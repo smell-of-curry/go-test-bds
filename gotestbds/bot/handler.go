@@ -2,7 +2,7 @@ package bot
 
 import (
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
-	"pokebedrock_testing_bot/bot/actor"
+	"github.com/smell-of-curry/go-test-bds/gotestbds/bot/actor"
 )
 
 // packetHandler represents a type that is able to handle a specific type of incoming packets from the server.

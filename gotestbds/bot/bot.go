@@ -3,7 +3,7 @@ package bot
 import (
 	"github.com/sandertv/gophertunnel/minecraft"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
-	"pokebedrock_testing_bot/bot/actor"
+	"github.com/smell-of-curry/go-test-bds/gotestbds/bot/actor"
 	"time"
 )
 
@@ -19,6 +19,7 @@ type Bot struct {
 	packets chan packet.Packet
 }
 
+// NewBot ...
 func NewBot(conn *minecraft.Conn) *Bot {
 	return &Bot{
 		a:        actor.NewActor(conn),
