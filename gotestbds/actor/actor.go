@@ -1,8 +1,12 @@
 package actor
 
+import "github.com/smell-of-curry/go-test-bds/gotestbds/world"
+
 // Actor simulates client actions.
 type Actor struct {
 	conn PacketWriter
+
+	world *world.World
 }
 
 // NewActor ...
