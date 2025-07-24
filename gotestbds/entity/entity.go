@@ -10,6 +10,7 @@ import (
 type Ent struct {
 	pos        mgl64.Vec3
 	rot        cube.Rotation
+	vel        mgl64.Vec3
 	meta       protocol.EntityMetadata
 	rid        uint64
 	entityType string
@@ -28,6 +29,16 @@ func (e *Ent) Position() mgl64.Vec3 {
 // Rotation is a rotation of the entity.
 func (e *Ent) Rotation() cube.Rotation {
 	return e.rot
+}
+
+// Velocity is a move vector of the entity.
+func (e *Ent) Velocity() mgl64.Vec3 {
+	return e.vel
+}
+
+// SetVelocity ...
+func (e *Ent) SetVelocity(vel mgl64.Vec3) {
+	e.vel = vel
 }
 
 // Meta is a metadata of the entity it is storing entity state.

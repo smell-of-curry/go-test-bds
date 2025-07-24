@@ -10,6 +10,7 @@ import (
 type Entity interface {
 	Position() mgl64.Vec3
 	Rotation() cube.Rotation
+	Velocity() mgl64.Vec3
 	Meta() protocol.EntityMetadata
 	RuntimeID() uint64
 	Move(pos mgl64.Vec3, rot cube.Rotation)

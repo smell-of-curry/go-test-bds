@@ -18,8 +18,8 @@ func (p *Player) Name() string {
 	return p.nick
 }
 
-// Id ...
-func (p *Player) Id() uuid.UUID {
+// UUID ...
+func (p *Player) UUID() uuid.UUID {
 	return p.id
 }
 
