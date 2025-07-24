@@ -89,7 +89,7 @@ func (w *World) Block(pos cube.Pos) world.Block {
 }
 
 // SetBlock writes a block to the position passed. If a chunk is not yet loaded
-// at that position operation will be ignored.
+// at that position, operation will be ignored.
 func (w *World) SetBlock(pos cube.Pos, b world.Block) {
 	c, ok := w.chunks[chunkPosFromBlockPos(pos)]
 	if !ok || pos.OutOfBounds(c.Range()) {
