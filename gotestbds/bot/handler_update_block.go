@@ -12,7 +12,7 @@ import (
 type UpdateBlockHandler struct{}
 
 // Handle ...
-func (UpdateBlockHandler) Handle(p packet.Packet, b *Bot, a *actor.Actor) {
+func (*UpdateBlockHandler) Handle(p packet.Packet, b *Bot, a *actor.Actor) {
 	updateBlock := p.(*packet.UpdateBlock)
 	if updateBlock.Layer != 0 {
 		return

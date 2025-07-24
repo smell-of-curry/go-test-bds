@@ -15,7 +15,7 @@ import (
 type SubChunkHandler struct{}
 
 // Handle ...
-func (s SubChunkHandler) Handle(p packet.Packet, b *Bot, a *actor.Actor) {
+func (*SubChunkHandler) Handle(p packet.Packet, b *Bot, a *actor.Actor) {
 	subChunk := p.(*packet.SubChunk)
 	pos := subChunk.Position
 	dim, _ := world.DimensionByID(int(subChunk.Dimension))
