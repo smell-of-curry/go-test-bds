@@ -3,7 +3,7 @@ package bot
 import (
 	"github.com/sandertv/gophertunnel/minecraft"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
-	"github.com/smell-of-curry/go-test-bds/gotestbds/bot/actor"
+	"github.com/smell-of-curry/go-test-bds/gotestbds/actor"
 	"time"
 )
 
