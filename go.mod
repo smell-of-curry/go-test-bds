@@ -5,6 +5,7 @@ go 1.24
 require github.com/sandertv/gophertunnel v1.48.1
 
 require (
+	github.com/df-mc/dragonfly v0.10.5 // indirect
 	github.com/go-gl/mathgl v1.2.0 // indirect
 	github.com/go-jose/go-jose/v4 v4.1.0 // indirect
 	github.com/golang/snappy v0.0.4 // indirect
