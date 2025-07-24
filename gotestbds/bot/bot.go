@@ -108,5 +108,6 @@ func (b *Bot) registerHandlers() {
 		packet.IDAddPlayer:    &AddEntityHandler{},
 		packet.IDLevelChunk:   &LevelChunkHandler{},
 		packet.IDSubChunk:     &SubChunkHandler{},
+		packet.IDUpdateBlock:  &UpdateBlockHandler{},
 	}
 }
