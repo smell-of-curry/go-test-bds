@@ -17,6 +17,7 @@ type World struct {
 	chunks map[world.ChunkPos]*chunk.Chunk
 }
 
+// NewWorld ...
 func NewWorld() *World {
 	return &World{
 		entities: make(map[uint64]Entity),

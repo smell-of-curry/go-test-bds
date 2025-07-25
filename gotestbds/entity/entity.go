@@ -4,6 +4,7 @@ import (
 	"github.com/df-mc/dragonfly/server/block/cube"
 	"github.com/go-gl/mathgl/mgl64"
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
+	"github.com/smell-of-curry/go-test-bds/gotestbds/entity/metadata"
 )
 
 // Ent is world.Entity implementation for simple entities.
@@ -11,14 +12,16 @@ type Ent struct {
 	pos        mgl64.Vec3
 	rot        cube.Rotation
 	vel        mgl64.Vec3
-	meta       protocol.EntityMetadata
+	state      *metadata.State
 	rid        uint64
 	entityType string
 }
 
 // NewEnt ...
 func NewEnt(pos mgl64.Vec3, meta protocol.EntityMetadata, rid uint64, entityType string) *Ent {
-	return &Ent{pos: pos, meta: meta, rid: rid, entityType: entityType}
+	state := new(metadata.State)
+	state.Decode(meta)
+	return &Ent{pos: pos, state: state, rid: rid, entityType: entityType}
 }
 
 // Position is a position of the entity.
@@ -41,9 +44,9 @@ func (e *Ent) SetVelocity(vel mgl64.Vec3) {
 	e.vel = vel
 }
 
-// Meta is a metadata of the entity it is storing entity state.
-func (e *Ent) Meta() protocol.EntityMetadata {
-	return e.meta
+// State returns state of the entity.
+func (e *Ent) State() *metadata.State {
+	return e.state
 }
 
 // RuntimeID is runtime identifier of the entity it identifies entity in the packets.

@@ -1,6 +1,8 @@
 package actor
 
 import (
+	"github.com/df-mc/dragonfly/server/block"
+	"github.com/df-mc/dragonfly/server/block/cube"
 	"github.com/google/uuid"
 	"github.com/sandertv/gophertunnel/minecraft"
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
@@ -73,13 +75,17 @@ func (a *Actor) Attack(e world.Entity) bool {
 	}) == nil
 }
 
+// BreakBlock breaks block at position passed.
+func (a *Actor) BreakBlock(pos cube.Pos) {
+	bl := a.World().Block(pos)
+	var air block.Air
+	if bl == air {
+		return
+	}
+}
+
 // Tick - simulates client tick.
 func (a *Actor) Tick() {
 	a.tickMovement()
 
-}
-
-// tickMovement simulates Actor's movement.
-func (a *Actor) tickMovement() {
-	//TODO...
 }

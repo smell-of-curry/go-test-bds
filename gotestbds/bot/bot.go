@@ -103,11 +103,14 @@ func (b *Bot) handlePacket(pk packet.Packet) {
 // registerHandlers registers all packet handlers.
 func (b *Bot) registerHandlers() {
 	b.handlers = map[uint32]packetHandler{
-		packet.IDAddActor:     &AddEntityHandler{},
-		packet.IDAddItemActor: &AddEntityHandler{},
-		packet.IDAddPlayer:    &AddEntityHandler{},
-		packet.IDLevelChunk:   &LevelChunkHandler{},
-		packet.IDSubChunk:     &SubChunkHandler{},
-		packet.IDUpdateBlock:  &UpdateBlockHandler{},
+		packet.IDAddActor:          &AddEntityHandler{},
+		packet.IDAddItemActor:      &AddEntityHandler{},
+		packet.IDAddPlayer:         &AddEntityHandler{},
+		packet.IDLevelChunk:        &LevelChunkHandler{},
+		packet.IDSubChunk:          &SubChunkHandler{},
+		packet.IDUpdateBlock:       &UpdateBlockHandler{},
+		packet.IDSetActorData:      &SetActorDataHandler{},
+		packet.IDSetActorMotion:    &SetActorMotionHandler{},
+		packet.IDMoveActorAbsolute: &MoveActorAbsoluteHandler{},
 	}
 }
