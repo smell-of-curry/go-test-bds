@@ -18,97 +18,97 @@ type movementData struct {
 	sneaking, sprinting, swimming, crawling, gliding, immobile bool
 	movementBitset                                             protocol.Bitset
 
-	computer *physics.Computer
+	mc *physics.Computer
 }
 
 // Sneaking ...
-func (m *movementData) Sneaking() bool {
-	return m.sneaking
+func (a *Actor) Sneaking() bool {
+	return a.sneaking
 }
 
 // StartSneaking ...
-func (m *movementData) StartSneaking() {
-	m.movementBitset.Set(packet.InputFlagStartSneaking)
-	m.sneaking = true
+func (a *Actor) StartSneaking() {
+	a.movementBitset.Set(packet.InputFlagStartSneaking)
+	a.sneaking = true
 }
 
 // StopSneaking ...
-func (m *movementData) StopSneaking() {
-	m.movementBitset.Set(packet.InputFlagStopSneaking)
-	m.sneaking = false
+func (a *Actor) StopSneaking() {
+	a.movementBitset.Set(packet.InputFlagStopSneaking)
+	a.sneaking = false
 }
 
 // Sprinting ...
-func (m *movementData) Sprinting() bool {
-	return m.sprinting
+func (a *Actor) Sprinting() bool {
+	return a.sprinting
 }
 
 // StartSprinting ...
-func (m *movementData) StartSprinting() {
-	m.movementBitset.Set(packet.InputFlagStartSprinting)
-	m.sprinting = true
+func (a *Actor) StartSprinting() {
+	a.movementBitset.Set(packet.InputFlagStartSprinting)
+	a.sprinting = true
 }
 
 // StopSprinting ...
-func (m *movementData) StopSprinting() {
-	m.movementBitset.Set(packet.InputFlagStopSprinting)
-	m.sprinting = false
+func (a *Actor) StopSprinting() {
+	a.movementBitset.Set(packet.InputFlagStopSprinting)
+	a.sprinting = false
 }
 
 // Swimming ...
-func (m *movementData) Swimming() bool {
-	return m.swimming
+func (a *Actor) Swimming() bool {
+	return a.swimming
 }
 
 // StartSwimming ...
-func (m *movementData) StartSwimming() {
-	m.movementBitset.Set(packet.InputFlagStartSwimming)
-	m.swimming = true
+func (a *Actor) StartSwimming() {
+	a.movementBitset.Set(packet.InputFlagStartSwimming)
+	a.swimming = true
 }
 
 // StopSwimming ...
-func (m *movementData) StopSwimming() {
-	m.movementBitset.Set(packet.InputFlagStopSprinting)
-	m.swimming = false
+func (a *Actor) StopSwimming() {
+	a.movementBitset.Set(packet.InputFlagStopSwimming)
+	a.swimming = false
 }
 
 // Crawling ...
-func (m *movementData) Crawling() bool {
-	return m.crawling
+func (a *Actor) Crawling() bool {
+	return a.crawling
 }
 
 // StartCrawling ...
-func (m *movementData) StartCrawling() {
-	m.movementBitset.Set(packet.InputFlagStartCrawling)
-	m.crawling = true
+func (a *Actor) StartCrawling() {
+	a.movementBitset.Set(packet.InputFlagStartCrawling)
+	a.crawling = true
 }
 
 // StopCrawling ...
-func (m *movementData) StopCrawling() {
-	m.movementBitset.Set(packet.InputFlagStopCrawling)
-	m.crawling = false
+func (a *Actor) StopCrawling() {
+	a.movementBitset.Set(packet.InputFlagStopCrawling)
+	a.crawling = false
 }
 
 // Gliding ...
-func (m *movementData) Gliding() bool {
-	return m.gliding
+func (a *Actor) Gliding() bool {
+	return a.gliding
 }
 
 // StartGliding ...
-func (m *movementData) StartGliding() {
-	m.movementBitset.Set(packet.InputFlagStartGliding)
-	m.gliding = true
+func (a *Actor) StartGliding() {
+	a.movementBitset.Set(packet.InputFlagStartGliding)
+	a.gliding = true
 }
 
 // StopGliding ...
-func (m *movementData) StopGliding() {
-	m.movementBitset.Set(packet.InputFlagStopGliding)
-	m.gliding = false
+func (a *Actor) StopGliding() {
+	a.movementBitset.Set(packet.InputFlagStopGliding)
+	a.gliding = false
 }
 
 // Immobile ...
-func (m *movementData) Immobile() bool {
-	return m.immobile
+func (a *Actor) Immobile() bool {
+	return a.immobile
 }
 
 // fillMovementBitset ...
@@ -154,7 +154,7 @@ func (a *Actor) SendMovement() {
 // tickMovement simulates Actor's movement.
 func (a *Actor) tickMovement() {
 	a.SendMovement()
-	movement := a.computer.TickMovement(a.State().Box(), a.Position(), a.Velocity(), a.World())
+	movement := a.mc.TickMovement(a.State().Box(), a.Position(), a.Velocity(), a.World())
 	a.Move(movement.Position(), a.Rotation())
 	a.SetVelocity(movement.Velocity())
 	a.tick++

@@ -3,6 +3,7 @@ package actor
 import (
 	"github.com/df-mc/dragonfly/server/block"
 	"github.com/df-mc/dragonfly/server/block/cube"
+	"github.com/df-mc/dragonfly/server/item/inventory"
 	"github.com/google/uuid"
 	"github.com/sandertv/gophertunnel/minecraft"
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
@@ -82,6 +83,22 @@ func (a *Actor) BreakBlock(pos cube.Pos) {
 	if bl == air {
 		return
 	}
+
+}
+
+// Inventory ...
+func (a *Actor) Inventory() *inventory.Inventory {
+	return a.inv
+}
+
+// Offhand ...
+func (a *Actor) Offhand() *inventory.Inventory {
+	return a.offhand
+}
+
+// Armor ...
+func (a *Actor) Armor() *inventory.Armour {
+	return a.armor
 }
 
 // Tick - simulates client tick.
