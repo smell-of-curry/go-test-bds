@@ -3,12 +3,12 @@ package actor
 import (
 	"github.com/df-mc/dragonfly/server/block"
 	"github.com/df-mc/dragonfly/server/block/cube"
-	"github.com/df-mc/dragonfly/server/item/inventory"
 	"github.com/google/uuid"
 	"github.com/sandertv/gophertunnel/minecraft"
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/entity"
+	"github.com/smell-of-curry/go-test-bds/gotestbds/inventory"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/mcmath"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/world"
 )
@@ -87,17 +87,17 @@ func (a *Actor) BreakBlock(pos cube.Pos) {
 }
 
 // Inventory ...
-func (a *Actor) Inventory() *inventory.Inventory {
+func (a *Actor) Inventory() *inventory.Handle {
 	return a.inv
 }
 
 // Offhand ...
-func (a *Actor) Offhand() *inventory.Inventory {
+func (a *Actor) Offhand() *inventory.Handle {
 	return a.offhand
 }
 
 // Armor ...
-func (a *Actor) Armor() *inventory.Armour {
+func (a *Actor) Armor() *inventory.Handle {
 	return a.armor
 }
 

@@ -34,7 +34,7 @@ func (*LevelChunkHandler) Handle(p packet.Packet, b *Bot, a *actor.Actor) {
 		offsets = append(offsets, protocol.SubChunkOffset{0, int8(y), 0})
 	}
 
-	b.Conn().WritePacket(&packet.SubChunkRequest{
+	_ = b.Conn().WritePacket(&packet.SubChunkRequest{
 		Dimension: levelChunk.Dimension,
 		Position:  protocol.SubChunkPos{levelChunk.Position.X(), int32(dimensionRange.Min() >> 4), levelChunk.Position.Z()},
 		Offsets:   offsets,

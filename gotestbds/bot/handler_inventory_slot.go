@@ -21,19 +21,15 @@ func (*InventorySlotHandler) Handle(p packet.Packet, b *Bot, a *actor.Actor) {
 
 	slot := int(inventorySlot.Slot)
 
-	mapping, ok := b.inventoryMappingByID(inventorySlot.WindowID)
-	if !ok {
-		b.logger.Error("unable to process InventorySlot packet", "err", fmt.Errorf("unknown windowID: %d", inventorySlot.WindowID))
+	inv := b.invByID(inventorySlot.WindowID)
+	if inv == nil {
+		b.logger.Error("unable to process InventorySlot packet", "err", fmt.Errorf("unknown windowID %d", inventorySlot.WindowID))
 		return
 	}
 
-	inv := mapping.inv
-	stack := internal.StackToItem(inventorySlot.NewItem.Stack)
-	err := inv.SetItem(slot, stack)
+	err := inv.SetItem(slot, internal.StackToItem(inventorySlot.NewItem.Stack), inventorySlot.NewItem.StackNetworkID)
 	if err != nil {
 		b.logger.Error("unable to process InventorySlot packet", "err", err)
 		return
 	}
-	// synchronizing network id's.
-	mapping.stackIds[slot] = inventorySlot.NewItem.StackNetworkID
 }

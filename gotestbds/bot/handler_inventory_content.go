@@ -6,6 +6,7 @@ import (
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/actor"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/internal"
+	"github.com/smell-of-curry/go-test-bds/gotestbds/inventory"
 )
 
 // InventoryContentHandler handles InventoryContent packet, updates Actor's inventory content.
@@ -20,28 +21,26 @@ func (*InventoryContentHandler) Handle(p packet.Packet, b *Bot, a *actor.Actor) 
 		b.handlingInventories = false
 	}()
 
-	mapping, ok := b.inventoryMappingByID(inventoryContent.WindowID)
-	if !ok {
+	inv := b.invByID(inventoryContent.WindowID)
+	if inv == nil {
 		b.logger.Error("unable to process InventoryContent packet", "err", fmt.Errorf("unknown windowID: %d", inventoryContent.WindowID))
 		return
 	}
 
-	err := fillInventory(mapping, inventoryContent.Content)
+	err := fillInventory(inv, inventoryContent.Content)
 	if err != nil {
 		b.logger.Error("unable to process InventoryContent packet", "err", err)
 	}
 }
 
 // fillInventory ...
-func fillInventory(mapping *inventoryMapping, content []protocol.ItemInstance) error {
-	inv := mapping.inv
+func fillInventory(inv *inventory.Handle, content []protocol.ItemInstance) error {
 	for slot := range inv.Size() {
 		slotContent := content[slot]
-		err := inv.SetItem(slot, internal.StackToItem(slotContent.Stack))
+		err := inv.SetItem(slot, internal.StackToItem(slotContent.Stack), slotContent.StackNetworkID)
 		if err != nil {
 			return err
 		}
-		mapping.stackIds[slot] = slotContent.StackNetworkID
 	}
 	return nil
 }

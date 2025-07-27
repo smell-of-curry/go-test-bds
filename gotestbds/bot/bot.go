@@ -1,10 +1,10 @@
 package bot
 
 import (
-	"github.com/df-mc/dragonfly/server/item/inventory"
 	"github.com/sandertv/gophertunnel/minecraft"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/actor"
+	"github.com/smell-of-curry/go-test-bds/gotestbds/inventory"
 	"log/slog"
 	"time"
 )
@@ -15,12 +15,12 @@ type Bot struct {
 	closed chan struct{}
 	conn   *minecraft.Conn
 
-	handlers map[uint32]packetHandler
-	tasks    chan func(actor *actor.Actor)
+	handlers                  map[uint32]packetHandler
+	tasks                     chan func(actor *actor.Actor)
+	pendingItemStackResponses map[int32]*inventory.History
 
 	handlingInventories bool
-	ui                  *inventory.Inventory
-	inventoryMappings   map[*inventory.Inventory]*inventoryMapping
+	currentRequestID    int32
 
 	packets chan packet.Packet
 	logger  *slog.Logger
@@ -29,17 +29,16 @@ type Bot struct {
 // NewBot ...
 func NewBot(conn *minecraft.Conn, logger *slog.Logger) *Bot {
 	bot := &Bot{
-		a:        actor.NewActor(conn),
-		closed:   make(chan struct{}),
-		conn:     conn,
-		handlers: make(map[uint32]packetHandler),
-		tasks:    make(chan func(actor *actor.Actor)),
-		packets:  make(chan packet.Packet),
-		logger:   logger,
+		a:                         actor.NewActor(conn),
+		closed:                    make(chan struct{}),
+		conn:                      conn,
+		handlers:                  make(map[uint32]packetHandler),
+		tasks:                     make(chan func(actor *actor.Actor)),
+		pendingItemStackResponses: make(map[int32]*inventory.History),
+		packets:                   make(chan packet.Packet),
+		logger:                    logger,
 	}
 	bot.registerHandlers()
-	bot.registerInventoryMappings()
-	bot.handleInventories()
 
 	return bot
 }
@@ -95,13 +94,6 @@ func (b *Bot) handlePackets() {
 	}
 }
 
-// handleInventories broadcasts inventory actions to the server.
-func (b *Bot) handleInventories() {
-	for i, mapping := range b.inventoryMappings {
-		i.SlotFunc(b.slotFunc(mapping.windowID, i))
-	}
-}
-
 // handlePacket handles incoming packet.
 func (b *Bot) handlePacket(pk packet.Packet) {
 	handler, ok := b.handlers[pk.ID()]
@@ -128,5 +120,6 @@ func (b *Bot) registerHandlers() {
 		packet.IDMoveActorAbsolute: &MoveActorAbsoluteHandler{},
 		packet.IDInventoryContent:  &InventoryContentHandler{},
 		packet.IDInventorySlot:     &InventorySlotHandler{},
+		packet.IDItemStackResponse: &ItemStackResponseHandler{},
 	}
 }

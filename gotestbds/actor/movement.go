@@ -133,7 +133,7 @@ func (a *Actor) SendMovement() {
 	}
 
 	a.fillMovementBitset()
-	a.conn.WritePacket(&packet.PlayerAuthInput{
+	_ = a.conn.WritePacket(&packet.PlayerAuthInput{
 		Pitch:             pitch,
 		Yaw:               yaw,
 		Position:          mcmath.Vec64To32(a.Position()),
