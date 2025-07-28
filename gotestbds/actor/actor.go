@@ -1,8 +1,13 @@
 package actor
 
 import (
+	"fmt"
 	"github.com/df-mc/dragonfly/server/block"
 	"github.com/df-mc/dragonfly/server/block/cube"
+	"github.com/df-mc/dragonfly/server/entity/effect"
+	"github.com/df-mc/dragonfly/server/item"
+	"github.com/df-mc/dragonfly/server/item/enchantment"
+	"github.com/go-gl/mathgl/mgl64"
 	"github.com/google/uuid"
 	"github.com/sandertv/gophertunnel/minecraft"
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
@@ -11,6 +16,9 @@ import (
 	"github.com/smell-of-curry/go-test-bds/gotestbds/inventory"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/mcmath"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/world"
+	"iter"
+	"math"
+	"time"
 )
 
 // Actor simulates client actions.
@@ -64,26 +72,131 @@ func (a *Actor) Attack(e world.Entity) bool {
 		return false
 	}
 
+	item, _ := a.Inventory().ItemInstance(a.slot)
+
 	return a.conn.WritePacket(&packet.InventoryTransaction{
 		TransactionData: &protocol.UseItemOnEntityTransactionData{
 			TargetEntityRuntimeID: e.RuntimeID(),
 			ActionType:            protocol.UseItemOnEntityActionAttack,
 			HotBarSlot:            int32(a.slot),
-			HeldItem:              protocol.ItemInstance{},
+			HeldItem:              item,
 			Position:              mcmath.Vec64To32(a.Position()),
 			ClickedPosition:       mcmath.Vec64To32(e.Position()),
 		},
 	}) == nil
 }
 
-// BreakBlock breaks block at position passed.
-func (a *Actor) BreakBlock(pos cube.Pos) {
-	bl := a.World().Block(pos)
-	var air block.Air
-	if bl == air {
-		return
+// Effects ...
+func (a *Actor) Effects() iter.Seq[effect.Effect] {
+	return a.effectManager.Effects()
+}
+
+// Effect ...
+func (a *Actor) Effect(e effect.Type) (effect.Effect, bool) {
+	return a.effectManager.Effect(e)
+}
+
+// AddEffect ...
+func (a *Actor) AddEffect(eff effect.Effect) {
+	a.effectManager.Add(eff)
+}
+
+// RemoveEffect ...
+func (a *Actor) RemoveEffect(eff effect.Type) {
+	a.effectManager.Remove(eff)
+}
+
+// SetHeldSlot sets held slot.
+func (a *Actor) SetHeldSlot(slot int) error {
+	if slot < 0 || slot > 8 {
+		return fmt.Errorf("slot exceeds hotbar range 0-8: slot is %v", slot)
 	}
 
+	item, _ := a.Inventory().ItemInstance(slot)
+	a.slot = slot
+
+	return a.conn.WritePacket(&packet.MobEquipment{
+		EntityRuntimeID: a.RuntimeID(),
+		NewItem:         item,
+		InventorySlot:   byte(slot),
+		HotBarSlot:      byte(slot),
+		WindowID:        protocol.WindowIDInventory,
+	})
+}
+
+// HeldItem returns item in the held slot.
+func (a *Actor) HeldItem() item.Stack {
+	it, _ := a.Inventory().Item(a.slot)
+	return it
+}
+
+// StartBreakingBlock starts breaking block at position passed and returns estimated break time.
+func (a *Actor) StartBreakingBlock(pos cube.Pos) (time.Duration, bool) {
+	bl := a.World().Block(pos)
+	_, ok := bl.(block.Breakable)
+	if !ok {
+		return math.MaxInt64, false
+	}
+
+	a.abortBreaking = false
+	a.breakingBlock = true
+	a.breakingPos = pos
+	return a.breakTime(pos), true
+}
+
+// breakTime ...
+func (a *Actor) breakTime(pos cube.Pos) time.Duration {
+	held := a.HeldItem()
+	breakTime := block.BreakDuration(a.world.Block(pos), held)
+	if !a.OnGround() {
+		breakTime *= 5
+	}
+
+	if _, ok := a.Armor().Helmet().Enchantment(enchantment.AquaAffinity); a.insideOfWater() && !ok {
+		breakTime *= 5
+	}
+	for e := range a.Effects() {
+		lvl := e.Level()
+		switch e.Type() {
+		case effect.Haste:
+			breakTime = time.Duration(float64(breakTime) * effect.Haste.Multiplier(lvl))
+		case effect.MiningFatigue:
+			breakTime = time.Duration(float64(breakTime) * effect.MiningFatigue.Multiplier(lvl))
+		case effect.ConduitPower:
+			breakTime = time.Duration(float64(breakTime) * effect.ConduitPower.Multiplier(lvl))
+		}
+	}
+	return breakTime
+}
+
+// insideOfWater ...
+func (a *Actor) insideOfWater() bool {
+	eyePos := a.Position().Add(mgl64.Vec3{0, a.EyeHeight()})
+	pos := cube.PosFromVec3(eyePos)
+	if l, ok := a.world.Liquid(pos); ok {
+		if _, ok := l.(block.Water); ok {
+			d := float64(l.SpreadDecay()) + 1
+			if l.LiquidFalling() {
+				d = 1
+			}
+			return a.Position().Y() < (pos.Side(cube.FaceUp).Vec3().Y())-(d/9-breathingDistanceBelowEyes)
+		}
+	}
+	return false
+}
+
+const breathingDistanceBelowEyes = 0.11111111
+
+// EyeHeight ...
+func (a *Actor) EyeHeight() float64 {
+	switch {
+	case a.swimming || a.crawling || a.gliding:
+		return 0.52
+	case a.sneaking:
+		return 1.26
+	default:
+		return 1.62
+	}
 }
 
 // Inventory ...
@@ -97,7 +210,7 @@ func (a *Actor) Offhand() *inventory.Handle {
 }
 
 // Armor ...
-func (a *Actor) Armor() *inventory.Handle {
+func (a *Actor) Armor() *Armour {
 	return a.armor
 }
 

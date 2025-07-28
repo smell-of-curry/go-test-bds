@@ -5,7 +5,6 @@ import (
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/actor"
-	"github.com/smell-of-curry/go-test-bds/gotestbds/internal"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/inventory"
 )
 
@@ -37,7 +36,7 @@ func (*InventoryContentHandler) Handle(p packet.Packet, b *Bot, a *actor.Actor) 
 func fillInventory(inv *inventory.Handle, content []protocol.ItemInstance) error {
 	for slot := range inv.Size() {
 		slotContent := content[slot]
-		err := inv.SetItem(slot, internal.StackToItem(slotContent.Stack), slotContent.StackNetworkID)
+		err := inv.SetItem(slot, slotContent)
 		if err != nil {
 			return err
 		}

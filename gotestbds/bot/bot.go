@@ -121,5 +121,6 @@ func (b *Bot) registerHandlers() {
 		packet.IDInventoryContent:  &InventoryContentHandler{},
 		packet.IDInventorySlot:     &InventorySlotHandler{},
 		packet.IDItemStackResponse: &ItemStackResponseHandler{},
+		packet.IDMobEffect:         &MobEffectHandler{},
 	}
 }

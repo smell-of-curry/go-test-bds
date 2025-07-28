@@ -5,6 +5,7 @@ import (
 	"github.com/df-mc/dragonfly/server/item"
 	"github.com/df-mc/dragonfly/server/item/inventory"
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
+	"github.com/smell-of-curry/go-test-bds/gotestbds/internal"
 	"slices"
 )
 
@@ -15,24 +16,71 @@ type Handle struct {
 	stackIds []int32
 	// windowID is an id of the inventory.
 	windowID     uint32
-	actionWriter InventoryActionWriter
+	actionWriter ActionWriter
 }
 
 // SetItem sets item in the slot passed, this function should not be called from anything other than the packet handler.
 // For inventory interactions call Move, Swap or Drop.
-func (source *Handle) SetItem(slot int, it item.Stack, stackId int32) error {
-	err := source.inv.SetItem(slot, it)
+func (source *Handle) SetItem(slot int, it protocol.ItemInstance) error {
+	s := internal.StackToItem(it.Stack)
+	err := source.inv.SetItem(slot, s)
 	if err != nil {
 		return err
 	}
 	// synchronizing network id's.
-	source.stackIds[slot] = stackId
+	source.stackIds[slot] = it.StackNetworkID
 	return nil
 }
 
 // Item ...
 func (source *Handle) Item(slot int) (item.Stack, error) {
 	return source.inv.Item(slot)
+}
+
+// First ...
+func (source *Handle) First(item item.Stack) (int, bool) {
+	return source.inv.FirstFunc(item.Comparable)
+}
+
+// FirstFunc ...
+func (source *Handle) FirstFunc(comparable func(stack item.Stack) bool) (int, bool) {
+	return source.inv.FirstFunc(comparable)
+}
+
+// FirstEmpty ...
+func (source *Handle) FirstEmpty() (int, bool) {
+	return source.inv.FirstEmpty()
+}
+
+// ContainsItem ...
+func (source *Handle) ContainsItem(it item.Stack) bool {
+	return source.inv.ContainsItem(it)
+}
+
+// ContainsItemFunc ...
+func (source *Handle) ContainsItemFunc(n int, comparable func(stack item.Stack) bool) bool {
+	return source.inv.ContainsItemFunc(n, comparable)
+}
+
+// Empty ...
+func (source *Handle) Empty() bool {
+	return source.inv.Empty()
+}
+
+// String ...
+func (source *Handle) String() string {
+	return source.inv.String()
+}
+
+// ItemInstance returns protocol.ItemInstance.
+func (source *Handle) ItemInstance(slot int) (protocol.ItemInstance, error) {
+	s, err := source.stack(slot)
+	if err != nil {
+		return protocol.ItemInstance{}, err
+	}
+	it := internal.InstanceFromItem(s.s)
+	it.StackNetworkID = s.id
+	return it, err
 }
 
 // Slots ...
@@ -54,17 +102,32 @@ func (source *Handle) slotInfo(slot int) protocol.StackRequestSlotInfo {
 	}
 }
 
+// stack ...
+func (source *Handle) stack(slot int) (stack, error) {
+	it, err := source.Item(slot)
+	if err != nil {
+		return stack{}, err
+	}
+	return stack{
+		s:  it,
+		id: source.stackIds[slot],
+	}, nil
+}
+
 // newWriter creates
-func (*Handle) newWriter() (setItem func(slot int, it item.Stack, handle *Handle) error, changes *History) {
+func (*Handle) newWriter() (setItem func(slot int, it stack, handle *Handle) error, changes *History) {
 	changes = &History{}
-	setItem = func(slot int, it item.Stack, handle *Handle) error {
+	setItem = func(slot int, it stack, handle *Handle) error {
 		oldItem, _ := handle.Item(slot)
-		err := handle.inv.SetItem(slot, it)
+		err := handle.inv.SetItem(slot, it.s)
 		if err != nil {
 			return err
 		}
 
-		changes.writeChange(slot, oldItem, handle)
+		oldId := handle.stackIds[slot]
+		handle.stackIds[slot] = it.id
+		changes.writeChange(slot, oldItem, oldId, handle)
+
 		return nil
 	}
 	return setItem, changes
@@ -74,7 +137,7 @@ func (*Handle) newWriter() (setItem func(slot int, it item.Stack, handle *Handle
 func (source *Handle) DropItem(slot, count int) error {
 	setItem, changes := source.newWriter()
 
-	it, err := source.Item(slot)
+	it, err := source.stack(slot)
 	if err != nil {
 		return fmt.Errorf("error droping item (err: %w)", err)
 	}
@@ -92,7 +155,7 @@ func (source *Handle) DropItem(slot, count int) error {
 func (source *Handle) Move(sourceSlot, destinationSlot, count int, destination *Handle) error {
 	setItem, changes := source.newWriter()
 
-	it, err := source.Item(sourceSlot)
+	it, err := source.stack(sourceSlot)
 	if err != nil {
 		return fmt.Errorf("error moving item (err: %w)", err)
 	}
@@ -121,12 +184,12 @@ func (source *Handle) Move(sourceSlot, destinationSlot, count int, destination *
 func (source *Handle) Swap(sourceSlot, destinationSlot int, destination *Handle) error {
 	setItem, changes := source.newWriter()
 
-	it1, err := source.Item(sourceSlot)
+	it1, err := source.stack(sourceSlot)
 	if err != nil {
 		return fmt.Errorf("error swaping item (err: %w)", err)
 	}
 
-	it2, err := destination.Item(destinationSlot)
+	it2, err := destination.stack(destinationSlot)
 	if err != nil {
 		return fmt.Errorf("error swaping item (err: %w)", err)
 	}
@@ -142,8 +205,8 @@ func (source *Handle) Swap(sourceSlot, destinationSlot int, destination *Handle)
 	return nil
 }
 
-// InventoryActionWriter ...
-type InventoryActionWriter interface {
+// ActionWriter ...
+type ActionWriter interface {
 	WriteInventoryAction(action protocol.StackRequestAction, changes *History)
 }
 
@@ -156,7 +219,10 @@ type History struct {
 func (c *History) Revert() {
 	slices.Reverse(c.operations)
 	for _, op := range c.operations {
-		_ = op.handle.inv.SetItem(op.slot, op.it)
+		handle := op.handle
+		slot := op.slot
+		_ = handle.inv.SetItem(slot, op.it.s)
+		handle.stackIds[slot] = op.it.id
 	}
 }
 
@@ -165,17 +231,35 @@ func (c *History) Size() int {
 	return len(c.operations)
 }
 
+// stack ...
+type stack struct {
+	s  item.Stack
+	id int32
+}
+
+// Grow ...
+func (s stack) Grow(n int) stack {
+	s.s = s.s.Grow(n)
+	return s
+}
+
+// Count ...
+func (s stack) Count() int {
+	return s.s.Count()
+}
+
 // writeChange ...
-func (c *History) writeChange(slot int, it item.Stack, handle *Handle) {
+func (c *History) writeChange(slot int, it item.Stack, id int32, handle *Handle) {
 	c.operations = append(c.operations, change{
 		slot:   slot,
-		it:     it,
+		it:     stack{it, id},
 		handle: handle,
 	})
 }
 
+// change ...
 type change struct {
 	slot   int
-	it     item.Stack
+	it     stack
 	handle *Handle
 }

@@ -7,6 +7,7 @@ import (
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/mcmath"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/mcmath/physics"
+	"time"
 )
 
 // movementData ...
@@ -15,10 +16,15 @@ type movementData struct {
 	delta  mgl64.Vec3
 	tick   uint64
 
-	sneaking, sprinting, swimming, crawling, gliding, immobile bool
-	movementBitset                                             protocol.Bitset
+	sneaking, sprinting, swimming, crawling, gliding, immobile, onGround bool
+	movementBitset                                                       protocol.Bitset
 
 	mc *physics.Computer
+}
+
+// OnGround ...
+func (m movementData) OnGround() bool {
+	return m.onGround
 }
 
 // Sneaking ...
@@ -146,6 +152,7 @@ func (a *Actor) SendMovement() {
 		InteractYaw:       yaw,
 		Tick:              a.tick,
 		Delta:             mcmath.Vec64To32(a.delta),
+		BlockActions:      a.blockActions(),
 		CameraOrientation: mcmath.Vec64To32(a.Rotation().Vec3()),
 		RawMoveVector:     moveVector,
 	})
@@ -157,5 +164,45 @@ func (a *Actor) tickMovement() {
 	movement := a.mc.TickMovement(a.State().Box(), a.Position(), a.Velocity(), a.World())
 	a.Move(movement.Position(), a.Rotation())
 	a.SetVelocity(movement.Velocity())
+	a.onGround = movement.OnGround()
 	a.tick++
+}
+
+// blockActions ...
+func (a *Actor) blockActions() []protocol.PlayerBlockAction {
+	if !a.breakingBlock {
+		return nil
+	}
+
+	action := protocol.PlayerBlockAction{
+		Action:   protocol.PlayerActionStartBreak,
+		BlockPos: protocol.BlockPos{int32(a.breakingPos[0]), int32(a.breakingPos[1]), int32(a.breakingPos[2])},
+	}
+
+	if a.breakingTick == 0 {
+		action.Action = protocol.PlayerActionCrackBreak
+	}
+	a.breakingTick++
+
+	if int(a.breakTime(a.breakingPos)/(time.Millisecond*50)) <= a.breakingTick {
+		action.Action = protocol.PlayerActionStopBreak
+	}
+
+	if a.abortBreaking {
+		a.finishBreaking()
+		action.Action = protocol.PlayerActionAbortBreak
+	}
+	return []protocol.PlayerBlockAction{action}
+}
+
+// finishBreaking ...
+func (a *Actor) finishBreaking() {
+	a.breakingTick = 0
+	a.breakingBlock = false
+	a.abortBreaking = false
+}
+
+// AbortBreaking ...
+func (a *Actor) AbortBreaking() {
+	a.abortBreaking = true
 }

@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/actor"
-	"github.com/smell-of-curry/go-test-bds/gotestbds/internal"
 )
 
 // InventorySlotHandler ...
@@ -27,7 +26,7 @@ func (*InventorySlotHandler) Handle(p packet.Packet, b *Bot, a *actor.Actor) {
 		return
 	}
 
-	err := inv.SetItem(slot, internal.StackToItem(inventorySlot.NewItem.Stack), inventorySlot.NewItem.StackNetworkID)
+	err := inv.SetItem(slot, inventorySlot.NewItem)
 	if err != nil {
 		b.logger.Error("unable to process InventorySlot packet", "err", err)
 		return

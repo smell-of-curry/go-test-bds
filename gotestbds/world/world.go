@@ -76,14 +76,31 @@ func (w *World) RemoveChunk(pos world.ChunkPos) {
 	delete(w.chunks, pos)
 }
 
-// Block reads a block from the position passed. If a chunk is not yet loaded
+// Block reads a block from the position passed. If the chunk is not yet loaded
 // at that position air will bee returned.
 func (w *World) Block(pos cube.Pos) world.Block {
+	return w.block(pos, 0)
+}
+
+// Liquid reads liquid from the position passed. If the chunk is not yet loaded
+// at the position or there are no water nil, false will be returned.
+func (w *World) Liquid(pos cube.Pos) (world.Liquid, bool) {
+	b := w.block(pos, 0)
+	if liq, ok := b.(world.Liquid); ok {
+		return liq, true
+	}
+
+	liq, ok := w.block(pos, 1).(world.Liquid)
+	return liq, ok
+}
+
+// block returns block from the pos & layer of the chunk or air if not succeed.
+func (w *World) block(pos cube.Pos, layer uint8) world.Block {
 	c := w.chunks[chunkPosFromBlockPos(pos)]
 	if pos.OutOfBounds(c.Range()) {
 		return block.Air{}
 	}
-	rid := c.Block(uint8(pos[0]), int16(pos[1]), uint8(pos[2]), 0)
+	rid := c.Block(uint8(pos[0]), int16(pos[1]), uint8(pos[2]), layer)
 
 	bl, _ := world.BlockByRuntimeID(rid)
 	return bl
