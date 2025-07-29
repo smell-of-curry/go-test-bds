@@ -8,10 +8,10 @@ import (
 
 // actorData ...
 type actorData struct {
-	slot    int
-	inv     *inventory.Handle
-	offhand *inventory.Handle
-	armor   *Armour
+	heldSlot int
+	inv      *inventory.Handle
+	offhand  *inventory.Handle
+	armor    *Armour
 
 	effectManager *entity.EffectManager
 

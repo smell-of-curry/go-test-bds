@@ -4,9 +4,12 @@ import (
 	"fmt"
 	"github.com/df-mc/dragonfly/server/block"
 	"github.com/df-mc/dragonfly/server/block/cube"
+	"github.com/df-mc/dragonfly/server/block/cube/trace"
+	"github.com/df-mc/dragonfly/server/block/model"
 	"github.com/df-mc/dragonfly/server/entity/effect"
 	"github.com/df-mc/dragonfly/server/item"
 	"github.com/df-mc/dragonfly/server/item/enchantment"
+	w "github.com/df-mc/dragonfly/server/world"
 	"github.com/go-gl/mathgl/mgl64"
 	"github.com/google/uuid"
 	"github.com/sandertv/gophertunnel/minecraft"
@@ -72,18 +75,18 @@ func (a *Actor) Attack(e world.Entity) bool {
 		return false
 	}
 
-	item, _ := a.Inventory().ItemInstance(a.slot)
+	heldItem, _ := a.Inventory().ItemInstance(a.heldSlot)
+	action := &protocol.UseItemOnEntityTransactionData{
+		TargetEntityRuntimeID: e.RuntimeID(),
+		ActionType:            protocol.UseItemOnEntityActionAttack,
+		HotBarSlot:            int32(a.heldSlot),
+		HeldItem:              heldItem,
+		Position:              mcmath.Vec64To32(a.Position()),
+		ClickedPosition:       mcmath.Vec64To32(e.Position()),
+	}
+	a.useItem(action)
 
-	return a.conn.WritePacket(&packet.InventoryTransaction{
-		TransactionData: &protocol.UseItemOnEntityTransactionData{
-			TargetEntityRuntimeID: e.RuntimeID(),
-			ActionType:            protocol.UseItemOnEntityActionAttack,
-			HotBarSlot:            int32(a.slot),
-			HeldItem:              item,
-			Position:              mcmath.Vec64To32(a.Position()),
-			ClickedPosition:       mcmath.Vec64To32(e.Position()),
-		},
-	}) == nil
+	return true
 }
 
 // Effects ...
@@ -113,7 +116,7 @@ func (a *Actor) SetHeldSlot(slot int) error {
 	}
 
 	item, _ := a.Inventory().ItemInstance(slot)
-	a.slot = slot
+	a.heldSlot = slot
 
 	return a.conn.WritePacket(&packet.MobEquipment{
 		EntityRuntimeID: a.RuntimeID(),
@@ -126,7 +129,7 @@ func (a *Actor) SetHeldSlot(slot int) error {
 
 // HeldItem returns item in the held slot.
 func (a *Actor) HeldItem() item.Stack {
-	it, _ := a.Inventory().Item(a.slot)
+	it, _ := a.Inventory().Item(a.heldSlot)
 	return it
 }
 
@@ -171,8 +174,7 @@ func (a *Actor) breakTime(pos cube.Pos) time.Duration {
 
 // insideOfWater ...
 func (a *Actor) insideOfWater() bool {
-	eyePos := a.Position().Add(mgl64.Vec3{0, a.EyeHeight()})
-	pos := cube.PosFromVec3(eyePos)
+	pos := cube.PosFromVec3(a.EyePos())
 	if l, ok := a.world.Liquid(pos); ok {
 		if _, ok := l.(block.Water); ok {
 			d := float64(l.SpreadDecay()) + 1
@@ -199,6 +201,11 @@ func (a *Actor) EyeHeight() float64 {
 	}
 }
 
+// EyePos returns eye position.
+func (a *Actor) EyePos() mgl64.Vec3 {
+	return a.Position().Add(mgl64.Vec3{0, a.EyeHeight()})
+}
+
 // Inventory ...
 func (a *Actor) Inventory() *inventory.Handle {
 	return a.inv
@@ -218,4 +225,158 @@ func (a *Actor) Armor() *Armour {
 func (a *Actor) Tick() {
 	a.tickMovement()
 
+}
+
+// LookAt makes Actor look at the point.
+func (a *Actor) LookAt(point mgl64.Vec3) {
+	pos := a.EyePos()
+	horizontal := math.Sqrt(math.Pow(point.X()-pos.X(), 2) + math.Pow(point.Z()-pos.Z(), 2))
+	vertical := point.Y() - (pos.Y())
+	pitch := -math.Atan2(vertical, horizontal) * 180 / math.Pi
+
+	xDist := point.X() - pos.X()
+	zDist := point.Z() - pos.Z()
+
+	yaw := math.Atan2(zDist, xDist)*180/math.Pi - 90
+	if yaw < 0 {
+		yaw += 360.0
+	}
+
+	a.Move(a.Position(), cube.Rotation{yaw, pitch})
+}
+
+// LookAtBlock makes Actor look at the block position passed.
+func (a *Actor) LookAtBlock(pos cube.Pos) {
+	a.LookAt(pos.Vec3Centre())
+}
+
+// LookAtEntity makes Actor look at the entity passed.
+func (a *Actor) LookAtEntity(e world.Entity) {
+	a.LookAt(e.Position().Add(mgl64.Vec3{0, e.State().Box().Height()}))
+}
+
+// BlockFromViewDirection returns block, position & face of the block actor is looking at,
+// if within 100 blocks there are no blocks, it will return the air.
+func (a *Actor) BlockFromViewDirection() (block w.Block, pos cube.Pos, face cube.Face) {
+	block, pos, face, _ = a.posFromView(100)
+	return block, pos, face
+}
+
+// PosFromViewDirection returns position actor is looking at
+func (a *Actor) PosFromViewDirection() (onBlock mgl64.Vec3, blockPos cube.Pos, succeed bool) {
+	bl, pos, _, vec := a.posFromView(100)
+	_, succeed = bl.(block.Air)
+	return vec.Sub(pos.Vec3()), pos, succeed
+}
+
+// posFromView returns block, position, face, position on the block actor is looking at.
+// it will return air in case it missed.
+func (a *Actor) posFromView(r int) (w.Block, cube.Pos, cube.Face, mgl64.Vec3) {
+	start := a.EyePos()
+	end := a.Rotation().Vec3().Mul(float64(r)).Add(start)
+	var (
+		face                    cube.Face
+		bl                      w.Block
+		currentPos, previousPos cube.Pos
+		posOnBlock              mgl64.Vec3
+	)
+	trace.TraverseBlocks(start, end, func(pos cube.Pos) (con bool) {
+		previousPos = currentPos
+		currentPos = pos
+		bl = a.world.Block(pos)
+		_, pass := bl.Model().(model.Empty)
+		if !pass {
+			// ensuring we hit the block.
+			result, ok := trace.BlockIntercept(pos, a.world, bl, start, end)
+			if ok {
+				face = result.Face()
+				posOnBlock = result.Position()
+			}
+			pass = !ok
+		}
+		return pass
+	})
+
+	if _, miss := bl.(block.Air); miss {
+		face = currentPos.Face(previousPos)
+	}
+	return bl, currentPos, face, posOnBlock
+}
+
+// Chat writes message to chat.
+func (a *Actor) Chat(message string) {
+	identity := a.conn.IdentityData()
+	_ = a.conn.WritePacket(&packet.Text{
+		TextType:   packet.TextTypeChat,
+		SourceName: identity.DisplayName,
+		Message:    message,
+		XUID:       identity.XUID,
+	})
+}
+
+// UseItem uses item in heldSlot.
+func (a *Actor) UseItem() {
+	heldItem, _ := a.Inventory().ItemInstance(a.heldSlot)
+	action := &protocol.UseItemTransactionData{
+		ActionType: protocol.UseItemActionClickAir,
+		HotBarSlot: int32(a.heldSlot),
+		HeldItem:   heldItem,
+	}
+
+	a.useItem(action)
+}
+
+// UseItemOnBlock uses item in heldSlot on the block.
+func (a *Actor) UseItemOnBlock(pos cube.Pos, face cube.Face, clickPos mgl64.Vec3) {
+	heldItem, _ := a.Inventory().ItemInstance(a.heldSlot)
+	action := &protocol.UseItemTransactionData{
+		HotBarSlot:      int32(a.heldSlot),
+		HeldItem:        heldItem,
+		ActionType:      protocol.UseItemActionClickBlock,
+		BlockPosition:   protocol.BlockPos{int32(pos[0]), int32(pos[1]), int32(pos[2])},
+		BlockFace:       int32(face),
+		ClickedPosition: mcmath.Vec64To32(clickPos),
+	}
+
+	a.useItem(action)
+}
+
+// ReleaseItem stops using held item.
+func (a *Actor) ReleaseItem() {
+	actionType := protocol.ReleaseItemActionRelease
+	it, _ := a.Inventory().Item(a.heldSlot)
+	if _, consumable := it.Item().(item.Consumable); consumable {
+		actionType = protocol.ReleaseItemActionConsume
+	}
+	heldItem, _ := a.Inventory().ItemInstance(a.heldSlot)
+	action := &protocol.ReleaseItemTransactionData{
+		ActionType:   uint32(actionType),
+		HotBarSlot:   int32(a.heldSlot),
+		HeldItem:     heldItem,
+		HeadPosition: mcmath.Vec64To32(a.EyePos()),
+	}
+
+	a.useItem(action)
+}
+
+// UseItemOnEntity uses held item on entity.
+func (a *Actor) UseItemOnEntity(e world.Entity) {
+	heldItem, _ := a.Inventory().ItemInstance(a.heldSlot)
+	action := &protocol.UseItemOnEntityTransactionData{
+		TargetEntityRuntimeID: e.RuntimeID(),
+		ActionType:            protocol.UseItemOnEntityActionAttack,
+		HotBarSlot:            int32(a.heldSlot),
+		HeldItem:              heldItem,
+		Position:              mcmath.Vec64To32(a.Position()),
+		ClickedPosition:       mcmath.Vec64To32(e.Position()),
+	}
+
+	a.useItem(action)
+}
+
+// useItem sends InventoryTransaction packet.
+func (a *Actor) useItem(data protocol.InventoryTransactionData) {
+	_ = a.conn.WritePacket(&packet.InventoryTransaction{
+		TransactionData: data,
+	})
 }

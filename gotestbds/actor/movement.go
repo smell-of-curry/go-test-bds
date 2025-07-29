@@ -1,6 +1,7 @@
 package actor
 
 import (
+	"github.com/df-mc/dragonfly/server/entity/effect"
 	"github.com/go-gl/mathgl/mgl32"
 	"github.com/go-gl/mathgl/mgl64"
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
@@ -22,9 +23,14 @@ type movementData struct {
 	mc *physics.Computer
 }
 
+// CurrentTick returns current tick of the actor
+func (a *Actor) CurrentTick() uint64 {
+	return a.tick
+}
+
 // OnGround ...
-func (m movementData) OnGround() bool {
-	return m.onGround
+func (a *Actor) OnGround() bool {
+	return a.onGround
 }
 
 // Sneaking ...
@@ -112,6 +118,21 @@ func (a *Actor) StopGliding() {
 	a.gliding = false
 }
 
+// Jump makes Actor jump.
+func (a *Actor) Jump() {
+	// TODO take into account sprinting.
+	if !a.OnGround() {
+		return
+	}
+	vel := a.Velocity()
+	jumpVel := 0.42
+	if e, ok := a.Effect(effect.JumpBoost); ok {
+		jumpVel = +float64(e.Level()) / 10
+	}
+	vel[1] = jumpVel
+	a.SetVelocity(vel)
+}
+
 // Immobile ...
 func (a *Actor) Immobile() bool {
 	return a.immobile
@@ -165,6 +186,9 @@ func (a *Actor) tickMovement() {
 	a.Move(movement.Position(), a.Rotation())
 	a.SetVelocity(movement.Velocity())
 	a.onGround = movement.OnGround()
+
+	// resetting movementBitset every tick.
+	a.movementBitset = protocol.NewBitset(packet.PlayerAuthInputBitsetSize)
 	a.tick++
 }
 
