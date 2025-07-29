@@ -14,6 +14,9 @@ type World struct {
 	entities map[uint64]Entity
 	players  map[string]Entity
 
+	currentChunkPos world.ChunkPos
+	currentChunk    *chunk.Chunk
+
 	chunks map[world.ChunkPos]*chunk.Chunk
 }
 
@@ -96,8 +99,8 @@ func (w *World) Liquid(pos cube.Pos) (world.Liquid, bool) {
 
 // block returns block from the pos & layer of the chunk or air if not succeed.
 func (w *World) block(pos cube.Pos, layer uint8) world.Block {
-	c := w.chunks[chunkPosFromBlockPos(pos)]
-	if pos.OutOfBounds(c.Range()) {
+	c := w.chunk(chunkPosFromBlockPos(pos))
+	if c == nil || pos.OutOfBounds(c.Range()) {
 		return block.Air{}
 	}
 	rid := c.Block(uint8(pos[0]), int16(pos[1]), uint8(pos[2]), layer)
@@ -106,11 +109,22 @@ func (w *World) block(pos cube.Pos, layer uint8) world.Block {
 	return bl
 }
 
+// chunk returns *chunk.Chunk or nil.
+func (w *World) chunk(pos world.ChunkPos) *chunk.Chunk {
+	if w.currentChunkPos == pos {
+		return w.currentChunk
+	}
+	ch := w.chunks[pos]
+	w.currentChunk = ch
+	w.currentChunkPos = pos
+	return ch
+}
+
 // SetBlock writes a block to the position passed. If a chunk is not yet loaded
 // at that position, operation will be ignored.
 func (w *World) SetBlock(pos cube.Pos, b world.Block) {
-	c, ok := w.chunks[chunkPosFromBlockPos(pos)]
-	if !ok || pos.OutOfBounds(c.Range()) {
+	c := w.chunk(chunkPosFromBlockPos(pos))
+	if c == nil || pos.OutOfBounds(c.Range()) {
 		return
 	}
 	rid := world.BlockRuntimeID(b)
