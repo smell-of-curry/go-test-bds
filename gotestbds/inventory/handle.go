@@ -114,7 +114,7 @@ func (source *Handle) stack(slot int) (stack, error) {
 	}, nil
 }
 
-// newWriter creates
+// newWriter creates new History writer.
 func (*Handle) newWriter() (setItem func(slot int, it stack, handle *Handle) error, changes *History) {
 	changes = &History{}
 	setItem = func(slot int, it stack, handle *Handle) error {
@@ -203,6 +203,19 @@ func (source *Handle) Swap(sourceSlot, destinationSlot int, destination *Handle)
 
 	source.actionWriter.WriteInventoryAction(action, changes)
 	return nil
+}
+
+// Destroy destroys item in slot.
+// It will work only if Actor has creative inventory access.
+func (source *Handle) Destroy(slot, count int) {
+	setItem, changes := source.newWriter()
+
+	action := &protocol.DestroyStackRequestAction{}
+	action.Count = byte(count)
+	action.Source = source.slotInfo(slot)
+
+	_ = setItem(slot, stack{}, source)
+	source.actionWriter.WriteInventoryAction(action, changes)
 }
 
 // ActionWriter ...
