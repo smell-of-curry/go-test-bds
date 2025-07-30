@@ -279,6 +279,7 @@ func (a *Actor) MoveRawInput(input movement.Input, deltaRotation cube.Rotation) 
 	if moveVec.LenSqr() != 0 {
 		a.moving = true
 		moveVec = moveVec.Normalize()
+		a.Move(a.Position(), rotation)
 		return
 	}
 	move := mcmath.RotateVec2(moveVec, rotation.Yaw()).Mul(a.Speed())
