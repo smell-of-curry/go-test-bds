@@ -211,6 +211,8 @@ func (a *Actor) SendMovement() {
 // tickMovement simulates Actor's movement.
 func (a *Actor) tickMovement() {
 	a.SendMovement()
+	a.delta = mgl64.Vec3{}
+
 	movementTick := a.mc.TickMovement(a.State().Box(), a.Position(), a.Velocity(), a.World())
 	a.Move(movementTick.Position(), a.Rotation())
 	a.SetVelocity(movementTick.Velocity())
@@ -266,7 +268,7 @@ func (a *Actor) Move(pos mgl64.Vec3, rot cube.Rotation) {
 		a.Player.Move(pos, rot)
 		return
 	}
-	a.delta = pos.Sub(a.Position())
+	a.delta = a.delta.Add(pos.Sub(a.Position()))
 }
 
 // MoveRawInput moves Actor according to Input.
