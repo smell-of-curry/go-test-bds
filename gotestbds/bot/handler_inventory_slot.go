@@ -13,11 +13,6 @@ type InventorySlotHandler struct{}
 func (*InventorySlotHandler) Handle(p packet.Packet, b *Bot, a *actor.Actor) {
 	inventorySlot := p.(*packet.InventorySlot)
 
-	b.handlingInventories = true
-	defer func() {
-		b.handlingInventories = false
-	}()
-
 	slot := int(inventorySlot.Slot)
 
 	inv := b.invByID(inventorySlot.WindowID)

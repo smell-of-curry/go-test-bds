@@ -37,8 +37,8 @@ type Computer struct {
 func (c *Computer) TickMovement(box cube.BBox, pos, vel mgl64.Vec3, source world.BlockSource) *Movement {
 	velBefore := vel
 	vel = c.applyHorizontalForces(source, pos, c.applyVerticalForces(vel))
-	dPos, vel := c.checkCollision(source, box, pos, vel)
-
+	dPos, vel, onGround := CheckCollision(source, box, pos, vel)
+	c.onGround = onGround
 	return &Movement{
 		pos: pos.Add(dPos), vel: vel, dpos: dPos, dvel: vel.Sub(velBefore),
 		onGround: c.onGround,
@@ -72,10 +72,11 @@ func (c *Computer) applyVerticalForces(vel mgl64.Vec3) mgl64.Vec3 {
 	return vel
 }
 
-// checkCollision limits collision
-func (c *Computer) checkCollision(source world.BlockSource, box cube.BBox, pos, vel mgl64.Vec3) (mgl64.Vec3, mgl64.Vec3) {
+// CheckCollision limits collision.
+func CheckCollision(source world.BlockSource, box cube.BBox, pos, vel mgl64.Vec3) (mgl64.Vec3, mgl64.Vec3, bool) {
 	// TODO: Implement collision with other entities.
 	deltaX, deltaY, deltaZ := vel[0], vel[1], vel[2]
+	var onGround bool
 
 	// Entities only ever have a single bounding box.
 	entityBBox := box.Translate(pos)
@@ -104,7 +105,7 @@ func (c *Computer) checkCollision(source world.BlockSource, box cube.BBox, pos, 
 	if !mgl64.FloatEqual(vel[1], 0) {
 		// The Y velocity of the entity is currently not 0, meaning it is moving either up or down. We can
 		// then assume the entity is not currently on the ground.
-		c.onGround = false
+		onGround = false
 	}
 	if !mgl64.FloatEqual(deltaX, vel[0]) {
 		vel[0] = 0
@@ -113,14 +114,14 @@ func (c *Computer) checkCollision(source world.BlockSource, box cube.BBox, pos, 
 		// The entity either hit the ground or hit the ceiling.
 		if vel[1] < 0 {
 			// The entity was going down, so we can assume it is now on the ground.
-			c.onGround = true
+			onGround = true
 		}
 		vel[1] = 0
 	}
 	if !mgl64.FloatEqual(deltaZ, vel[2]) {
 		vel[2] = 0
 	}
-	return mgl64.Vec3{deltaX, deltaY, deltaZ}, vel
+	return mgl64.Vec3{deltaX, deltaY, deltaZ}, vel, onGround
 }
 
 // blockBBoxsAround ...

@@ -15,11 +15,6 @@ type InventoryContentHandler struct{}
 func (*InventoryContentHandler) Handle(p packet.Packet, b *Bot, a *actor.Actor) {
 	inventoryContent := p.(*packet.InventoryContent)
 
-	b.handlingInventories = true
-	defer func() {
-		b.handlingInventories = false
-	}()
-
 	inv := b.invByID(inventoryContent.WindowID)
 	if inv == nil {
 		b.logger.Error("unable to process InventoryContent packet", "err", fmt.Errorf("unknown windowID: %d", inventoryContent.WindowID))

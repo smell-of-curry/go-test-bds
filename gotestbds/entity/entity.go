@@ -4,6 +4,7 @@ import (
 	"github.com/df-mc/dragonfly/server/block/cube"
 	"github.com/go-gl/mathgl/mgl64"
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
+	"github.com/smell-of-curry/go-test-bds/gotestbds/entity/attributes"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/entity/metadata"
 )
 
@@ -13,6 +14,7 @@ type Ent struct {
 	rot        cube.Rotation
 	vel        mgl64.Vec3
 	state      *metadata.State
+	attributes *attributes.Values
 	rid        uint64
 	entityType string
 }
@@ -47,6 +49,11 @@ func (e *Ent) SetVelocity(vel mgl64.Vec3) {
 // State returns state of the entity.
 func (e *Ent) State() *metadata.State {
 	return e.state
+}
+
+// Attributes returns attribute values of the entity.
+func (e *Ent) Attributes() *attributes.Values {
+	return e.attributes
 }
 
 // RuntimeID is runtime identifier of the entity it identifies entity in the packets.

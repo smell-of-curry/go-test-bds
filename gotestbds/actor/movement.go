@@ -1,13 +1,16 @@
 package actor
 
 import (
+	"github.com/df-mc/dragonfly/server/block/cube"
 	"github.com/df-mc/dragonfly/server/entity/effect"
+	"github.com/df-mc/dragonfly/server/item"
 	"github.com/go-gl/mathgl/mgl32"
 	"github.com/go-gl/mathgl/mgl64"
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/mcmath"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/mcmath/physics"
+	"github.com/smell-of-curry/go-test-bds/gotestbds/mcmath/physics/movement"
 	"time"
 )
 
@@ -57,8 +60,10 @@ func (a *Actor) Sprinting() bool {
 
 // StartSprinting ...
 func (a *Actor) StartSprinting() {
-	a.movementBitset.Set(packet.InputFlagStartSprinting)
-	a.sprinting = true
+	if a.CanSprint() {
+		a.movementBitset.Set(packet.InputFlagStartSprinting)
+		a.sprinting = true
+	}
 }
 
 // StopSprinting ...
@@ -74,8 +79,10 @@ func (a *Actor) Swimming() bool {
 
 // StartSwimming ...
 func (a *Actor) StartSwimming() {
-	a.movementBitset.Set(packet.InputFlagStartSwimming)
-	a.swimming = true
+	if a.CanSprint() {
+		a.movementBitset.Set(packet.InputFlagStartSwimming)
+		a.swimming = true
+	}
 }
 
 // StopSwimming ...
@@ -108,6 +115,10 @@ func (a *Actor) Gliding() bool {
 
 // StartGliding ...
 func (a *Actor) StartGliding() {
+	chest := a.Armour().Chestplate()
+	if _, ok := chest.Item().(item.Elytra); !ok || chest.Durability() < 2 {
+		return
+	}
 	a.movementBitset.Set(packet.InputFlagStartGliding)
 	a.gliding = true
 }
@@ -116,6 +127,20 @@ func (a *Actor) StartGliding() {
 func (a *Actor) StopGliding() {
 	a.movementBitset.Set(packet.InputFlagStopGliding)
 	a.gliding = false
+}
+
+// BreakingBlock ...
+func (a *Actor) BreakingBlock() bool {
+	return a.breakingBlock
+}
+
+// Speed returns Actor's speed in blocks per tick.
+func (a *Actor) Speed() float64 {
+	// https://minecraft.wiki/w/Walking
+	mPerSecond := 4.317
+	mPerTick := mPerSecond / 20
+	multiplier := a.Attributes().Speed() * 10
+	return mPerTick * multiplier
 }
 
 // Jump makes Actor jump.
@@ -146,6 +171,9 @@ func (a *Actor) fillMovementBitset() {
 	if a.Sprinting() {
 		a.movementBitset.Set(packet.InputFlagSprinting)
 	}
+	if a.BreakingBlock() {
+		a.movementBitset.Set(packet.InputFlagPerformBlockActions)
+	}
 }
 
 // SendMovement sends movement to the server.
@@ -155,8 +183,9 @@ func (a *Actor) SendMovement() {
 	pitch := float32(a.Rotation().Pitch())
 	yaw := float32(a.Rotation().Yaw())
 
-	if !a.moving {
-		moveVector = mcmath.RotateVec2(mgl32.Vec2{float32(vel.X()), float32(vel.Z())}, -yaw)
+	if a.moving {
+		rotated := mcmath.RotateVec2(mgl64.Vec2{vel.X(), vel.Z()}, -a.Rotation().Yaw())
+		moveVector = mgl32.Vec2{float32(rotated.X()), float32(rotated.Y())}
 	}
 
 	a.fillMovementBitset()
@@ -182,10 +211,10 @@ func (a *Actor) SendMovement() {
 // tickMovement simulates Actor's movement.
 func (a *Actor) tickMovement() {
 	a.SendMovement()
-	movement := a.mc.TickMovement(a.State().Box(), a.Position(), a.Velocity(), a.World())
-	a.Move(movement.Position(), a.Rotation())
-	a.SetVelocity(movement.Velocity())
-	a.onGround = movement.OnGround()
+	movementTick := a.mc.TickMovement(a.State().Box(), a.Position(), a.Velocity(), a.World())
+	a.Move(movementTick.Position(), a.Rotation())
+	a.SetVelocity(movementTick.Velocity())
+	a.onGround = movementTick.OnGround()
 
 	// resetting movementBitset every tick.
 	a.movementBitset = protocol.NewBitset(packet.PlayerAuthInputBitsetSize)
@@ -226,7 +255,61 @@ func (a *Actor) finishBreaking() {
 	a.abortBreaking = false
 }
 
-// AbortBreaking ...
+// AbortBreaking makes Actor cancel block breaking.
 func (a *Actor) AbortBreaking() {
 	a.abortBreaking = true
+}
+
+// Move directly moves Actor.
+func (a *Actor) Move(pos mgl64.Vec3, rot cube.Rotation) {
+	if pos == a.Position() {
+		a.Player.Move(pos, rot)
+		return
+	}
+	a.delta = pos.Sub(a.Position())
+}
+
+// MoveRawInput moves Actor according to Input.
+func (a *Actor) MoveRawInput(input movement.Input, deltaRotation cube.Rotation) {
+	a.fillInput(input)
+	moveVec := input.MoveVector()
+	rotation := a.Rotation().Add(deltaRotation)
+	if moveVec.LenSqr() != 0 {
+		a.moving = true
+		moveVec = moveVec.Normalize()
+		return
+	}
+	move := mcmath.RotateVec2(moveVec, rotation.Yaw()).Mul(a.Speed())
+	dPos, _, _ := physics.CheckCollision(a.World(), a.State().Box(), a.Position(), mgl64.Vec3{move.X(), 0, move.Y()})
+	a.Move(dPos.Add(a.Position()), rotation)
+}
+
+// fillInput fills input flags into movementBitset.
+func (a *Actor) fillInput(input movement.Input) {
+	if input.Jump {
+		a.Jump()
+	}
+	if input.Sneak && !a.Sneaking() {
+		a.StartSneaking()
+	} else if a.Sneaking() {
+		a.StopSneaking()
+	}
+	if input.Forward {
+		a.movementBitset.Set(packet.InputFlagUp)
+		if input.Right {
+			a.movementBitset.Set(packet.InputFlagUpRight)
+		}
+		if input.Left {
+			a.movementBitset.Set(packet.InputFlagUpLeft)
+		}
+	}
+	if input.Right {
+		a.movementBitset.Set(packet.InputFlagRight)
+	}
+	if input.Left {
+		a.movementBitset.Set(packet.InputFlagLeft)
+	}
+	if input.Back {
+		a.movementBitset.Set(packet.InputFlagDown)
+	}
 }

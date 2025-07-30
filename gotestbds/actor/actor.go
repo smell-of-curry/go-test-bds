@@ -9,6 +9,7 @@ import (
 	"github.com/df-mc/dragonfly/server/entity/effect"
 	"github.com/df-mc/dragonfly/server/item"
 	"github.com/df-mc/dragonfly/server/item/enchantment"
+	"github.com/df-mc/dragonfly/server/player/skin"
 	w "github.com/df-mc/dragonfly/server/world"
 	"github.com/go-gl/mathgl/mgl64"
 	"github.com/google/uuid"
@@ -22,6 +23,7 @@ import (
 	"iter"
 	"math"
 	"time"
+	_ "unsafe"
 )
 
 // Actor simulates client actions.
@@ -155,7 +157,7 @@ func (a *Actor) breakTime(pos cube.Pos) time.Duration {
 		breakTime *= 5
 	}
 
-	if _, ok := a.Armor().Helmet().Enchantment(enchantment.AquaAffinity); a.insideOfWater() && !ok {
+	if _, ok := a.Armour().Helmet().Enchantment(enchantment.AquaAffinity); a.insideOfWater() && !ok {
 		breakTime *= 5
 	}
 	for e := range a.Effects() {
@@ -216,8 +218,8 @@ func (a *Actor) Offhand() *inventory.Handle {
 	return a.offhand
 }
 
-// Armor ...
-func (a *Actor) Armor() *Armour {
+// Armour ...
+func (a *Actor) Armour() *Armour {
 	return a.armor
 }
 
@@ -380,3 +382,32 @@ func (a *Actor) useItem(data protocol.InventoryTransactionData) {
 		TransactionData: data,
 	})
 }
+
+// Respawn respawns Actor.
+func (a *Actor) Respawn() {
+	a.conn.WritePacket(&packet.Respawn{
+		State:           packet.RespawnStateClientReadyToSpawn,
+		EntityRuntimeID: a.conn.GameData().EntityRuntimeID,
+	})
+}
+
+// SetSkin sets Actor's skin.
+func (a *Actor) SetSkin(skin skin.Skin) {
+	_ = a.conn.WritePacket(&packet.PlayerSkin{
+		UUID: a.UUID(),
+		Skin: skinToProtocol(skin),
+	})
+}
+
+// Health ...
+func (a *Actor) Health() float64 {
+	return a.Attributes().Health()
+}
+
+// CanSprint ...
+func (a *Actor) CanSprint() bool {
+	return a.Attributes().Food() > 6
+}
+
+//go:linkname skinToProtocol github.com/df-mc/dragonfly/server/player/skin.skinToProtocol
+func skinToProtocol(s skin.Skin) protocol.Skin

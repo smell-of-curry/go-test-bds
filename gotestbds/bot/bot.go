@@ -19,8 +19,7 @@ type Bot struct {
 	tasks                     chan func(actor *actor.Actor)
 	pendingItemStackResponses map[int32]*inventory.History
 
-	handlingInventories bool
-	currentRequestID    int32
+	currentRequestID int32
 
 	packets chan packet.Packet
 	logger  *slog.Logger
@@ -122,5 +121,6 @@ func (b *Bot) registerHandlers() {
 		packet.IDInventorySlot:     &InventorySlotHandler{},
 		packet.IDItemStackResponse: &ItemStackResponseHandler{},
 		packet.IDMobEffect:         &MobEffectHandler{},
+		packet.IDUpdateAttributes:  &UpdateAttributesHandler{},
 	}
 }

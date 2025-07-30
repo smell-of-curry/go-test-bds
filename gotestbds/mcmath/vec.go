@@ -18,15 +18,15 @@ func Vec64To32(vec3 mgl64.Vec3) mgl32.Vec3 {
 }
 
 // RotateVec2 rotates vec by yaw degrees.
-func RotateVec2(vec mgl32.Vec2, yaw float32) mgl32.Vec2 {
+func RotateVec2(vec mgl64.Vec2, yaw float64) mgl64.Vec2 {
 	yawRad := float64(yaw * math.Pi / 180.0)
 
-	sin, cos := float32(math.Sin(yawRad)), float32(math.Cos(yawRad))
+	sin, cos := math.Sin(yawRad), math.Cos(yawRad)
 
 	x := vec[0]*cos - vec[1]*sin
 	y := vec[0]*sin + vec[1]*cos
 
-	return mgl32.Vec2{x, y}
+	return mgl64.Vec2{x, y}
 }
 
 // VectorToRotation converts vector to the
