@@ -1,7 +1,7 @@
 package bot
 
 import (
-	"github.com/sandertv/gophertunnel/minecraft"
+	"github.com/sandertv/gophertunnel/minecraft/protocol"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/actor"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/inventory"
@@ -13,7 +13,7 @@ import (
 type Bot struct {
 	a      *actor.Actor
 	closed chan struct{}
-	conn   *minecraft.Conn
+	conn   Conn
 
 	handlers                  map[uint32]packetHandler
 	tasks                     chan func(actor *actor.Actor)
@@ -26,9 +26,8 @@ type Bot struct {
 }
 
 // NewBot ...
-func NewBot(conn *minecraft.Conn, logger *slog.Logger) *Bot {
+func NewBot(conn Conn, logger *slog.Logger) *Bot {
 	bot := &Bot{
-		a:                         actor.NewActor(conn),
 		closed:                    make(chan struct{}),
 		conn:                      conn,
 		handlers:                  make(map[uint32]packetHandler),
@@ -37,6 +36,12 @@ func NewBot(conn *minecraft.Conn, logger *slog.Logger) *Bot {
 		packets:                   make(chan packet.Packet),
 		logger:                    logger,
 	}
+	bot.a = actor.Config{
+		Conn:      conn,
+		Inventory: inventory.NewHandle(36, protocol.WindowIDInventory, bot),
+		Offhand:   inventory.NewHandle(1, protocol.WindowIDOffHand, bot),
+		Armour:    inventory.NewArmour(bot),
+	}.New()
 	bot.registerHandlers()
 
 	return bot
@@ -77,7 +82,7 @@ func (b *Bot) Execute(task func(*actor.Actor)) {
 }
 
 // Conn ...
-func (b *Bot) Conn() *minecraft.Conn {
+func (b *Bot) Conn() Conn {
 	return b.conn
 }
 

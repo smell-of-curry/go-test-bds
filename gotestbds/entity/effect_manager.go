@@ -12,6 +12,11 @@ type EffectManager struct {
 	effects map[reflect.Type]effect.Effect
 }
 
+// NewEffectManager ...
+func NewEffectManager() *EffectManager {
+	return &EffectManager{make(map[reflect.Type]effect.Effect)}
+}
+
 // Add ...
 func (m *EffectManager) Add(e effect.Effect) {
 	_, ok := e.Type().(effect.LastingType)

@@ -19,6 +19,16 @@ type Handle struct {
 	actionWriter ActionWriter
 }
 
+// NewHandle ...
+func NewHandle(size int, windowID uint32, actionWriter ActionWriter) *Handle {
+	return &Handle{
+		inv:          inventory.New(size, nil),
+		stackIds:     make([]int32, size),
+		windowID:     windowID,
+		actionWriter: actionWriter,
+	}
+}
+
 // SetItem sets item in the slot passed, this function should not be called from anything other than the packet handler.
 // For inventory interactions call Move, Swap or Drop.
 func (source *Handle) SetItem(slot int, it protocol.ItemInstance) error {

@@ -32,9 +32,9 @@ type Actor struct {
 
 	world *world.World
 
-	*actorData
+	actorData
 
-	conn *minecraft.Conn
+	conn Conn
 }
 
 // NewActor ...
@@ -219,7 +219,7 @@ func (a *Actor) Offhand() *inventory.Handle {
 }
 
 // Armour ...
-func (a *Actor) Armour() *Armour {
+func (a *Actor) Armour() *inventory.Armour {
 	return a.armor
 }
 

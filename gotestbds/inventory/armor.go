@@ -1,20 +1,18 @@
-package actor
+package inventory
 
 import (
 	"github.com/df-mc/dragonfly/server/item"
-	"github.com/smell-of-curry/go-test-bds/gotestbds/inventory"
+	"github.com/sandertv/gophertunnel/minecraft/protocol"
 )
 
 // Armour ...
 type Armour struct {
-	inv *inventory.Handle
+	inv *Handle
 }
 
-func NewArmour(inv *inventory.Handle) *Armour {
-	if inv.Size() != 4 {
-		panic("incorrect inventory size")
-	}
-	return &Armour{inv: inv}
+// NewArmour ...
+func NewArmour(writer ActionWriter) *Armour {
+	return &Armour{NewHandle(4, protocol.WindowIDArmour, writer)}
 }
 
 // Helmet returns the item stack set as helmet in the inventory.
@@ -42,6 +40,6 @@ func (a *Armour) Boots() item.Stack {
 }
 
 // Inventory ...
-func (a *Armour) Inventory() *inventory.Handle {
+func (a *Armour) Inventory() *Handle {
 	return a.inv
 }

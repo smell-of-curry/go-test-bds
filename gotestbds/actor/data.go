@@ -11,7 +11,7 @@ type actorData struct {
 	heldSlot int
 	inv      *inventory.Handle
 	offhand  *inventory.Handle
-	armor    *Armour
+	armor    *inventory.Armour
 
 	effectManager *entity.EffectManager
 
