@@ -117,12 +117,12 @@ func (a *Actor) SetHeldSlot(slot int) error {
 		return fmt.Errorf("slot exceeds hotbar range 0-8: slot is %v", slot)
 	}
 
-	item, _ := a.Inventory().ItemInstance(slot)
+	heldItem, _ := a.Inventory().ItemInstance(slot)
 	a.heldSlot = slot
 
 	return a.conn.WritePacket(&packet.MobEquipment{
 		EntityRuntimeID: a.RuntimeID(),
-		NewItem:         item,
+		NewItem:         heldItem,
 		InventorySlot:   byte(slot),
 		HotBarSlot:      byte(slot),
 		WindowID:        protocol.WindowIDInventory,
