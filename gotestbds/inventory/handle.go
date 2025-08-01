@@ -2,11 +2,12 @@ package inventory
 
 import (
 	"fmt"
+	"slices"
+
 	"github.com/df-mc/dragonfly/server/item"
 	"github.com/df-mc/dragonfly/server/item/inventory"
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/internal"
-	"slices"
 )
 
 // Handle is a correct way to interact with inventories.
@@ -149,7 +150,7 @@ func (source *Handle) DropItem(slot, count int) error {
 
 	it, err := source.stack(slot)
 	if err != nil {
-		return fmt.Errorf("error droping item (err: %w)", err)
+		return fmt.Errorf("error dropping item (err: %w)", err)
 	}
 
 	_ = setItem(slot, it.Grow(-count), source)
@@ -198,12 +199,12 @@ func (source *Handle) Swap(sourceSlot, destinationSlot int, destination *Handle)
 
 	it1, err := source.stack(sourceSlot)
 	if err != nil {
-		return fmt.Errorf("error swaping item (err: %w)", err)
+		return fmt.Errorf("error swapping item (err: %w)", err)
 	}
 
 	it2, err := destination.stack(destinationSlot)
 	if err != nil {
-		return fmt.Errorf("error swaping item (err: %w)", err)
+		return fmt.Errorf("error swapping item (err: %w)", err)
 	}
 
 	action := &protocol.SwapStackRequestAction{}

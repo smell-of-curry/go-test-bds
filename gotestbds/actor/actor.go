@@ -2,6 +2,11 @@ package actor
 
 import (
 	"fmt"
+	"iter"
+	"math"
+	"time"
+	_ "unsafe"
+
 	"github.com/df-mc/dragonfly/server/block"
 	"github.com/df-mc/dragonfly/server/block/cube"
 	"github.com/df-mc/dragonfly/server/block/cube/trace"
@@ -20,10 +25,6 @@ import (
 	"github.com/smell-of-curry/go-test-bds/gotestbds/inventory"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/mcmath"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/world"
-	"iter"
-	"math"
-	"time"
-	_ "unsafe"
 )
 
 // Actor simulates client actions.
@@ -384,7 +385,7 @@ func (a *Actor) useItem(data protocol.InventoryTransactionData) {
 	})
 }
 
-// Respawn respawns Actor.
+// Respawn respawn's the Actor.
 func (a *Actor) Respawn() {
 	_ = a.conn.WritePacket(&packet.Respawn{
 		State:           packet.RespawnStateClientReadyToSpawn,
