@@ -45,6 +45,8 @@ func (*SubChunkHandler) Handle(p packet.Packet, b *Bot, a *actor.Actor) {
 			w.AddChunk(chunkPos, c)
 		}
 
+		buf.Write(entry.RawPayload)
+
 		var index byte
 		decodedSC, err := decodeSubChunk(buf, c, &index, chunk.NetworkEncoding)
 		if err != nil {

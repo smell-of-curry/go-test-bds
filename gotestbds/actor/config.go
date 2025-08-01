@@ -2,6 +2,7 @@ package actor
 
 import (
 	"github.com/google/uuid"
+	"github.com/sandertv/gophertunnel/minecraft/protocol"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/entity"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/inventory"
@@ -39,6 +40,8 @@ func (c Config) New() *Actor {
 		armor:         c.Armour,
 		effectManager: entity.NewEffectManager(),
 	}
+
+	data.movementBitset = protocol.NewBitset(packet.PlayerAuthInputBitsetSize)
 
 	data.mc = &physics.Computer{
 		Gravity:           0.08,

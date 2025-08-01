@@ -16,7 +16,7 @@ type Input struct {
 func (i Input) MoveVector() mgl64.Vec2 {
 	f := calculateImpulse(i.Forward, i.Back)
 	g := calculateImpulse(i.Left, i.Right)
-	return mgl64.Vec2{f, g}
+	return mgl64.Vec2{g, f}
 }
 
 // calculateImpulse ...

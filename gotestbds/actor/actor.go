@@ -52,11 +52,12 @@ func NewActor(conn *minecraft.Conn) *Actor {
 	w := world.NewWorld()
 	w.AddEntity(pl)
 
-	return &Actor{
+	actor := &Actor{
 		conn:   conn,
 		world:  w,
 		Player: pl.(*entity.Player),
 	}
+	return actor
 }
 
 // World ...
@@ -385,7 +386,7 @@ func (a *Actor) useItem(data protocol.InventoryTransactionData) {
 
 // Respawn respawns Actor.
 func (a *Actor) Respawn() {
-	a.conn.WritePacket(&packet.Respawn{
+	_ = a.conn.WritePacket(&packet.Respawn{
 		State:           packet.RespawnStateClientReadyToSpawn,
 		EntityRuntimeID: a.conn.GameData().EntityRuntimeID,
 	})
@@ -407,6 +408,18 @@ func (a *Actor) Health() float64 {
 // CanSprint ...
 func (a *Actor) CanSprint() bool {
 	return a.Attributes().Food() > 6
+}
+
+// RunCommand runs the command on the server side.
+func (a *Actor) RunCommand(cmd string) {
+	_ = a.conn.WritePacket(&packet.CommandRequest{
+		CommandLine: cmd,
+		CommandOrigin: protocol.CommandOrigin{
+			Origin:         protocol.CommandOriginPlayer,
+			UUID:           uuid.New(),
+			PlayerUniqueID: a.conn.GameData().EntityUniqueID,
+		},
+	})
 }
 
 //go:linkname skinToProtocol github.com/df-mc/dragonfly/server/player/skin.skinToProtocol

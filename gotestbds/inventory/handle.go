@@ -14,17 +14,17 @@ type Handle struct {
 	inv *inventory.Inventory
 	// stackIds is used to map item.Stack to its network id.
 	stackIds []int32
-	// windowID is an id of the inventory.
-	windowID     uint32
+	// containerID is an id of the inventory.
+	containerID  uint32
 	actionWriter ActionWriter
 }
 
 // NewHandle ...
-func NewHandle(size int, windowID uint32, actionWriter ActionWriter) *Handle {
+func NewHandle(size int, containerID uint32, actionWriter ActionWriter) *Handle {
 	return &Handle{
 		inv:          inventory.New(size, nil),
 		stackIds:     make([]int32, size),
-		windowID:     windowID,
+		containerID:  containerID,
 		actionWriter: actionWriter,
 	}
 }
@@ -49,7 +49,7 @@ func (source *Handle) Item(slot int) (item.Stack, error) {
 
 // First ...
 func (source *Handle) First(item item.Stack) (int, bool) {
-	return source.inv.FirstFunc(item.Comparable)
+	return source.inv.First(item)
 }
 
 // FirstFunc ...
@@ -106,7 +106,7 @@ func (source *Handle) Size() int {
 // slotInfo ...
 func (source *Handle) slotInfo(slot int) protocol.StackRequestSlotInfo {
 	return protocol.StackRequestSlotInfo{
-		Container:      protocol.FullContainerName{ContainerID: byte(source.windowID)},
+		Container:      protocol.FullContainerName{ContainerID: byte(source.containerID)},
 		Slot:           byte(slot),
 		StackNetworkID: source.stackIds[slot],
 	}
@@ -180,6 +180,7 @@ func (source *Handle) Move(sourceSlot, destinationSlot, count int, destination *
 	action.Count = byte(count)
 	action.Source = source.slotInfo(sourceSlot)
 	action.Destination = destination.slotInfo(destinationSlot)
+	action.Destination.StackNetworkID = 0
 
 	err = setItem(sourceSlot, it.Grow(-count), source)
 	if err != nil {
@@ -191,6 +192,7 @@ func (source *Handle) Move(sourceSlot, destinationSlot, count int, destination *
 }
 
 // Swap ...
+// currently does not work.
 func (source *Handle) Swap(sourceSlot, destinationSlot int, destination *Handle) error {
 	setItem, changes := source.newWriter()
 

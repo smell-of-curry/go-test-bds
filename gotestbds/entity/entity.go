@@ -23,7 +23,7 @@ type Ent struct {
 func NewEnt(pos mgl64.Vec3, meta protocol.EntityMetadata, rid uint64, entityType string) *Ent {
 	state := new(metadata.State)
 	state.Decode(meta)
-	return &Ent{pos: pos, state: state, rid: rid, entityType: entityType}
+	return &Ent{pos: pos, state: state, rid: rid, entityType: entityType, attributes: new(attributes.Values)}
 }
 
 // Position is a position of the entity.

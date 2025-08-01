@@ -144,6 +144,7 @@ func (a *Actor) Speed() float64 {
 }
 
 // Jump makes Actor jump.
+// for what ever reason it can not jump on the block.
 func (a *Actor) Jump() {
 	// TODO take into account sprinting.
 	if !a.OnGround() {
@@ -152,7 +153,7 @@ func (a *Actor) Jump() {
 	vel := a.Velocity()
 	jumpVel := 0.42
 	if e, ok := a.Effect(effect.JumpBoost); ok {
-		jumpVel = +float64(e.Level()) / 10
+		jumpVel = jumpVel + float64(e.Level())/10
 	}
 	vel[1] = jumpVel
 	a.SetVelocity(vel)
@@ -192,7 +193,7 @@ func (a *Actor) SendMovement() {
 	_ = a.conn.WritePacket(&packet.PlayerAuthInput{
 		Pitch:             pitch,
 		Yaw:               yaw,
-		Position:          mcmath.Vec64To32(a.Position()),
+		Position:          mcmath.Vec64To32(a.Position().Add(mgl64.Vec3{0, 1.62})),
 		MoveVector:        moveVector.Normalize(),
 		HeadYaw:           yaw,
 		InputData:         a.movementBitset,
@@ -211,11 +212,15 @@ func (a *Actor) SendMovement() {
 // tickMovement simulates Actor's movement.
 func (a *Actor) tickMovement() {
 	a.SendMovement()
-	a.delta = mgl64.Vec3{}
 
 	movementTick := a.mc.TickMovement(a.State().Box(), a.Position(), a.Velocity(), a.World())
 	a.Move(movementTick.Position(), a.Rotation())
-	a.SetVelocity(movementTick.Velocity())
+	if movementTick.Velocity().LenSqr() < a.delta.LenSqr() && a.moving {
+		a.SetVelocity(a.delta)
+	} else {
+		a.SetVelocity(movementTick.Velocity())
+	}
+	a.delta = mgl64.Vec3{}
 	a.onGround = movementTick.OnGround()
 
 	// resetting movementBitset every tick.
@@ -264,24 +269,23 @@ func (a *Actor) AbortBreaking() {
 
 // Move directly moves Actor.
 func (a *Actor) Move(pos mgl64.Vec3, rot cube.Rotation) {
-	if pos == a.Position() {
-		a.Player.Move(pos, rot)
-		return
-	}
+	a.Player.Move(pos, rot)
 	a.delta = a.delta.Add(pos.Sub(a.Position()))
 }
 
 // MoveRawInput moves Actor according to Input.
 func (a *Actor) MoveRawInput(input movement.Input, deltaRotation cube.Rotation) {
+	// TODO implement gliding & swimming.
 	a.fillInput(input)
 	moveVec := input.MoveVector()
 	rotation := a.Rotation().Add(deltaRotation)
-	if moveVec.LenSqr() != 0 {
-		a.moving = true
-		moveVec = moveVec.Normalize()
+	if moveVec.LenSqr() == 0 {
+		// just rotating.
 		a.Move(a.Position(), rotation)
 		return
 	}
+	a.moving = true
+	moveVec = moveVec.Normalize()
 	move := mcmath.RotateVec2(moveVec, rotation.Yaw()).Mul(a.Speed())
 	dPos, _, _ := physics.CheckCollision(a.World(), a.State().Box(), a.Position(), mgl64.Vec3{move.X(), 0, move.Y()})
 	a.Move(dPos.Add(a.Position()), rotation)

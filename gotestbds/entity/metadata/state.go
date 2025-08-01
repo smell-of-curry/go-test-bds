@@ -64,6 +64,9 @@ func (s *State) Box() cube.BBox {
 
 // Decode decodes metadata into State.
 func (s *State) Decode(meta protocol.EntityMetadata) {
+	if meta == nil {
+		return
+	}
 	s.sneaking = meta.Flag(protocol.EntityDataKeyFlags, protocol.EntityDataFlagSneaking)
 	s.sprinting = meta.Flag(protocol.EntityDataKeyFlags, protocol.EntityDataFlagSprinting)
 	s.swimming = meta.Flag(protocol.EntityDataKeyFlags, protocol.EntityDataFlagSwimming)
