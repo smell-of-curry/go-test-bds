@@ -34,7 +34,7 @@ type Computer struct {
 	onGround bool
 }
 
-func (c *Computer) TickMovement(box cube.BBox, pos, vel mgl64.Vec3, source world.BlockSource) *Movement {
+func (c *Computer) TickMovement(box cube.BBox, pos, vel mgl64.Vec3, rot cube.Rotation, source world.BlockSource) *Movement {
 	velBefore := vel
 	vel = c.applyHorizontalForces(source, pos, c.applyVerticalForces(vel))
 	dPos, vel, onGround := CheckCollision(source, box, pos, vel)

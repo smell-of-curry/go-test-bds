@@ -31,11 +31,20 @@ func RotateVec2(vec mgl64.Vec2, yaw float64) mgl64.Vec2 {
 
 // VectorToRotation converts vector to the
 func VectorToRotation(direction mgl64.Vec3) cube.Rotation {
-	normalized := direction.Normalize()
+	// Нормализуем вектор направления (если он не нулевой)
+	if direction.Len() == 0 {
+		return cube.Rotation{}
+	}
+	dir := direction.Normalize()
 
-	yaw := math.Atan2(normalized.Y(), normalized.X())
-	xyDist := math.Sqrt(normalized.X()*normalized.X() + normalized.Y()*normalized.Y())
-	pitch := math.Atan2(normalized.Z(), xyDist)
+	horizontal := math.Sqrt(dir.X()*dir.X() + dir.Z()*dir.Z())
+
+	pitch := -math.Atan2(dir.Y(), horizontal) * 180 / math.Pi
+
+	yaw := math.Atan2(dir.Z(), dir.X())*180/math.Pi - 90
+	if yaw < 0 {
+		yaw += 360.0
+	}
 
 	return cube.Rotation{yaw, pitch}
 }

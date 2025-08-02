@@ -8,6 +8,7 @@ import (
 	"github.com/smell-of-curry/go-test-bds/gotestbds/inventory"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/mcmath/physics"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/world"
+	_ "unsafe"
 )
 
 // Config ...
@@ -49,10 +50,16 @@ func (c Config) New() *Actor {
 		DragBeforeGravity: true,
 	}
 
+	finaliseBlockRegistry()
+
 	return &Actor{
 		conn:      c.Conn,
 		world:     w,
 		Player:    pl.(*entity.Player),
 		actorData: data,
+		h:         NopHandler{},
 	}
 }
+
+//go:linkname finaliseBlockRegistry github.com/df-mc/dragonfly/server/world.finaliseBlockRegistry
+func finaliseBlockRegistry()

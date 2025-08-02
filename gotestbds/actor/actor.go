@@ -7,13 +7,13 @@ import (
 	"github.com/df-mc/dragonfly/server/block/cube/trace"
 	"github.com/df-mc/dragonfly/server/block/model"
 	"github.com/df-mc/dragonfly/server/entity/effect"
+	"github.com/df-mc/dragonfly/server/event"
 	"github.com/df-mc/dragonfly/server/item"
 	"github.com/df-mc/dragonfly/server/item/enchantment"
 	"github.com/df-mc/dragonfly/server/player/skin"
 	w "github.com/df-mc/dragonfly/server/world"
 	"github.com/go-gl/mathgl/mgl64"
 	"github.com/google/uuid"
-	"github.com/sandertv/gophertunnel/minecraft"
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/entity"
@@ -29,6 +29,7 @@ import (
 // Actor simulates client actions.
 type Actor struct {
 	*entity.Player
+	h Handler
 
 	world *world.World
 
@@ -37,27 +38,17 @@ type Actor struct {
 	conn Conn
 }
 
-// NewActor ...
-func NewActor(conn *minecraft.Conn) *Actor {
-	identity := conn.IdentityData()
-	gameData := conn.GameData()
-	pl := entity.CreateFromPacket(&packet.AddPlayer{
-		UUID:            uuid.MustParse(identity.Identity),
-		Username:        identity.DisplayName,
-		EntityRuntimeID: gameData.EntityRuntimeID,
-		Position:        gameData.PlayerPosition,
-		GameType:        gameData.PlayerGameMode,
-	})
+// Handler returns Actor's handler.
+func (a *Actor) Handler() Handler {
+	return a.h
+}
 
-	w := world.NewWorld()
-	w.AddEntity(pl)
-
-	actor := &Actor{
-		conn:   conn,
-		world:  w,
-		Player: pl.(*entity.Player),
+// Handle sets Actor's handler.
+func (a *Actor) Handle(h Handler) {
+	if h == nil {
+		h = NopHandler{}
 	}
-	return actor
+	a.h = h
 }
 
 // World ...
@@ -71,10 +62,15 @@ func (a *Actor) Close() error {
 	return nil
 }
 
-// Attack attacks passed entity.
-func (a *Actor) Attack(e world.Entity) bool {
-	_, ok := a.world.Entity(e.RuntimeID())
+// AttackEntity attacks passed entity.
+func (a *Actor) AttackEntity(e world.Entity) bool {
+	ent, ok := a.world.Entity(e.RuntimeID())
 	if !ok {
+		return false
+	}
+
+	ctx := event.C(a)
+	if a.Handler().HandleAttack(ctx, ent); ctx.Cancelled() {
 		return false
 	}
 
@@ -92,6 +88,18 @@ func (a *Actor) Attack(e world.Entity) bool {
 	return true
 }
 
+// Attack attacks entity that Actor is looking at.
+func (a *Actor) Attack() bool {
+	ent, ok := a.EntityFromViewDirection(func(e world.Entity) bool {
+		_, isItem := e.(*entity.Item)
+		return !isItem
+	}, false)
+	if !ok {
+		return false
+	}
+	return a.AttackEntity(ent)
+}
+
 // Effects ...
 func (a *Actor) Effects() iter.Seq[effect.Effect] {
 	return a.effectManager.Effects()
@@ -104,11 +112,19 @@ func (a *Actor) Effect(e effect.Type) (effect.Effect, bool) {
 
 // AddEffect ...
 func (a *Actor) AddEffect(eff effect.Effect) {
+	ctx := event.C(a)
+	if a.Handler().HandleAddEffect(ctx, eff); ctx.Cancelled() {
+		return
+	}
 	a.effectManager.Add(eff)
 }
 
 // RemoveEffect ...
 func (a *Actor) RemoveEffect(eff effect.Type) {
+	ctx := event.C(a)
+	if a.Handler().HandleRemoveEffect(ctx, eff); ctx.Cancelled() {
+		return
+	}
 	a.effectManager.Remove(eff)
 }
 
@@ -138,6 +154,11 @@ func (a *Actor) HeldItem() item.Stack {
 
 // StartBreakingBlock starts breaking block at position passed and returns estimated break time.
 func (a *Actor) StartBreakingBlock(pos cube.Pos) (time.Duration, bool) {
+	ctx := event.C(a)
+	if a.Handler().HandleStartBreaking(ctx, pos); ctx.Cancelled() {
+		return math.MaxInt64, false
+	}
+
 	bl := a.World().Block(pos)
 	_, ok := bl.(block.Breakable)
 	if !ok {
@@ -226,8 +247,9 @@ func (a *Actor) Armour() *inventory.Armour {
 
 // Tick - simulates client tick.
 func (a *Actor) Tick() {
+	a.Handler().HandleTick(a, a.CurrentTick())
 	a.tickMovement()
-
+	a.tickNavigating()
 }
 
 // LookAt makes Actor look at the point.
@@ -255,7 +277,7 @@ func (a *Actor) LookAtBlock(pos cube.Pos) {
 
 // LookAtEntity makes Actor look at the entity passed.
 func (a *Actor) LookAtEntity(e world.Entity) {
-	a.LookAt(e.Position().Add(mgl64.Vec3{0, e.State().Box().Height()}))
+	a.LookAt(e.Position().Add(mgl64.Vec3{0, e.State().Box().Height() * (3 / 4)}))
 }
 
 // BlockFromViewDirection returns block, position & face of the block actor is looking at,
@@ -306,6 +328,59 @@ func (a *Actor) posFromView(r int) (w.Block, cube.Pos, cube.Face, mgl64.Vec3) {
 	return bl, currentPos, face, posOnBlock
 }
 
+// EntityFromViewDirection returns entity that player is looking at.
+func (a *Actor) EntityFromViewDirection(filter func(e world.Entity) bool, behindWall bool) (world.Entity, bool) {
+	start := a.EyePos()
+	end := a.Rotation().Vec3().Mul(4).Add(start)
+
+	var nearest world.Entity
+	var distanceToNearest = math.MaxFloat64
+	var entityResult trace.BBoxResult
+
+	trace.TraverseBlocks(start, end, func(pos cube.Pos) (con bool) {
+		for ent := range a.world.Entities() {
+			if filter != nil && !filter(ent) || ent.RuntimeID() == a.RuntimeID() {
+				continue
+			}
+			var ok bool
+
+			entityResult, ok = trace.BBoxIntercept(ent.State().Box().Translate(ent.Position()), start, end)
+			if !ok {
+				continue
+			}
+
+			distance := entityResult.Position().Sub(start).LenSqr()
+			if distance < distanceToNearest {
+				if !behindWall && a.CanInteractWithEntity(pos, start, end, ent) {
+					continue
+				}
+
+				distanceToNearest = distance
+				nearest = ent
+			}
+		}
+
+		found := nearest != nil
+
+		return !found
+	})
+	return nearest, nearest != nil
+}
+
+// CanInteractWithEntity ...
+func (a *Actor) CanInteractWithEntity(pos cube.Pos, start, end mgl64.Vec3, ent world.Entity) bool {
+	blockResult, blockOk := trace.BlockIntercept(pos, a.world, a.world.Block(pos), start, end)
+	if !blockOk {
+		return true
+	}
+	box := ent.State().Box().Translate(ent.Position())
+	boxResult, boxOk := trace.BBoxIntercept(box, start, end)
+	if !boxOk {
+		return false
+	}
+	return start.Sub(blockResult.Position()).LenSqr() > start.Sub(boxResult.Position()).LenSqr()
+}
+
 // Chat writes message to chat.
 func (a *Actor) Chat(message string) {
 	identity := a.conn.IdentityData()
@@ -317,8 +392,18 @@ func (a *Actor) Chat(message string) {
 	})
 }
 
+// ReceiveMessage ...
+func (a *Actor) ReceiveMessage(message string) {
+	a.Handler().HandleReceiveMessage(message)
+}
+
 // UseItem uses item in heldSlot.
 func (a *Actor) UseItem() {
+	ctx := event.C(a)
+	if a.Handler().HandleUseItem(ctx, a.HeldItem()); ctx.Cancelled() {
+		return
+	}
+
 	heldItem, _ := a.Inventory().ItemInstance(a.heldSlot)
 	action := &protocol.UseItemTransactionData{
 		ActionType: protocol.UseItemActionClickAir,
@@ -331,6 +416,11 @@ func (a *Actor) UseItem() {
 
 // UseItemOnBlock uses item in heldSlot on the block.
 func (a *Actor) UseItemOnBlock(pos cube.Pos, face cube.Face, clickPos mgl64.Vec3) {
+	ctx := event.C(a)
+	if a.Handler().HandleUseItemOnBlock(ctx, a.HeldItem(), pos); ctx.Cancelled() {
+		return
+	}
+
 	heldItem, _ := a.Inventory().ItemInstance(a.heldSlot)
 	action := &protocol.UseItemTransactionData{
 		HotBarSlot:      int32(a.heldSlot),
@@ -346,6 +436,11 @@ func (a *Actor) UseItemOnBlock(pos cube.Pos, face cube.Face, clickPos mgl64.Vec3
 
 // ReleaseItem stops using held item.
 func (a *Actor) ReleaseItem() {
+	ctx := event.C(a)
+	if a.Handler().HandleReleaseItem(ctx, a.HeldItem()); ctx.Cancelled() {
+		return
+	}
+
 	actionType := protocol.ReleaseItemActionRelease
 	it, _ := a.Inventory().Item(a.heldSlot)
 	if _, consumable := it.Item().(item.Consumable); consumable {
@@ -364,6 +459,11 @@ func (a *Actor) ReleaseItem() {
 
 // UseItemOnEntity uses held item on entity.
 func (a *Actor) UseItemOnEntity(e world.Entity) {
+	ctx := event.C(a)
+	if a.Handler().HandleUseItemOnEntity(ctx, a.HeldItem(), e); ctx.Cancelled() {
+		return
+	}
+
 	heldItem, _ := a.Inventory().ItemInstance(a.heldSlot)
 	action := &protocol.UseItemOnEntityTransactionData{
 		TargetEntityRuntimeID: e.RuntimeID(),

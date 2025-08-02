@@ -105,9 +105,8 @@ func (b *Bot) handlePacket(pk packet.Packet) {
 		return
 	}
 
-	b.Execute(func(a *actor.Actor) {
-		handler.Handle(pk, b, a)
-	})
+	// there is no need to call Bot.Execute() as it is running in the same goroutine anyway.
+	handler.Handle(pk, b, b.a)
 }
 
 // registerHandlers registers all packet handlers.
@@ -129,5 +128,6 @@ func (b *Bot) registerHandlers() {
 		packet.IDUpdateAttributes:            &UpdateAttributesHandler{},
 		packet.IDCorrectPlayerMovePrediction: &CorrectPlayerMovePredictionHandler{},
 		packet.IDRemoveActor:                 &RemoveActorHandler{},
+		packet.IDActorEvent:                  &ActorEventHandler{},
 	}
 }

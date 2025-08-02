@@ -1,8 +1,10 @@
 package actor
 
 import (
+	"github.com/FDUTCH/Pathfinder"
 	"github.com/df-mc/dragonfly/server/block/cube"
 	"github.com/df-mc/dragonfly/server/entity/effect"
+	"github.com/df-mc/dragonfly/server/event"
 	"github.com/df-mc/dragonfly/server/item"
 	"github.com/go-gl/mathgl/mgl32"
 	"github.com/go-gl/mathgl/mgl64"
@@ -22,6 +24,9 @@ type movementData struct {
 
 	sneaking, sprinting, swimming, crawling, gliding, immobile, onGround bool
 	movementBitset                                                       protocol.Bitset
+
+	path             *pathfind.Path
+	navigationTarget cube.Pos
 
 	mc *physics.Computer
 }
@@ -139,19 +144,29 @@ func (a *Actor) Speed() float64 {
 	// https://minecraft.wiki/w/Walking
 	mPerSecond := 4.317
 	mPerTick := mPerSecond / 20
+	// TODO swimming speed.
 	multiplier := a.Attributes().Speed() * 10
+	if !a.OnGround() && a.State().Sprinting() {
+		// sprinting does not affect air strafing.
+		multiplier /= 1.3
+	}
 	return mPerTick * multiplier
 }
 
 // Jump makes Actor jump.
 // for what ever reason it can not jump on the block.
 func (a *Actor) Jump() {
+	ctx := event.C(a)
+	if a.Handler().HandleJump(ctx); ctx.Cancelled() {
+		return
+	}
+
 	// TODO take into account sprinting.
 	if !a.OnGround() {
 		return
 	}
 	vel := a.Velocity()
-	jumpVel := 0.42
+	jumpVel := 0.52
 	if e, ok := a.Effect(effect.JumpBoost); ok {
 		jumpVel = jumpVel + float64(e.Level())/10
 	}
@@ -211,20 +226,17 @@ func (a *Actor) SendMovement() {
 
 // tickMovement simulates Actor's movement.
 func (a *Actor) tickMovement() {
+	defer a.clearMovement()
+
 	a.SendMovement()
 
-	movementTick := a.mc.TickMovement(a.State().Box(), a.Position(), a.Velocity(), a.World())
-	a.Move(movementTick.Position(), a.Rotation())
-	if movementTick.Velocity().LenSqr() < a.delta.LenSqr() && a.moving {
-		a.SetVelocity(a.delta)
-	} else {
-		a.SetVelocity(movementTick.Velocity())
-	}
-	a.delta = mgl64.Vec3{}
-	a.onGround = movementTick.OnGround()
+	physicsTick := a.tickPhysics()
+	a.Move(physicsTick.Position(), a.Rotation())
 
-	// resetting movementBitset every tick.
-	a.movementBitset = protocol.NewBitset(packet.PlayerAuthInputBitsetSize)
+	a.resolveVelocity(physicsTick.Velocity())
+
+	a.onGround = physicsTick.OnGround()
+
 	a.tick++
 }
 
@@ -269,26 +281,91 @@ func (a *Actor) AbortBreaking() {
 
 // Move directly moves Actor.
 func (a *Actor) Move(pos mgl64.Vec3, rot cube.Rotation) {
+	ctx := event.C(a)
+	if a.Handler().HandleMove(ctx, &rot, &pos); ctx.Cancelled() {
+		return
+	}
+
 	a.Player.Move(pos, rot)
 	a.delta = a.delta.Add(pos.Sub(a.Position()))
 }
 
-// MoveRawInput moves Actor according to Input.
-func (a *Actor) MoveRawInput(input movement.Input, deltaRotation cube.Rotation) {
-	// TODO implement gliding & swimming.
+// MoveRawInput moves Actor according to Input
+// should be called once in the tick.
+func (a *Actor) MoveRawInput(input movement.Input, deltaRotation cube.Rotation) bool {
+	ctx := event.C(a)
+	if a.Handler().HandleInput(ctx, &input); ctx.Cancelled() {
+		return false
+	}
+
+	if a.moving {
+		// cannot handle input twice.
+		return false
+	}
+
 	a.fillInput(input)
 	moveVec := input.MoveVector()
 	rotation := a.Rotation().Add(deltaRotation)
 	if moveVec.LenSqr() == 0 {
 		// just rotating.
 		a.Move(a.Position(), rotation)
-		return
+		return true
 	}
+
 	a.moving = true
+
+	var move mgl64.Vec3
+	switch {
+	case a.Gliding():
+		// gliding should be simulated by the physics package.
+	case a.Swimming():
+		move = a.swim(rotation)
+	default:
+		move = a.walk(moveVec, rotation)
+	}
+
+	newPos := a.moveLimit(move)
+	a.Move(newPos, rotation)
+
+	return true
+}
+
+// walk makes Actor simulate walking motion.
+func (a *Actor) walk(moveVec mgl64.Vec2, rotation cube.Rotation) mgl64.Vec3 {
+	// TODO implement 0.5 step.
 	moveVec = moveVec.Normalize()
 	move := mcmath.RotateVec2(moveVec, rotation.Yaw()).Mul(a.Speed())
-	dPos, _, _ := physics.CheckCollision(a.World(), a.State().Box(), a.Position(), mgl64.Vec3{move.X(), 0, move.Y()})
-	a.Move(dPos.Add(a.Position()), rotation)
+	return mgl64.Vec3{move.X(), 0, move.Y()}
+}
+
+// swim makes Actor simulate swimming motion.
+func (a *Actor) swim(rotation cube.Rotation) mgl64.Vec3 {
+	return rotation.Vec3().Mul(a.Speed())
+}
+
+// tickPhysics ...
+func (a *Actor) tickPhysics() *physics.Movement {
+	// TODO implement gliding & swimming simulation.
+	return a.mc.TickMovement(a.State().Box(), a.Position(), a.Velocity(), a.Rotation(), a.World())
+}
+
+// resolveVelocity ...
+func (a *Actor) resolveVelocity(vel mgl64.Vec3) {
+	if vel.LenSqr() < a.delta.LenSqr() && a.moving {
+		if !a.Gliding() && !a.Swimming() {
+			// walking does not affect vertical velocity.
+			a.delta[1] = vel.Y()
+		}
+		a.SetVelocity(a.delta)
+	} else {
+		a.SetVelocity(vel)
+	}
+}
+
+// moveLimit ...
+func (a *Actor) moveLimit(direction mgl64.Vec3) mgl64.Vec3 {
+	dPos, _, _ := physics.CheckCollision(a.World(), a.State().Box(), a.Position(), direction)
+	return dPos.Add(a.Position())
 }
 
 // fillInput fills input flags into movementBitset.
@@ -319,4 +396,11 @@ func (a *Actor) fillInput(input movement.Input) {
 	if input.Back {
 		a.movementBitset.Set(packet.InputFlagDown)
 	}
+}
+
+// clearMovement resets movement.
+func (a *Actor) clearMovement() {
+	a.moving = false
+	a.delta = mgl64.Vec3{}
+	a.movementBitset = protocol.NewBitset(packet.PlayerAuthInputBitsetSize)
 }
