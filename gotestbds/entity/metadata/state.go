@@ -67,6 +67,10 @@ func (s *State) Decode(meta protocol.EntityMetadata) {
 	if meta == nil {
 		return
 	}
+	// for some reason BDS can send empty metadata.
+	if _, found := meta[protocol.EntityDataKeyFlags]; !found {
+		meta[protocol.EntityDataKeyFlags] = int64(0)
+	}
 	s.sneaking = meta.Flag(protocol.EntityDataKeyFlags, protocol.EntityDataFlagSneaking)
 	s.sprinting = meta.Flag(protocol.EntityDataKeyFlags, protocol.EntityDataFlagSprinting)
 	s.swimming = meta.Flag(protocol.EntityDataKeyFlags, protocol.EntityDataFlagSwimming)

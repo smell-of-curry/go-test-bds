@@ -251,6 +251,7 @@ func (a *Actor) Tick() {
 	a.Handler().HandleTick(a, a.CurrentTick())
 	a.tickMovement()
 	a.tickNavigating()
+	a.unloadChunks()
 }
 
 // NearestEntity returns nearest to Actor entity and distance to it.
@@ -539,6 +540,38 @@ func (a *Actor) RunCommand(cmd string) {
 			PlayerUniqueID: a.conn.GameData().EntityUniqueID,
 		},
 	})
+}
+
+// SetChunkLoadCenter ...
+func (a *Actor) SetChunkLoadCenter(pos cube.Pos) {
+	a.loadingCenter = pos
+}
+
+// RequestRenderDistance ...
+func (a *Actor) RequestRenderDistance(chunkRadius int) {
+	_ = a.conn.WritePacket(&packet.RequestChunkRadius{ChunkRadius: int32(chunkRadius)})
+}
+
+// SetChunkRadius ...
+func (a *Actor) SetChunkRadius(chunkRadius int) {
+	a.chunkRadius = chunkRadius
+}
+
+// ChunkRadius ...
+func (a *Actor) ChunkRadius() int {
+	return a.chunkRadius
+}
+
+// unloadChunks ...
+func (a *Actor) unloadChunks() {
+	current := w.ChunkPos{int32(a.loadingCenter.X() >> 4), int32(a.loadingCenter.Z() >> 4)}
+	for pos := range a.world.Chunks() {
+		diffX, diffZ := pos[0]-current[0], pos[1]-current[1]
+		dist := math.Sqrt(float64(diffX*diffX) + float64(diffZ*diffZ))
+		if int(dist) > a.chunkRadius {
+			a.world.RemoveChunk(pos)
+		}
+	}
 }
 
 //go:linkname skinToProtocol github.com/df-mc/dragonfly/server/player/skin.skinToProtocol

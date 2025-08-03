@@ -13,6 +13,7 @@ type CorrectPlayerMovePredictionHandler struct{}
 // Handle ...
 func (*CorrectPlayerMovePredictionHandler) Handle(p packet.Packet, b *Bot, a *actor.Actor) {
 	// this is not correct logic.
+	b.logger.Warn("mismatched movement")
 	correct := p.(*packet.CorrectPlayerMovePrediction)
 	pos := mcmath.Vec32To64(correct.Position)
 	rot := cube.Rotation{float64(correct.Rotation[0]), float64(correct.Rotation[1])}

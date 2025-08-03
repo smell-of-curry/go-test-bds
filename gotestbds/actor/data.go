@@ -20,5 +20,8 @@ type actorData struct {
 	breakingTick  int
 	abortBreaking bool
 
+	chunkRadius   int
+	loadingCenter cube.Pos
+
 	movementData
 }

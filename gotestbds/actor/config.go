@@ -40,6 +40,7 @@ func (c Config) New() *Actor {
 		offhand:       c.Offhand,
 		armor:         c.Armour,
 		effectManager: entity.NewEffectManager(),
+		chunkRadius:   int(gameData.ChunkRadius),
 	}
 
 	data.movementBitset = protocol.NewBitset(packet.PlayerAuthInputBitsetSize)

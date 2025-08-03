@@ -29,6 +29,17 @@ func NewWorld() *World {
 	}
 }
 
+// Chunks returns all chunks.
+func (w *World) Chunks() iter.Seq2[world.ChunkPos, *chunk.Chunk] {
+	return func(yield func(world.ChunkPos, *chunk.Chunk) bool) {
+		for pos, ch := range w.chunks {
+			if !yield(pos, ch) {
+				return
+			}
+		}
+	}
+}
+
 // Entity ...
 func (w *World) Entity(rid uint64) (Entity, bool) {
 	ent, ok := w.entities[rid]
