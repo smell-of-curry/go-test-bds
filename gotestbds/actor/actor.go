@@ -253,6 +253,24 @@ func (a *Actor) Tick() {
 	a.tickNavigating()
 }
 
+// NearestEntity returns nearest to Actor entity and distance to it.
+func (a *Actor) NearestEntity(filter func(e world.Entity) bool) (world.Entity, float64, bool) {
+	var nearest world.Entity
+	var distanceToNearest = math.MaxFloat64
+	for ent := range a.world.Entities() {
+		if filter != nil && !filter(ent) || ent.RuntimeID() == a.RuntimeID() {
+			continue
+		}
+		// using squared distance for performance.
+		distance := ent.Position().Sub(a.Position()).LenSqr()
+		if distance < distanceToNearest {
+			nearest = ent
+			distanceToNearest = distance
+		}
+	}
+	return nearest, math.Sqrt(distanceToNearest), nearest != nil
+}
+
 // LookAt makes Actor look at the point.
 func (a *Actor) LookAt(point mgl64.Vec3) {
 	pos := a.EyePos()
@@ -485,7 +503,7 @@ func (a *Actor) useItem(data protocol.InventoryTransactionData) {
 	})
 }
 
-// Respawn respawn's the Actor.
+// Respawn respawns the Actor.
 func (a *Actor) Respawn() {
 	_ = a.conn.WritePacket(&packet.Respawn{
 		State:           packet.RespawnStateClientReadyToSpawn,

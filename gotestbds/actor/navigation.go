@@ -4,7 +4,6 @@ import (
 	pathfind "github.com/FDUTCH/Pathfinder"
 	"github.com/FDUTCH/Pathfinder/evaluator"
 	"github.com/df-mc/dragonfly/server/block/cube"
-	"github.com/smell-of-curry/go-test-bds/gotestbds/mcmath"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/mcmath/physics/movement"
 )
 
@@ -32,11 +31,10 @@ func (a *Actor) tickNavigating() {
 		return
 	}
 	path := a.path
-	destination := path.NextNode().Pos.Vec3Middle()
+	destination := path.NextNode().Pos
+	pos := cube.PosFromVec3(a.Position())
 
-	diff := a.Position().Sub(destination)
-	diff[1] = 0
-	if diff.Len() < 0.5 {
+	if pos == destination {
 		path.Advance()
 	}
 
@@ -54,13 +52,13 @@ func (a *Actor) tickNavigating() {
 	}
 
 	input := movement.Input{Forward: true}
-	if destination.Y() > a.Position().Y() {
+	if destination.Y() > pos.Y() {
 		input.Jump = true
 	}
-
+	pitch := a.Rotation().Pitch()
+	a.LookAtBlock(destination)
 	previousPosition := a.Position()
-	rot := mcmath.VectorToRotation(a.Position().Sub(destination))
-	if !a.MoveRawInput(input, a.Rotation().Add(rot.Neg())) {
+	if !a.MoveRawInput(input, cube.Rotation{0, pitch - a.Rotation().Pitch()}) {
 		return
 	}
 
