@@ -43,6 +43,18 @@ func (source *Handle) SetItem(slot int, it protocol.ItemInstance) error {
 	return nil
 }
 
+// Spend spends one item from the slot.
+// this function is only for internal usage.
+func (source *Handle) Spend(slot int) bool {
+	it, err := source.inv.Item(slot)
+	if err != nil {
+		return false
+	}
+
+	_ = source.inv.SetItem(slot, it.Grow(-1))
+	return !it.Empty()
+}
+
 // Item ...
 func (source *Handle) Item(slot int) (item.Stack, error) {
 	return source.inv.Item(slot)
