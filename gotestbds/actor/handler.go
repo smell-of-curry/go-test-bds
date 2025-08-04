@@ -27,7 +27,7 @@ type Handler interface {
 	HandleUseItemOnBlock(ctx *Context, item item.Stack, pos cube.Pos)
 	HandleUseItemOnEntity(ctx *Context, item item.Stack, ent world.Entity)
 	HandleReleaseItem(ctx *Context, item item.Stack)
-	HandleReceiveMessage(msg string)
+	HandleReceiveMessage(actor *Actor, msg string)
 	HandleReachTarget(actor *Actor)
 	HandleStopNavigation(actor *Actor)
 }
@@ -49,6 +49,6 @@ func (n NopHandler) HandleUseItem(ctx *Context, item item.Stack)                
 func (n NopHandler) HandleUseItemOnBlock(ctx *Context, item item.Stack, pos cube.Pos)      {}
 func (n NopHandler) HandleUseItemOnEntity(ctx *Context, item item.Stack, ent world.Entity) {}
 func (n NopHandler) HandleReleaseItem(ctx *Context, item item.Stack)                       {}
-func (n NopHandler) HandleReceiveMessage(msg string)                                       {}
+func (n NopHandler) HandleReceiveMessage(actor *Actor, msg string)                         {}
 func (n NopHandler) HandleReachTarget(actor *Actor)                                        {}
 func (n NopHandler) HandleStopNavigation(actor *Actor)                                     {}

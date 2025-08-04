@@ -414,7 +414,7 @@ func (a *Actor) Chat(message string) {
 
 // ReceiveMessage ...
 func (a *Actor) ReceiveMessage(message string) {
-	a.Handler().HandleReceiveMessage(message)
+	a.Handler().HandleReceiveMessage(a, message)
 }
 
 // UseItem uses item in heldSlot.

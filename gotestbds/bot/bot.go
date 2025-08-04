@@ -71,7 +71,7 @@ func (b *Bot) StartTickLoop() {
 		case task := <-b.tasks:
 			task(b.a)
 		case pk := <-b.packets:
-			b.handlePacket(pk)
+			b.HandlePacket(pk)
 		}
 	}
 }
@@ -98,8 +98,8 @@ func (b *Bot) handlePackets() {
 	}
 }
 
-// handlePacket handles incoming packet.
-func (b *Bot) handlePacket(pk packet.Packet) {
+// HandlePacket handles incoming packet.
+func (b *Bot) HandlePacket(pk packet.Packet) {
 	handler, ok := b.handlers[pk.ID()]
 	if !ok {
 		return

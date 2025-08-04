@@ -20,7 +20,8 @@ type Config struct {
 }
 
 // New creates new Actor.
-func (c Config) New() *Actor {
+func (c Config) New() (actor *Actor) {
+
 	identity := c.Conn.IdentityData()
 	gameData := c.Conn.GameData()
 
@@ -53,13 +54,16 @@ func (c Config) New() *Actor {
 
 	finaliseBlockRegistry()
 
-	return &Actor{
+	actor = &Actor{
 		conn:      c.Conn,
 		world:     w,
 		Player:    pl.(*entity.Player),
 		actorData: data,
 		h:         NopHandler{},
 	}
+	actor.prepare()
+
+	return actor
 }
 
 //go:linkname finaliseBlockRegistry github.com/df-mc/dragonfly/server/world.finaliseBlockRegistry
