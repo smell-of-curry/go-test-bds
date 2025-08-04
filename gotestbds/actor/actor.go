@@ -429,6 +429,7 @@ func (a *Actor) UseItem() {
 		ActionType: protocol.UseItemActionClickAir,
 		HotBarSlot: int32(a.heldSlot),
 		HeldItem:   heldItem,
+		BlockFace:  -1,
 	}
 
 	a.useItem(action)
@@ -572,6 +573,59 @@ func (a *Actor) unloadChunks() {
 			a.world.RemoveChunk(pos)
 		}
 	}
+}
+
+// PlaceBlock ...
+func (a *Actor) PlaceBlock(pos cube.Pos) bool {
+	held := a.HeldItem()
+	if held.Empty() {
+		return false
+	}
+
+	bl, ok := held.Item().(w.Block)
+	if !ok {
+		return false
+	}
+
+	supporter, ok := a.resolveBlockSupporter(pos)
+	if !ok {
+		return false
+	}
+
+	if !a.inv.Spend(a.heldSlot) {
+		return false
+	}
+
+	a.world.SetBlock(pos, bl)
+	a.UseItemOnBlock(supporter, supporter.Face(pos), mgl64.Vec3{})
+	return true
+}
+
+// resolveBlockSupporter tries to find block position on which Actor can place block.
+func (a *Actor) resolveBlockSupporter(pos cube.Pos) (cube.Pos, bool) {
+	// trying to resolve block from Actor's position.
+	start := a.EyePos()
+	destination := pos.Vec3Centre()
+	direction := destination.Sub(start)
+
+	var blockBehind cube.Pos
+	trace.TraverseBlocks(destination, destination.Add(direction), func(blockPos cube.Pos) (con bool) {
+		blockBehind = blockPos
+		return pos == blockPos
+	})
+
+	if len(a.world.Block(blockBehind).Model().BBox(blockBehind, a.world)) != 0 {
+		return blockBehind, true
+	}
+
+	// brute force search.
+	for _, face := range cube.Faces() {
+		blockPos := pos.Side(face)
+		if len(a.world.Block(blockPos).Model().BBox(blockPos, a.world)) != 0 {
+			return blockPos, true
+		}
+	}
+	return cube.Pos{}, false
 }
 
 //go:linkname skinToProtocol github.com/df-mc/dragonfly/server/player/skin.skinToProtocol
