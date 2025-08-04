@@ -19,8 +19,8 @@ func NewPull() *Pull {
 // UnmarshalJSON ...
 func (pull *Pull) UnmarshalJSON(data []byte) error {
 	var types []struct {
-		Type string          `json:"type"`
-		Data json.RawMessage `json:"data"`
+		Action     string          `json:"action"`
+		Parameters json.RawMessage `json:"parameters"`
 	}
 
 	if err := json.Unmarshal(data, &types); err != nil {
@@ -28,12 +28,12 @@ func (pull *Pull) UnmarshalJSON(data []byte) error {
 	}
 
 	for _, t := range types {
-		f, ok := pull.pull[t.Type]
+		f, ok := pull.pull[t.Action]
 		if !ok {
-			panic(fmt.Sprintf("unregistered instruction %v", t.Type))
+			panic(fmt.Sprintf("unregistered instruction %v", t.Action))
 		}
 		instruction := f()
-		err := json.Unmarshal(t.Data, instruction)
+		err := json.Unmarshal(t.Parameters, instruction)
 		if err != nil {
 			panic(err)
 		}
