@@ -5,10 +5,10 @@ import (
 	"fmt"
 )
 
-// Pull stores all instructions
+// Pull stores all instructions.
 type Pull struct {
-	pull         map[string]func() Instruction
-	instructions []Instruction
+	pull        map[string]func() Instruction
+	instruction Instruction
 }
 
 // NewPull ...
@@ -18,28 +18,26 @@ func NewPull() *Pull {
 
 // UnmarshalJSON ...
 func (pull *Pull) UnmarshalJSON(data []byte) error {
-	var types []struct {
+	var definition struct {
 		Action     string          `json:"action"`
 		Parameters json.RawMessage `json:"parameters"`
 	}
 
-	if err := json.Unmarshal(data, &types); err != nil {
+	if err := json.Unmarshal(data, &definition); err != nil {
 		return err
 	}
 
-	for _, t := range types {
-		f, ok := pull.pull[t.Action]
-		if !ok {
-			panic(fmt.Sprintf("unregistered instruction %v", t.Action))
-		}
-		instruction := f()
-		err := json.Unmarshal(t.Parameters, instruction)
-		if err != nil {
-			panic(err)
-		}
-
-		pull.instructions = append(pull.instructions, instruction)
+	f, ok := pull.pull[definition.Action]
+	if !ok {
+		return fmt.Errorf("unregistered instruction %v", definition.Action)
 	}
+	instruction := f()
+	err := json.Unmarshal(definition.Parameters, instruction)
+	if err != nil {
+		return err
+	}
+
+	pull.instruction = instruction
 
 	return nil
 }
@@ -50,12 +48,11 @@ func (pull *Pull) Register(f func() Instruction) {
 	pull.pull[i.Name()] = f
 }
 
-// NextInstruction ...
-func (pull *Pull) NextInstruction() (Instruction, bool) {
-	if len(pull.instructions) == 0 {
-		return nil, false
+// Decode ...
+func (pull *Pull) Decode(msg string) (Instruction, error) {
+	err := json.Unmarshal([]byte(msg), pull)
+	if err != nil {
+		return nil, err
 	}
-	instruction := pull.instructions[0]
-	pull.instructions = pull.instructions[1:]
-	return instruction, true
+	return pull.instruction, nil
 }

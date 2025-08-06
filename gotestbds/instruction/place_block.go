@@ -1,6 +1,7 @@
 package instruction
 
 import (
+	"context"
 	"github.com/df-mc/dragonfly/server/block/cube"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/actor"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/bot"
@@ -13,16 +14,12 @@ type PlaceBlock struct {
 
 // Name ...
 func (p *PlaceBlock) Name() string {
-	return "Place"
+	return "placeBlock"
 }
 
 // Run ...
-func (p *PlaceBlock) Run(b *bot.Bot) (succeed bool) {
-	ch := make(chan struct{})
-	b.Execute(func(actor *actor.Actor) {
-		succeed = actor.PlaceBlock(p.Pos)
-		close(ch)
+func (p *PlaceBlock) Run(_ context.Context, b *bot.Bot) error {
+	return execute(b, func(a *actor.Actor) error {
+		return a.PlaceBlock(p.Pos)
 	})
-	<-ch
-	return
 }

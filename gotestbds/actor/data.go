@@ -15,10 +15,11 @@ type actorData struct {
 
 	effectManager *entity.EffectManager
 
-	breakingBlock bool
-	breakingPos   cube.Pos
-	breakingTick  int
-	abortBreaking bool
+	breakingBlock    bool
+	breakingPos      cube.Pos
+	breakingTick     int
+	breakingCallback func(a *Actor, success bool)
+	abortBreaking    bool
 
 	chunkRadius   int
 	loadingCenter cube.Pos

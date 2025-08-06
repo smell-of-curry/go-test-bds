@@ -16,7 +16,7 @@ type Bot struct {
 	conn   Conn
 
 	handlers                  map[uint32]packetHandler
-	tasks                     chan func(actor *actor.Actor)
+	tasks                     chan task
 	pendingItemStackResponses map[int32]*inventory.History
 
 	currentRequestID int32
@@ -31,7 +31,7 @@ func NewBot(conn Conn, logger *slog.Logger) *Bot {
 		closed:                    make(chan struct{}),
 		conn:                      conn,
 		handlers:                  make(map[uint32]packetHandler),
-		tasks:                     make(chan func(actor *actor.Actor), 256),
+		tasks:                     make(chan task, 256),
 		pendingItemStackResponses: make(map[int32]*inventory.History),
 		packets:                   make(chan packet.Packet, 256),
 		logger:                    logger,
@@ -68,17 +68,23 @@ func (b *Bot) StartTickLoop() {
 			return
 		case <-ticker.C:
 			b.a.Tick()
-		case task := <-b.tasks:
-			task(b.a)
+		case t := <-b.tasks:
+			t.fn(b.a)
+			close(t.done)
 		case pk := <-b.packets:
 			b.HandlePacket(pk)
 		}
 	}
 }
 
-// Execute - executes task on the Actor.
-func (b *Bot) Execute(task func(*actor.Actor)) {
-	b.tasks <- task
+// Execute - executes fn on the Actor.
+func (b *Bot) Execute(fn func(*actor.Actor)) chan struct{} {
+	done := make(chan struct{})
+	b.tasks <- task{
+		fn:   fn,
+		done: done,
+	}
+	return done
 }
 
 // Conn ...
@@ -132,4 +138,10 @@ func (b *Bot) registerHandlers() {
 		packet.IDChunkRadiusUpdated:          &ChunkRadiusUpdatedHandler{},
 		packet.IDNetworkChunkPublisherUpdate: &NetworkChunkPublisherUpdateHandler{},
 	}
+}
+
+// task ...
+type task struct {
+	fn   func(a *actor.Actor)
+	done chan struct{}
 }

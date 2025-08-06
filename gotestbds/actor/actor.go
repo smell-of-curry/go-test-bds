@@ -154,7 +154,7 @@ func (a *Actor) HeldItem() item.Stack {
 }
 
 // StartBreakingBlock starts breaking block at position passed and returns estimated break time.
-func (a *Actor) StartBreakingBlock(pos cube.Pos) (time.Duration, bool) {
+func (a *Actor) StartBreakingBlock(pos cube.Pos, callback func(*Actor, bool)) (time.Duration, bool) {
 	ctx := event.C(a)
 	if a.Handler().HandleStartBreaking(ctx, pos); ctx.Cancelled() {
 		return math.MaxInt64, false
@@ -169,6 +169,7 @@ func (a *Actor) StartBreakingBlock(pos cube.Pos) (time.Duration, bool) {
 	a.abortBreaking = false
 	a.breakingBlock = true
 	a.breakingPos = pos
+	a.breakingCallback = callback
 	return a.breakTime(pos), true
 }
 
@@ -576,29 +577,29 @@ func (a *Actor) unloadChunks() {
 }
 
 // PlaceBlock ...
-func (a *Actor) PlaceBlock(pos cube.Pos) bool {
+func (a *Actor) PlaceBlock(pos cube.Pos) error {
 	held := a.HeldItem()
 	if held.Empty() {
-		return false
+		return fmt.Errorf("main hand is empty")
 	}
 
 	bl, ok := held.Item().(w.Block)
 	if !ok {
-		return false
+		return fmt.Errorf("held item is not a block")
 	}
 
 	supporter, ok := a.resolveBlockSupporter(pos)
 	if !ok {
-		return false
+		return fmt.Errorf("failed resolving support block")
 	}
 
 	if !a.inv.Spend(a.heldSlot) {
-		return false
+		return fmt.Errorf("unable to spend item in the main hand")
 	}
 
 	a.world.SetBlock(pos, bl)
 	a.UseItemOnBlock(supporter, supporter.Face(pos), mgl64.Vec3{})
-	return true
+	return nil
 }
 
 // resolveBlockSupporter tries to find block position on which Actor can place block.

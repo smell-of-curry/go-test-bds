@@ -1,6 +1,7 @@
 package gotestbds
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"github.com/sandertv/gophertunnel/minecraft"
@@ -8,6 +9,8 @@ import (
 	"github.com/smell-of-curry/go-test-bds/gotestbds/bot"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/instruction"
 	"log/slog"
+	"strings"
+	"time"
 )
 
 // RunTest runs tests.
@@ -26,15 +29,10 @@ func RunTest(addr string, dialer minecraft.Dialer, logger *slog.Logger, instruct
 	h := NewTestingHandler(instructionPull, b, logger).(*TestingHandler)
 	b.Execute(func(a *actor.Actor) {
 		a.Handle(h)
-
-		// broadcasting “ready” status.
-		// this should be handled on the server side.
-		data, _ := json.Marshal(struct {
-			Status string `json:"status"`
-		}{"ready"})
-		a.Chat(string(data))
 	})
-	return <-h.ch
+
+	b.StartTickLoop()
+	return nil
 }
 
 // TestingHandler ...
@@ -43,34 +41,49 @@ type TestingHandler struct {
 	pull   *instruction.Pull
 	b      *bot.Bot
 	logger *slog.Logger
-	ch     chan error
 }
 
 // NewTestingHandler ...
 func NewTestingHandler(pull *instruction.Pull, b *bot.Bot, logger *slog.Logger) actor.Handler {
-	return &TestingHandler{pull: pull, b: b, logger: logger, ch: make(chan error)}
+	return &TestingHandler{pull: pull, b: b, logger: logger}
 }
 
 // HandleReceiveMessage ...
-func (h *TestingHandler) HandleReceiveMessage(_ *actor.Actor, msg string) {
-	err := json.Unmarshal([]byte(msg), h.pull)
-	if err != nil {
-		h.logger.Error("error decoding message", "err", err)
-		return
+func (h *TestingHandler) HandleReceiveMessage(a *actor.Actor, msg string) {
+	actionData := strings.TrimPrefix(msg, "[RUN_ACTION]")
+	if actionData != msg {
+		go h.runAction(actionData)
 	}
-	go func() {
-		h.ch <- h.runInstructions()
-	}()
 }
 
-// runInstructions ...
-func (h *TestingHandler) runInstructions() error {
-	for i, ok := h.pull.NextInstruction(); ok; {
-		if i.Run(h.b) {
-			h.logger.Info("success running instruction", "instruction", i.Name())
-		} else {
-			return fmt.Errorf("error running instruction %v", i.Name())
-		}
+// runAction ...
+func (h *TestingHandler) runAction(data string) {
+	i, err := h.pull.Decode(data)
+	if err != nil {
+		broadcastStatus(StatusError, err.Error(), h.b)
+		h.logger.Error("error decoding instruction")
+		return
 	}
-	return nil
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*20)
+	defer cancel()
+	err = i.Run(ctx, h.b)
+
+	if err != nil {
+		broadcastStatus(StatusError, err.Error(), h.b)
+		h.logger.Error("error running instruction", "instruction", fmt.Sprintf("%#v", i))
+	} else {
+		broadcastStatus(StatusSuccess, "", h.b)
+	}
+}
+
+// broadcastStatus ...
+func broadcastStatus(status, message string, b *bot.Bot) {
+	b.Execute(func(a *actor.Actor) {
+		data, _ := json.Marshal(struct {
+			Status  string `json:"status"`
+			Message string `json:"message,omitempty"`
+		}{Status: status, Message: message})
+		a.Chat(StatusMessagePrefix + string(data))
+	})
 }

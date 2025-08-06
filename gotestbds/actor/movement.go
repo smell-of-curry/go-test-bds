@@ -2,6 +2,7 @@ package actor
 
 import (
 	"github.com/FDUTCH/Pathfinder"
+	"github.com/df-mc/dragonfly/server/block"
 	"github.com/df-mc/dragonfly/server/block/cube"
 	"github.com/df-mc/dragonfly/server/entity/effect"
 	"github.com/df-mc/dragonfly/server/event"
@@ -258,6 +259,10 @@ func (a *Actor) blockActions() []protocol.PlayerBlockAction {
 
 	if int(a.breakTime(a.breakingPos)/(time.Millisecond*50)) <= a.breakingTick {
 		action.Action = protocol.PlayerActionStopBreak
+		a.world.SetBlock(a.breakingPos, block.Air{})
+		if a.breakingCallback != nil {
+			a.breakingCallback(a, true)
+		}
 	}
 
 	if a.abortBreaking {
@@ -272,11 +277,15 @@ func (a *Actor) finishBreaking() {
 	a.breakingTick = 0
 	a.breakingBlock = false
 	a.abortBreaking = false
+	a.breakingCallback = nil
 }
 
 // AbortBreaking makes Actor cancel block breaking.
 func (a *Actor) AbortBreaking() {
 	a.abortBreaking = true
+	if a.breakingCallback != nil {
+		a.breakingCallback(a, false)
+	}
 }
 
 // Move directly moves Actor.
