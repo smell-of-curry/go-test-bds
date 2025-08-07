@@ -10,7 +10,8 @@ import (
 
 // BreakBlock ...
 type BreakBlock struct {
-	Pos cube.Pos `json:"pos"`
+	Callbacker Callbacker `json:"_"`
+	Pos        cube.Pos   `json:"pos"`
 }
 
 // Name ...
@@ -22,7 +23,8 @@ func (*BreakBlock) Name() string {
 func (action *BreakBlock) Run(ctx context.Context, b *bot.Bot) error {
 	breakCh := make(chan bool)
 	err := execute(b, func(a *actor.Actor) error {
-		_, ok := a.StartBreakingBlock(action.Pos, func(_ *actor.Actor, b bool) { breakCh <- b })
+		action.Callbacker.SetBreakingCallback(func(b bool) { breakCh <- b })
+		_, ok := a.StartBreakingBlock(action.Pos)
 		if !ok {
 			return fmt.Errorf("unbreakable block")
 		}

@@ -1,0 +1,42 @@
+package instruction
+
+import (
+	"context"
+	"fmt"
+	"github.com/df-mc/dragonfly/server/block/cube"
+	"github.com/smell-of-curry/go-test-bds/gotestbds/actor"
+	"github.com/smell-of-curry/go-test-bds/gotestbds/bot"
+)
+
+// NavigateToBlock ...
+type NavigateToBlock struct {
+	Callbacker Callbacker `json:"_"`
+	Pos        cube.Pos   `json:"pos"`
+}
+
+// Name ...
+func (*NavigateToBlock) Name() string {
+	return "navigateToBlock"
+}
+
+// Run ...
+func (n *NavigateToBlock) Run(ctx context.Context, b *bot.Bot) error {
+	navigateCh := make(chan bool)
+	_ = execute(b, func(a *actor.Actor) error {
+		n.Callbacker.SetNavigationCallback(func(b bool) { navigateCh <- b })
+		a.Navigate(n.Pos)
+		return nil
+	})
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case ok := <-navigateCh:
+		if !ok {
+			b.Execute(func(a *actor.Actor) { a.StopNavigating() })
+			return fmt.Errorf("unable to reach destination")
+		}
+	}
+
+	return nil
+}

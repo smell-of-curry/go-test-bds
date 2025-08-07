@@ -19,6 +19,7 @@ type Handler interface {
 	HandleInput(ctx *Context, input *movement.Input)
 	HandleStartBreaking(ctx *Context, pos cube.Pos)
 	HandleBreakBlock(ctx *Context, pos cube.Pos, block w.Block)
+	HandleAbortBreaking(ctx *Context, pos cube.Pos)
 	HandleAttack(ctx *Context, entity world.Entity)
 	HandleJump(ctx *Context)
 	HandleAddEffect(ctx *Context, eff effect.Effect)
@@ -41,6 +42,7 @@ func (n NopHandler) HandleMove(ctx *Context, rot *cube.Rotation, pos *mgl64.Vec3
 func (n NopHandler) HandleInput(ctx *Context, input *movement.Input)                       {}
 func (n NopHandler) HandleStartBreaking(ctx *Context, pos cube.Pos)                        {}
 func (n NopHandler) HandleBreakBlock(ctx *Context, pos cube.Pos, block w.Block)            {}
+func (n NopHandler) HandleAbortBreaking(ctx *Context, pos cube.Pos)                        {}
 func (n NopHandler) HandleAttack(ctx *Context, entity world.Entity)                        {}
 func (n NopHandler) HandleJump(ctx *Context)                                               {}
 func (n NopHandler) HandleAddEffect(ctx *Context, eff effect.Effect)                       {}

@@ -56,3 +56,41 @@ func (pull *Pull) Decode(msg string) (Instruction, error) {
 	}
 	return pull.instruction, nil
 }
+
+// DefaultPull returns new instance of default Pull.
+func DefaultPull(callbacker Callbacker) *Pull {
+	pull := NewPull()
+	pull.Register(create[Attack]())
+	pull.Register(create[AttackEntity]())
+	pull.Register(func() Instruction {
+		return &BreakBlock{Callbacker: callbacker}
+	})
+	pull.Register(create[Chat]())
+	pull.Register(create[Disconnect]())
+	pull.Register(create[DropSelectedItem]())
+	pull.Register(create[Interact]())
+	pull.Register(create[InteractWithBlock]())
+	pull.Register(create[Jump]())
+	pull.Register(create[LookAtBlock]())
+	pull.Register(create[LookAtEntity]())
+	pull.Register(create[LookAtLocation]())
+	pull.Register(create[MoveRawInput]())
+	pull.Register(func() Instruction {
+		return &NavigateToBlock{Callbacker: callbacker}
+	})
+	pull.Register(create[PlaceBlock]())
+	pull.Register(create[Respawn]())
+	pull.Register(create[Rotate]())
+	pull.Register(create[SetHeldSlot]())
+	pull.Register(create[StopBreakingBlock]())
+	pull.Register(create[StopNavigating]())
+	pull.Register(create[StopUsingItem]())
+	return pull
+}
+
+// create creates new instance of the Instruction.
+func create[T any]() func() Instruction {
+	return func() Instruction {
+		return any(new(T)).(Instruction)
+	}
+}

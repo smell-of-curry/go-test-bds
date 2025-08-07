@@ -41,6 +41,7 @@ type TestingHandler struct {
 	pull   *instruction.Pull
 	b      *bot.Bot
 	logger *slog.Logger
+	callbacks
 }
 
 // NewTestingHandler ...

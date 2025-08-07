@@ -258,13 +258,17 @@ func (a *Actor) blockActions() []protocol.PlayerBlockAction {
 	a.breakingTick++
 
 	if int(a.breakTime(a.breakingPos)/(time.Millisecond*50)) <= a.breakingTick {
+		ctx := event.C(a)
+		if a.Handler().HandleBreakBlock(ctx, a.breakingPos, a.world.Block(a.breakingPos)); ctx.Cancelled() {
+			goto continueBreaking
+		}
+
 		action.Action = protocol.PlayerActionStopBreak
 		a.world.SetBlock(a.breakingPos, block.Air{})
-		if a.breakingCallback != nil {
-			a.breakingCallback(a, true)
-		}
+		a.finishBreaking()
 	}
 
+continueBreaking:
 	if a.abortBreaking {
 		a.finishBreaking()
 		action.Action = protocol.PlayerActionAbortBreak
@@ -277,15 +281,15 @@ func (a *Actor) finishBreaking() {
 	a.breakingTick = 0
 	a.breakingBlock = false
 	a.abortBreaking = false
-	a.breakingCallback = nil
 }
 
 // AbortBreaking makes Actor cancel block breaking.
 func (a *Actor) AbortBreaking() {
-	a.abortBreaking = true
-	if a.breakingCallback != nil {
-		a.breakingCallback(a, false)
+	ctx := event.C(a)
+	if a.Handler().HandleAbortBreaking(ctx, a.breakingPos); ctx.Cancelled() {
+		return
 	}
+	a.abortBreaking = true
 }
 
 // Move directly moves Actor.

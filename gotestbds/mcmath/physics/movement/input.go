@@ -4,12 +4,12 @@ import "github.com/go-gl/mathgl/mgl64"
 
 // Input simulates keystrokes.
 type Input struct {
-	Forward bool
-	Back    bool
-	Left    bool
-	Right   bool
-	Jump    bool
-	Sneak   bool
+	Forward bool `json:"forward"`
+	Back    bool `json:"back"`
+	Left    bool `json:"left"`
+	Right   bool `json:"right"`
+	Jump    bool `json:"jump"`
+	Sneak   bool `json:"sneak"`
 }
 
 // MoveVector calculates move vector from Input.

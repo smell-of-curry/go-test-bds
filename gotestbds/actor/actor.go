@@ -153,8 +153,13 @@ func (a *Actor) HeldItem() item.Stack {
 	return it
 }
 
+// HeldSlot ...
+func (a *Actor) HeldSlot() int {
+	return a.heldSlot
+}
+
 // StartBreakingBlock starts breaking block at position passed and returns estimated break time.
-func (a *Actor) StartBreakingBlock(pos cube.Pos, callback func(*Actor, bool)) (time.Duration, bool) {
+func (a *Actor) StartBreakingBlock(pos cube.Pos) (time.Duration, bool) {
 	ctx := event.C(a)
 	if a.Handler().HandleStartBreaking(ctx, pos); ctx.Cancelled() {
 		return math.MaxInt64, false
@@ -169,7 +174,6 @@ func (a *Actor) StartBreakingBlock(pos cube.Pos, callback func(*Actor, bool)) (t
 	a.abortBreaking = false
 	a.breakingBlock = true
 	a.breakingPos = pos
-	a.breakingCallback = callback
 	return a.breakTime(pos), true
 }
 
