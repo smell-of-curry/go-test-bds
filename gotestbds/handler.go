@@ -4,13 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
+	"strings"
+	"time"
+
 	"github.com/sandertv/gophertunnel/minecraft"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/actor"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/bot"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/instruction"
-	"log/slog"
-	"strings"
-	"time"
 )
 
 // RunTest runs tests.
@@ -42,11 +43,23 @@ type TestingHandler struct {
 	b      *bot.Bot
 	logger *slog.Logger
 	callbacks
+
+	cancelForms bool
 }
 
 // NewTestingHandler ...
 func NewTestingHandler(pull *instruction.Pull, b *bot.Bot, logger *slog.Logger) actor.Handler {
-	return &TestingHandler{pull: pull, b: b, logger: logger}
+	_, ok1 := pull.Instruction("customFormRespond")
+	_, ok2 := pull.Instruction("menuFormRespond")
+	_, ok3 := pull.Instruction("modalFormRespond")
+
+	return &TestingHandler{
+		pull:   pull,
+		b:      b,
+		logger: logger,
+
+		cancelForms: ok1 || ok2 || ok3,
+	}
 }
 
 // HandleReceiveMessage ...
@@ -75,6 +88,13 @@ func (h *TestingHandler) runAction(data string) {
 		h.logger.Error("error running instruction", "instruction", fmt.Sprintf("%#v", i))
 	} else {
 		broadcastStatus(StatusSuccess, "", h.b)
+	}
+}
+
+// HandleReceiveForm ...
+func (h *TestingHandler) HandleReceiveForm(ctx *actor.Context, form *actor.Form) {
+	if h.cancelForms {
+		ctx.Cancel()
 	}
 }
 

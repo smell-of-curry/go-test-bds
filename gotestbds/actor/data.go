@@ -23,5 +23,7 @@ type actorData struct {
 	chunkRadius   int
 	loadingCenter cube.Pos
 
+	lastForm *Form
+
 	movementData
 }

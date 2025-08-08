@@ -27,11 +27,10 @@ func (pull *Pull) UnmarshalJSON(data []byte) error {
 		return err
 	}
 
-	f, ok := pull.pull[definition.Action]
+	instruction, ok := pull.Instruction(definition.Action)
 	if !ok {
 		return fmt.Errorf("unregistered instruction %v", definition.Action)
 	}
-	instruction := f()
 	err := json.Unmarshal(definition.Parameters, instruction)
 	if err != nil {
 		return err
@@ -40,6 +39,15 @@ func (pull *Pull) UnmarshalJSON(data []byte) error {
 	pull.instruction = instruction
 
 	return nil
+}
+
+// Instruction ...
+func (pull *Pull) Instruction(name string) (Instruction, bool) {
+	f, ok := pull.pull[name]
+	if !ok {
+		return nil, false
+	}
+	return f(), true
 }
 
 // Register registers Instructions.
@@ -85,6 +93,9 @@ func DefaultPull(callbacker Callbacker) *Pull {
 	pull.Register(create[StopBreakingBlock]())
 	pull.Register(create[StopNavigating]())
 	pull.Register(create[StopUsingItem]())
+	pull.Register(create[CustomFormRespond]())
+	pull.Register(create[MenuFormRespond]())
+	pull.Register(create[ModalFormRespond]())
 	return pull
 }
 

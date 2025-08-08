@@ -68,21 +68,28 @@ func (f *Form) Title() string {
 }
 
 // CustomFormContent ...
-func (f *Form) CustomFormContent() *Content {
-	return &f.f.Content
+func (f *Form) CustomFormContent() (*Content, bool) {
+	if f.Type() != FormTypeCustom {
+		return nil, false
+	}
+	return &f.f.Content, true
 }
 
 // MenuFormButtons ...
-func (f *Form) MenuFormButtons() []Button {
-	return f.f.Buttons
+func (f *Form) MenuFormButtons() ([]Button, bool) {
+	if f.Type() != FormTypeMenu {
+		return nil, false
+	}
+	return f.f.Buttons, true
 }
 
 // ModalFormButtons ...
-func (f *Form) ModalFormButtons() (yes *Button, no *Button) {
-	return &f.f.Button1, &f.f.Button2
+func (f *Form) ModalFormButtons() (yes *Button, no *Button, ok bool) {
+	if f.Type() != FormTypeModal {
+		return
+	}
+	return &f.f.Button1, &f.f.Button2, true
 }
-
-// formInternals ...
 
 // Ignore ...
 func (f *Form) Ignore() error {
@@ -120,6 +127,7 @@ func (f *Form) submit(data any) error {
 	return f.conn.WritePacket(response)
 }
 
+// formInternals ...
 type formInternals struct {
 	customForm
 	menuForm

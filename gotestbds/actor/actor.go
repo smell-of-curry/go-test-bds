@@ -428,7 +428,17 @@ func (a *Actor) ReceiveForm(form *Form) {
 	a.Handler().HandleReceiveForm(ctx, form)
 	if !form.used && !ctx.Cancelled() {
 		_ = form.Ignore()
+	} else {
+		a.lastForm = form
 	}
+}
+
+// LastForm ...
+func (a *Actor) LastForm() (*Form, bool) {
+	if a.lastForm == nil || a.lastForm.used {
+		return nil, false
+	}
+	return a.lastForm, true
 }
 
 // UseItem uses item in heldSlot.
