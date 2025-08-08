@@ -1,6 +1,8 @@
 package actor
 
 import (
+	"time"
+
 	"github.com/FDUTCH/Pathfinder"
 	"github.com/df-mc/dragonfly/server/block"
 	"github.com/df-mc/dragonfly/server/block/cube"
@@ -14,7 +16,6 @@ import (
 	"github.com/smell-of-curry/go-test-bds/gotestbds/mcmath"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/mcmath/physics"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/mcmath/physics/movement"
-	"time"
 )
 
 // movementData ...
@@ -259,7 +260,7 @@ func (a *Actor) blockActions() []protocol.PlayerBlockAction {
 
 	if int(a.breakTime(a.breakingPos)/(time.Millisecond*50)) <= a.breakingTick {
 		ctx := event.C(a)
-		if a.Handler().HandleBreakBlock(ctx, a.breakingPos, a.world.Block(a.breakingPos)); ctx.Cancelled() {
+		if a.Handler().HandleBlockBreak(ctx, a.breakingPos, a.world.Block(a.breakingPos)); ctx.Cancelled() {
 			goto continueBreaking
 		}
 

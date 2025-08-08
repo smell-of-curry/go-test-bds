@@ -161,7 +161,7 @@ func (a *Actor) HeldSlot() int {
 // StartBreakingBlock starts breaking block at position passed and returns estimated break time.
 func (a *Actor) StartBreakingBlock(pos cube.Pos) (time.Duration, bool) {
 	ctx := event.C(a)
-	if a.Handler().HandleStartBreaking(ctx, pos); ctx.Cancelled() {
+	if a.Handler().HandleStartBreak(ctx, pos); ctx.Cancelled() {
 		return math.MaxInt64, false
 	}
 
@@ -420,6 +420,15 @@ func (a *Actor) Chat(message string) {
 // ReceiveMessage ...
 func (a *Actor) ReceiveMessage(message string) {
 	a.Handler().HandleReceiveMessage(a, message)
+}
+
+// ReceiveForm ...
+func (a *Actor) ReceiveForm(form *Form) {
+	ctx := event.C(a)
+	a.Handler().HandleReceiveForm(ctx, form)
+	if !form.used && !ctx.Cancelled() {
+		_ = form.Ignore()
+	}
 }
 
 // UseItem uses item in heldSlot.

@@ -1,12 +1,13 @@
 package bot
 
 import (
+	"log/slog"
+	"time"
+
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/actor"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/inventory"
-	"log/slog"
-	"time"
 )
 
 // Bot handles server packets and Actor's actions.
@@ -137,6 +138,7 @@ func (b *Bot) registerHandlers() {
 		packet.IDActorEvent:                  &ActorEventHandler{},
 		packet.IDChunkRadiusUpdated:          &ChunkRadiusUpdatedHandler{},
 		packet.IDNetworkChunkPublisherUpdate: &NetworkChunkPublisherUpdateHandler{},
+		packet.IDModalFormRequest:            &ModalFormRequestHandler{},
 	}
 }
 

@@ -12,7 +12,7 @@ type callbacks struct {
 }
 
 // HandleBreakBlock ...
-func (h *TestingHandler) HandleBreakBlock(ctx *actor.Context, pos cube.Pos, block w.Block) {
+func (h *TestingHandler) HandleBlockBreak(ctx *actor.Context, pos cube.Pos, block w.Block) {
 	if h.breakingCallback != nil {
 		h.breakingCallback(true)
 		h.breakingCallback = nil
