@@ -11,7 +11,7 @@ type callbacks struct {
 	navigatingCallback func(bool)
 }
 
-// HandleBreakBlock ...
+// HandleBlockBreak ...
 func (h *TestingHandler) HandleBlockBreak(ctx *actor.Context, pos cube.Pos, block w.Block) {
 	if h.breakingCallback != nil {
 		h.breakingCallback(true)
