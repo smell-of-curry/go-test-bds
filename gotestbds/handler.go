@@ -51,8 +51,6 @@ func (h *TestingHandler) HandleReceiveMessage(a *actor.Actor, msg string) {
 	actionData := strings.TrimPrefix(msg, ActionHeader)
 	if actionData != msg {
 		go h.runAction(actionData)
-	} else {
-		fmt.Println(actionData)
 	}
 }
 
