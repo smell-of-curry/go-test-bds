@@ -1,5 +1,7 @@
 github.com/FDUTCH/Pathfinder v0.0.0-20250802000749-2bc6b6bbf97d h1:yuTlZAv/bsI1W3nBolot76/t/JW+V2uW3iSFgEdbYxw=
 github.com/FDUTCH/Pathfinder v0.0.0-20250802000749-2bc6b6bbf97d/go.mod h1:YRPk4ibigBecymgR9Sebo48t8JQD2QDxNxWggGzYQbM=
+github.com/FDUTCH/dummy_item_blocks v0.0.0-20250723120814-3e58bad00d1e h1:65vE2n7mqVCa+R444/kN36KmuAmcUxcN5UB4+PX3Ciw=
+github.com/FDUTCH/dummy_item_blocks v0.0.0-20250723120814-3e58bad00d1e/go.mod h1:0UaxOQJtX1QdBG/8zkrBRdVJAjKbQCrH4i2ckbMXMYY=
 github.com/brentp/intintmap v0.0.0-20190211203843-30dc0ade9af9 h1:/G0ghZwrhou0Wq21qc1vXXMm/t/aKWkALWwITptKbE0=
 github.com/brentp/intintmap v0.0.0-20190211203843-30dc0ade9af9/go.mod h1:TOk10ahXejq9wkEaym3KPRNeuR/h5Jx+s8QRWIa2oTM=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=

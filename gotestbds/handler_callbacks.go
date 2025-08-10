@@ -6,6 +6,7 @@ import (
 	"github.com/smell-of-curry/go-test-bds/gotestbds/actor"
 )
 
+// callbacks allows instruction to await for certain action to accomplish.
 type callbacks struct {
 	breakingCallback   func(bool)
 	navigatingCallback func(bool)

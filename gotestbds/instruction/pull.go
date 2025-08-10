@@ -9,11 +9,12 @@ import (
 type Pull struct {
 	pull        map[string]func() Instruction
 	instruction Instruction
+	Callbacker
 }
 
 // NewPull ...
 func NewPull() *Pull {
-	return &Pull{pull: make(map[string]func() Instruction)}
+	return &Pull{pull: make(map[string]func() Instruction), Callbacker: NopCallbacker{}}
 }
 
 // UnmarshalJSON ...
@@ -68,6 +69,9 @@ func (pull *Pull) Decode(msg string) (Instruction, error) {
 // DefaultPull returns new instance of default Pull.
 func DefaultPull(callbacker Callbacker) *Pull {
 	pull := NewPull()
+	if callbacker == nil {
+		callbacker = pull
+	}
 	pull.Register(create[Attack]())
 	pull.Register(create[AttackEntity]())
 	pull.Register(func() Instruction {
@@ -96,6 +100,7 @@ func DefaultPull(callbacker Callbacker) *Pull {
 	pull.Register(create[CustomFormRespond]())
 	pull.Register(create[MenuFormRespond]())
 	pull.Register(create[ModalFormRespond]())
+	pull.Register(create[RunCommand]())
 	return pull
 }
 

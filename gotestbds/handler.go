@@ -3,38 +3,19 @@ package gotestbds
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
 	"time"
 
-	"github.com/sandertv/gophertunnel/minecraft"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/actor"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/bot"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/instruction"
 )
 
-// RunTest runs tests.
-func RunTest(addr string, dialer minecraft.Dialer, logger *slog.Logger, instructionPull *instruction.Pull) error {
-	conn, err := dialer.Dial("raknet", addr)
-	if err != nil {
-		return err
-	}
-
-	err = conn.DoSpawn()
-	if err != nil {
-		return err
-	}
-
-	b := bot.NewBot(conn, logger)
-	h := NewTestingHandler(instructionPull, b, logger).(*TestingHandler)
-	b.Execute(func(a *actor.Actor) {
-		a.Handle(h)
-	})
-
-	b.StartTickLoop()
-	return nil
-}
+// ActionHeader ...
+const ActionHeader = "[RUN_ACTION]"
 
 // TestingHandler ...
 type TestingHandler struct {
@@ -53,20 +34,25 @@ func NewTestingHandler(pull *instruction.Pull, b *bot.Bot, logger *slog.Logger) 
 	_, ok2 := pull.Instruction("menuFormRespond")
 	_, ok3 := pull.Instruction("modalFormRespond")
 
-	return &TestingHandler{
+	handler := &TestingHandler{
 		pull:   pull,
 		b:      b,
 		logger: logger,
 
 		cancelForms: ok1 || ok2 || ok3,
 	}
+	pull.Callbacker = handler
+
+	return handler
 }
 
 // HandleReceiveMessage ...
 func (h *TestingHandler) HandleReceiveMessage(a *actor.Actor, msg string) {
-	actionData := strings.TrimPrefix(msg, "[RUN_ACTION]")
+	actionData := strings.TrimPrefix(msg, ActionHeader)
 	if actionData != msg {
 		go h.runAction(actionData)
+	} else {
+		fmt.Println(actionData)
 	}
 }
 
@@ -84,8 +70,12 @@ func (h *TestingHandler) runAction(data string) {
 	err = i.Run(ctx, h.b)
 
 	if err != nil {
-		broadcastStatus(StatusError, err.Error(), h.b)
 		h.logger.Error("error running instruction", "instruction", fmt.Sprintf("%#v", i))
+		if errors.Is(err, context.DeadlineExceeded) {
+			broadcastStatus(StatusTimeOut, err.Error(), h.b)
+			return
+		}
+		broadcastStatus(StatusError, err.Error(), h.b)
 	} else {
 		broadcastStatus(StatusSuccess, "", h.b)
 	}

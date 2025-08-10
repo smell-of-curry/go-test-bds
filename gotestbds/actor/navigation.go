@@ -30,6 +30,12 @@ func (a *Actor) tickNavigating() {
 	if !a.Navigating() {
 		return
 	}
+
+	if a.path.Count() == 0 {
+		a.StopNavigating()
+		return
+	}
+
 	path := a.path
 	destination := path.NextNode().Pos
 	pos := cube.PosFromVec3(a.Position())

@@ -30,6 +30,9 @@ func (n *NavigateToBlock) Run(ctx context.Context, b *bot.Bot) error {
 
 	select {
 	case <-ctx.Done():
+		b.Execute(func(a *actor.Actor) {
+			a.StopNavigating()
+		})
 		return ctx.Err()
 	case ok := <-navigateCh:
 		if !ok {

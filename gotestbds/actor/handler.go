@@ -57,21 +57,21 @@ var _ Handler = NopHandler{}
 
 type NopHandler struct{}
 
-func (n NopHandler) HandleTick(actor *Actor, tick uint64)                                  {}
-func (n NopHandler) HandleMove(ctx *Context, rot *cube.Rotation, pos *mgl64.Vec3)          {}
-func (n NopHandler) HandleInput(ctx *Context, input *movement.Input)                       {}
-func (n NopHandler) HandleStartBreak(ctx *Context, pos cube.Pos)                           {}
-func (n NopHandler) HandleBlockBreak(ctx *Context, pos cube.Pos, block w.Block)            {}
-func (n NopHandler) HandleAbortBreaking(ctx *Context, pos cube.Pos)                        {}
-func (n NopHandler) HandleAttack(ctx *Context, entity world.Entity)                        {}
-func (n NopHandler) HandleJump(ctx *Context)                                               {}
-func (n NopHandler) HandleAddEffect(ctx *Context, eff effect.Effect)                       {}
-func (n NopHandler) HandleRemoveEffect(ctx *Context, eff effect.Type)                      {}
-func (n NopHandler) HandleUseItem(ctx *Context, item item.Stack)                           {}
-func (n NopHandler) HandleUseItemOnBlock(ctx *Context, item item.Stack, pos cube.Pos)      {}
-func (n NopHandler) HandleUseItemOnEntity(ctx *Context, item item.Stack, ent world.Entity) {}
-func (n NopHandler) HandleReleaseItem(ctx *Context, item item.Stack)                       {}
-func (n NopHandler) HandleReceiveMessage(actor *Actor, msg string)                         {}
-func (n NopHandler) HandleReceiveForm(ctx *Context, form *Form)                            {}
-func (n NopHandler) HandleReachTarget(actor *Actor)                                        {}
-func (n NopHandler) HandleStopNavigation(actor *Actor)                                     {}
+func (NopHandler) HandleTick(actor *Actor, tick uint64)                                  {}
+func (NopHandler) HandleMove(ctx *Context, rot *cube.Rotation, pos *mgl64.Vec3)          {}
+func (NopHandler) HandleInput(ctx *Context, input *movement.Input)                       {}
+func (NopHandler) HandleStartBreak(ctx *Context, pos cube.Pos)                           {}
+func (NopHandler) HandleBlockBreak(ctx *Context, pos cube.Pos, block w.Block)            {}
+func (NopHandler) HandleAbortBreaking(ctx *Context, pos cube.Pos)                        {}
+func (NopHandler) HandleAttack(ctx *Context, entity world.Entity)                        {}
+func (NopHandler) HandleJump(ctx *Context)                                               {}
+func (NopHandler) HandleAddEffect(ctx *Context, eff effect.Effect)                       {}
+func (NopHandler) HandleRemoveEffect(ctx *Context, eff effect.Type)                      {}
+func (NopHandler) HandleUseItem(ctx *Context, item item.Stack)                           {}
+func (NopHandler) HandleUseItemOnBlock(ctx *Context, item item.Stack, pos cube.Pos)      {}
+func (NopHandler) HandleUseItemOnEntity(ctx *Context, item item.Stack, ent world.Entity) {}
+func (NopHandler) HandleReleaseItem(ctx *Context, item item.Stack)                       {}
+func (NopHandler) HandleReceiveMessage(actor *Actor, msg string)                         {}
+func (NopHandler) HandleReceiveForm(ctx *Context, form *Form)                            {}
+func (NopHandler) HandleReachTarget(actor *Actor)                                        {}
+func (NopHandler) HandleStopNavigation(actor *Actor)                                     {}

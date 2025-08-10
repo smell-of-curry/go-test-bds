@@ -139,6 +139,7 @@ func (b *Bot) registerHandlers() {
 		packet.IDChunkRadiusUpdated:          &ChunkRadiusUpdatedHandler{},
 		packet.IDNetworkChunkPublisherUpdate: &NetworkChunkPublisherUpdateHandler{},
 		packet.IDModalFormRequest:            &ModalFormRequestHandler{},
+		packet.IDText:                        &TextHandler{},
 	}
 }
 
