@@ -1,12 +1,13 @@
 package world
 
 import (
+	"iter"
+	"maps"
+
 	"github.com/df-mc/dragonfly/server/block"
 	"github.com/df-mc/dragonfly/server/block/cube"
 	"github.com/df-mc/dragonfly/server/world"
 	"github.com/df-mc/dragonfly/server/world/chunk"
-	"iter"
-	"maps"
 )
 
 // World stores all entities & blocks.
@@ -50,8 +51,11 @@ func (w *World) Entity(rid uint64) (Entity, bool) {
 func (w *World) AddEntity(ent Entity) {
 	w.entities[ent.RuntimeID()] = ent
 	if ent.Type() == "minecraft:player" {
-		name := ent.(interface{ Name() string }).Name()
-		w.players[name] = ent
+		name, ok := ent.(interface{ Name() string })
+		if !ok {
+			return
+		}
+		w.players[name.Name()] = ent
 	}
 }
 
