@@ -15,13 +15,36 @@ GoTestBDS is a designed to be a complete end-to-end testing framework for Minecr
 - [x] Smooth Navigation simulation
 - [x] Full UI and Form Automation
 
-## Installation
+## Example
+```go
+package main
 
-...
+import (
+	"context"
+	"log/slog"
 
-## Writing Tests
+	"github.com/FDUTCH/dummy_item_blocks/dummy"
+	"github.com/sandertv/gophertunnel/minecraft"
+	"github.com/smell-of-curry/go-test-bds/gotestbds"
+)
 
-...
+func main() {
+	//This is recommended so that the bot has more information about the blocks, making its actions more accurate.
+	dummy.Register()
+
+	err := gotestbds.Test{
+		Dialer: minecraft.Dialer{
+			// your Dialer settings
+		},
+		RemoteAddress: "your_server.com:19132",
+		Logger:        slog.Default(),
+	}.RunCtx(context.Background())
+	
+	if err != nil {
+		slog.Error(err.Error())
+	}
+}
+```
 
 ## License
 
