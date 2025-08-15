@@ -2,20 +2,23 @@ package bot
 
 import (
 	"bytes"
+	"fmt"
+	_ "unsafe"
+
 	"github.com/df-mc/dragonfly/server/world"
 	"github.com/df-mc/dragonfly/server/world/chunk"
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/actor"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/internal"
-	_ "unsafe"
+	"github.com/smell-of-curry/go-test-bds/gotestbds/util"
 )
 
 // SubChunkHandler updates subchunk it the Actor's world.
 type SubChunkHandler struct{}
 
 // Handle ...
-func (*SubChunkHandler) Handle(p packet.Packet, b *Bot, a *actor.Actor) {
+func (*SubChunkHandler) Handle(p packet.Packet, b *Bot, a *actor.Actor) error {
 	subChunk := p.(*packet.SubChunk)
 	pos := subChunk.Position
 	dim, _ := world.DimensionByID(int(subChunk.Dimension))
@@ -27,6 +30,8 @@ func (*SubChunkHandler) Handle(p packet.Packet, b *Bot, a *actor.Actor) {
 		buf.Reset()
 		internal.BufferPool.Put(buf)
 	}()
+
+	var errors []error
 
 	// Credit: https://github.com/oomph-ac/oomph/blob/3ad077131b68cd30a5fcab4daa835f3e134a49e7/player/component/acknowledgement/chunks.go#L65
 	for _, entry := range subChunk.SubChunkEntries {
@@ -50,11 +55,12 @@ func (*SubChunkHandler) Handle(p packet.Packet, b *Bot, a *actor.Actor) {
 		var index byte
 		decodedSC, err := decodeSubChunk(buf, c, &index, chunk.NetworkEncoding)
 		if err != nil {
-			b.logger.Error("error decoding subchunk", "error", err)
+			errors = append(errors, fmt.Errorf("error decoding subchunk, err: %w", err))
 			continue
 		}
 		c.Sub()[index] = decodedSC
 	}
+	return util.MultiError(errors...)
 }
 
 //go:linkname decodeSubChunk github.com/df-mc/dragonfly/server/world/chunk.decodeSubChunk

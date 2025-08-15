@@ -2,6 +2,7 @@ package bot
 
 import (
 	"fmt"
+
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/actor"
 )
@@ -10,20 +11,15 @@ import (
 type InventorySlotHandler struct{}
 
 // Handle ...
-func (*InventorySlotHandler) Handle(p packet.Packet, b *Bot, a *actor.Actor) {
+func (*InventorySlotHandler) Handle(p packet.Packet, b *Bot, a *actor.Actor) error {
 	inventorySlot := p.(*packet.InventorySlot)
 
 	slot := int(inventorySlot.Slot)
 
 	inv := b.invByID(inventorySlot.WindowID)
 	if inv == nil {
-		b.logger.Error("unable to process InventorySlot packet", "err", fmt.Errorf("unknown windowID %d", inventorySlot.WindowID))
-		return
+		return fmt.Errorf("unknown windowID %d", inventorySlot.WindowID)
 	}
 
-	err := inv.SetItem(slot, inventorySlot.NewItem)
-	if err != nil {
-		b.logger.Error("unable to process InventorySlot packet", "err", err)
-		return
-	}
+	return inv.SetItem(slot, inventorySlot.NewItem)
 }

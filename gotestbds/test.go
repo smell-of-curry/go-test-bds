@@ -14,10 +14,11 @@ import (
 // Test allows specifying specific settings for testing on the Minecraft server.
 // For optimal results, adjust the movement correction and block breaking settings on the server to be as mild as possible.
 type Test struct {
-	Dialer        minecraft.Dialer
-	RemoteAddress string
-	Logger        *slog.Logger
-	Instructions  *instruction.Pull
+	Dialer            minecraft.Dialer
+	RemoteAddress     string
+	Logger            *slog.Logger
+	Instructions      *instruction.Pull
+	InstructionPrefix string
 }
 
 // Run runs test.
@@ -33,6 +34,10 @@ func (t Test) RunCtx(ctx context.Context) error {
 
 	if t.Instructions == nil {
 		t.Instructions = instruction.DefaultPull(nil)
+	}
+
+	if t.InstructionPrefix == "" {
+		t.InstructionPrefix = DefaultInstructionPrefix
 	}
 
 	conn, err := t.Dialer.DialContext(ctx, "raknet", t.RemoteAddress)
@@ -57,6 +62,10 @@ func (t Test) RunCtx(ctx context.Context) error {
 	time.Sleep(time.Second * 2)
 	b.StartTickLoop()
 	return nil
+}
+
+func (t Test) rejoin() {
+
 }
 
 // RunTest ...

@@ -22,6 +22,9 @@ type Handle struct {
 
 // NewHandle ...
 func NewHandle(size int, containerID uint32, actionWriter ActionWriter) *Handle {
+	if actionWriter == nil {
+		actionWriter = NopActionWriter{}
+	}
 	return &Handle{
 		inv:          inventory.New(size, nil),
 		stackIds:     make([]int32, size),
@@ -247,6 +250,12 @@ func (source *Handle) Destroy(slot, count int) {
 type ActionWriter interface {
 	WriteInventoryAction(action protocol.StackRequestAction, changes *History)
 }
+
+// NopActionWriter ...
+type NopActionWriter struct{}
+
+// WriteInventoryAction ...
+func (n NopActionWriter) WriteInventoryAction(_ protocol.StackRequestAction, _ *History) {}
 
 // History is a record of changes.
 type History struct {

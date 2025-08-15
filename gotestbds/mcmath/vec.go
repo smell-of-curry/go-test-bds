@@ -1,10 +1,11 @@
 package mcmath
 
 import (
+	"math"
+
 	"github.com/df-mc/dragonfly/server/block/cube"
 	"github.com/go-gl/mathgl/mgl32"
 	"github.com/go-gl/mathgl/mgl64"
-	"math"
 )
 
 // Vec32To64 ...
@@ -47,4 +48,29 @@ func VectorToRotation(direction mgl64.Vec3) cube.Rotation {
 	}
 
 	return cube.Rotation{yaw, pitch}
+}
+
+// NearestPosOnBox returns nearest point to pos on the box surface.
+func NearestPosOnBox(box cube.BBox, pos mgl64.Vec3) mgl64.Vec3 {
+	var result mgl64.Vec3
+
+	minVec := box.Min()
+	maxVec := box.Max()
+
+	for i := range result {
+		result[i] = MiddleOrExtreme(minVec[i], maxVec[i], pos[i])
+	}
+
+	return result
+}
+
+// MiddleOrExtreme returns nearest to wanted with bounds.
+func MiddleOrExtreme(min, max, wanted float64) float64 {
+	if wanted >= min && wanted <= max {
+		return wanted
+	}
+	if wanted <= min {
+		return min
+	}
+	return max
 }

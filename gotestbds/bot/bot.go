@@ -1,6 +1,7 @@
 package bot
 
 import (
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -42,6 +43,7 @@ func NewBot(conn Conn, logger *slog.Logger) *Bot {
 		Inventory: inventory.NewHandle(36, protocol.ContainerInventory, bot),
 		Offhand:   inventory.NewHandle(1, protocol.ContainerOffhand, bot),
 		Armour:    inventory.NewArmour(bot),
+		Ui:        inventory.NewHandle(54, protocol.ContainerCursor, bot),
 	}.New()
 	bot.registerHandlers()
 
@@ -113,7 +115,13 @@ func (b *Bot) HandlePacket(pk packet.Packet) {
 	}
 
 	// there is no need to call Bot.Execute() as it is running in the same goroutine anyway.
-	handler.Handle(pk, b, b.a)
+	err := handler.Handle(pk, b, b.a)
+	if err != nil {
+		b.logger.Error("error handling packet",
+			"packet", fmt.Sprintf("%T", pk),
+			"error", err,
+		)
+	}
 }
 
 // registerHandlers registers all packet handlers.
@@ -140,6 +148,8 @@ func (b *Bot) registerHandlers() {
 		packet.IDNetworkChunkPublisherUpdate: &NetworkChunkPublisherUpdateHandler{},
 		packet.IDModalFormRequest:            &ModalFormRequestHandler{},
 		packet.IDText:                        &TextHandler{},
+		packet.IDMobArmourEquipment:          &MobArmourEquipmentHandler{},
+		packet.IDMobEquipment:                &MobEquipmentHandler{},
 	}
 }
 

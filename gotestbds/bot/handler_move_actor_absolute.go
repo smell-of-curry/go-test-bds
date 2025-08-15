@@ -11,7 +11,7 @@ import (
 type MoveActorAbsoluteHandler struct{}
 
 // Handle ...
-func (m MoveActorAbsoluteHandler) Handle(p packet.Packet, b *Bot, a *actor.Actor) {
+func (m MoveActorAbsoluteHandler) Handle(p packet.Packet, b *Bot, a *actor.Actor) error {
 	moveActorAbsolute := p.(*packet.MoveActorAbsolute)
 	ent, ok := a.World().Entity(moveActorAbsolute.EntityRuntimeID)
 
@@ -28,4 +28,5 @@ func (m MoveActorAbsoluteHandler) Handle(p packet.Packet, b *Bot, a *actor.Actor
 	if ok {
 		ent.Move(mcmath.Vec32To64(moveActorAbsolute.Position), rot)
 	}
+	return nil
 }

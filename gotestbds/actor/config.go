@@ -1,6 +1,8 @@
 package actor
 
 import (
+	_ "unsafe"
+
 	"github.com/google/uuid"
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
@@ -8,7 +10,6 @@ import (
 	"github.com/smell-of-curry/go-test-bds/gotestbds/inventory"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/mcmath/physics"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/world"
-	_ "unsafe"
 )
 
 // Config ...
@@ -17,6 +18,7 @@ type Config struct {
 	Inventory *inventory.Handle
 	Offhand   *inventory.Handle
 	Armour    *inventory.Armour
+	Ui        *inventory.Handle
 }
 
 // New creates new Actor.

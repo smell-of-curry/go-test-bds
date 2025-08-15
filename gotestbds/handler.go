@@ -14,8 +14,8 @@ import (
 	"github.com/smell-of-curry/go-test-bds/gotestbds/instruction"
 )
 
-// ActionHeader ...
-const ActionHeader = "[RUN_ACTION]"
+// DefaultInstructionPrefix ...
+const DefaultInstructionPrefix = "[RUN_ACTION]"
 
 // TestingHandler ...
 type TestingHandler struct {
@@ -25,30 +25,32 @@ type TestingHandler struct {
 	logger *slog.Logger
 	callbacks
 
+	t Test
+
 	cancelForms bool
 }
 
 // NewTestingHandler ...
-func NewTestingHandler(pull *instruction.Pull, b *bot.Bot, logger *slog.Logger) actor.Handler {
-	_, ok1 := pull.Instruction("customFormRespond")
-	_, ok2 := pull.Instruction("menuFormRespond")
-	_, ok3 := pull.Instruction("modalFormRespond")
+func NewTestingHandler(b *bot.Bot, t Test) actor.Handler {
+	_, ok1 := t.Instructions.Instruction("customFormRespond")
+	_, ok2 := t.Instructions.Instruction("menuFormRespond")
+	_, ok3 := t.Instructions.Instruction("modalFormRespond")
 
 	handler := &TestingHandler{
-		pull:   pull,
+		pull:   t.Instructions,
 		b:      b,
-		logger: logger,
+		logger: t.Logger,
 
 		cancelForms: ok1 || ok2 || ok3,
 	}
-	pull.Callbacker = handler
+	handler.pull.Callbacker = handler
 
 	return handler
 }
 
 // HandleReceiveMessage ...
 func (h *TestingHandler) HandleReceiveMessage(a *actor.Actor, msg string) {
-	actionData := strings.TrimPrefix(msg, ActionHeader)
+	actionData := strings.TrimPrefix(msg, h.t.InstructionPrefix)
 	if actionData != msg {
 		go h.runAction(actionData)
 	}

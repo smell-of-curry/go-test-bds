@@ -12,14 +12,12 @@ import (
 type UpdateBlockHandler struct{}
 
 // Handle ...
-func (*UpdateBlockHandler) Handle(p packet.Packet, b *Bot, a *actor.Actor) {
+func (*UpdateBlockHandler) Handle(p packet.Packet, b *Bot, a *actor.Actor) error {
 	updateBlock := p.(*packet.UpdateBlock)
-	if updateBlock.Layer != 0 {
-		return
-	}
 
 	bl, _ := world.BlockByRuntimeID(updateBlock.NewBlockRuntimeID)
-	a.World().SetBlock(blockPosToCubePos(updateBlock.Position), bl)
+	a.World().SetBlockOnTheLayer(blockPosToCubePos(updateBlock.Position), bl, updateBlock.Layer)
+	return nil
 }
 
 func blockPosToCubePos(pos protocol.BlockPos) cube.Pos {

@@ -12,6 +12,7 @@ type actorData struct {
 	inv      *inventory.Handle
 	offhand  *inventory.Handle
 	armor    *inventory.Armour
+	ui       *inventory.Handle
 
 	effectManager *entity.EffectManager
 

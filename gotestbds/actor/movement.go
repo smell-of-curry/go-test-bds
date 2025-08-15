@@ -86,7 +86,7 @@ func (a *Actor) Swimming() bool {
 
 // StartSwimming ...
 func (a *Actor) StartSwimming() {
-	if a.CanSprint() {
+	if a.CanSprint() && a.InsideOfWater() {
 		a.movementBitset.Set(packet.InputFlagStartSwimming)
 		a.swimming = true
 	}
@@ -258,7 +258,7 @@ func (a *Actor) blockActions() []protocol.PlayerBlockAction {
 	}
 	a.breakingTick++
 
-	if int(a.breakTime(a.breakingPos)/(time.Millisecond*50)) <= a.breakingTick {
+	if int(a.BreakTime(a.breakingPos)/(time.Millisecond*50)) <= a.breakingTick {
 		ctx := event.C(a)
 		if a.Handler().HandleBlockBreak(ctx, a.breakingPos, a.world.Block(a.breakingPos)); ctx.Cancelled() {
 			goto continueBreaking

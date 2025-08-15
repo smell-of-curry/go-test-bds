@@ -10,9 +10,10 @@ import (
 type NetworkChunkPublisherUpdateHandler struct{}
 
 // Handle ...
-func (*NetworkChunkPublisherUpdateHandler) Handle(p packet.Packet, b *Bot, a *actor.Actor) {
+func (*NetworkChunkPublisherUpdateHandler) Handle(p packet.Packet, b *Bot, a *actor.Actor) error {
 	pk := p.(*packet.NetworkChunkPublisherUpdate)
 	pos := pk.Position
 	a.SetChunkLoadCenter(cube.Pos{int(pos[0]), int(pos[1]), int(pos[2])})
 	a.SetChunkRadius(int(pk.Radius << 4))
+	return nil
 }

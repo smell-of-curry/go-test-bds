@@ -3,6 +3,7 @@ package instruction
 import (
 	"context"
 	"fmt"
+
 	"github.com/df-mc/dragonfly/server/block/cube"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/actor"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/bot"
@@ -24,9 +25,9 @@ func (action *BreakBlock) Run(ctx context.Context, b *bot.Bot) error {
 	breakCh := make(chan bool)
 	err := execute(b, func(a *actor.Actor) error {
 		action.Callbacker.SetBreakingCallback(func(b bool) { breakCh <- b })
-		_, ok := a.StartBreakingBlock(action.Pos)
-		if !ok {
-			return fmt.Errorf("unbreakable block")
+		_, err := a.StartBreakingBlock(action.Pos)
+		if err != nil {
+			return fmt.Errorf("unable to start breaking block err: %w", err)
 		}
 		return nil
 	})

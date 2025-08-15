@@ -12,7 +12,7 @@ import (
 type LevelChunkHandler struct{}
 
 // Handle ...
-func (*LevelChunkHandler) Handle(p packet.Packet, b *Bot, a *actor.Actor) {
+func (*LevelChunkHandler) Handle(p packet.Packet, b *Bot, a *actor.Actor) error {
 	levelChunk := p.(*packet.LevelChunk)
 
 	dim, ok := world.DimensionByID(int(levelChunk.Dimension))
@@ -39,6 +39,7 @@ func (*LevelChunkHandler) Handle(p packet.Packet, b *Bot, a *actor.Actor) {
 		Position:  protocol.SubChunkPos{levelChunk.Position.X(), int32(dimensionRange.Min() >> 4), levelChunk.Position.Z()},
 		Offsets:   offsets,
 	})
+	return err
 }
 
 func init() {

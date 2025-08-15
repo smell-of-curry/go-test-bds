@@ -10,7 +10,7 @@ import (
 type ItemStackResponseHandler struct{}
 
 // Handle ...
-func (*ItemStackResponseHandler) Handle(p packet.Packet, b *Bot, a *actor.Actor) {
+func (*ItemStackResponseHandler) Handle(p packet.Packet, b *Bot, a *actor.Actor) error {
 	itemStackResponse := p.(*packet.ItemStackResponse)
 	for _, response := range itemStackResponse.Responses {
 		if response.Status == protocol.ItemStackResponseStatusError {
@@ -19,4 +19,5 @@ func (*ItemStackResponseHandler) Handle(p packet.Packet, b *Bot, a *actor.Actor)
 		}
 		delete(b.pendingItemStackResponses, response.RequestID)
 	}
+	return nil
 }

@@ -15,6 +15,8 @@ func (b *Bot) invByID(id uint32) *inventory.Handle {
 		return b.a.Offhand()
 	case protocol.WindowIDArmour:
 		return b.a.Armour().Inventory()
+	case protocol.WindowIDUI:
+		return b.a.UiInv()
 	}
 	return nil
 }

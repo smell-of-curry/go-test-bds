@@ -52,10 +52,9 @@ func (w *World) AddEntity(ent Entity) {
 	w.entities[ent.RuntimeID()] = ent
 	if ent.Type() == "minecraft:player" {
 		name, ok := ent.(interface{ Name() string })
-		if !ok {
-			return
+		if ok {
+			w.players[name.Name()] = ent
 		}
-		w.players[name.Name()] = ent
 	}
 }
 
@@ -63,8 +62,10 @@ func (w *World) AddEntity(ent Entity) {
 func (w *World) RemoveEntity(ent Entity) {
 	delete(w.entities, ent.RuntimeID())
 	if ent.Type() == "minecraft:player" {
-		name := ent.(interface{ Name() string }).Name()
-		delete(w.players, name)
+		name, ok := ent.(interface{ Name() string })
+		if ok {
+			delete(w.players, name.Name())
+		}
 	}
 }
 
@@ -138,6 +139,11 @@ func (w *World) chunk(pos world.ChunkPos) *chunk.Chunk {
 // SetBlock writes a block to the position passed. If a chunk is not yet loaded
 // at that position, operation will be ignored.
 func (w *World) SetBlock(pos cube.Pos, b world.Block) {
+	w.SetBlockOnTheLayer(pos, b, 0)
+}
+
+// SetBlockOnTheLayer ...
+func (w *World) SetBlockOnTheLayer(pos cube.Pos, b world.Block, layer uint32) {
 	c := w.chunk(chunkPosFromBlockPos(pos))
 	if c == nil || pos.OutOfBounds(c.Range()) {
 		return
@@ -145,7 +151,7 @@ func (w *World) SetBlock(pos cube.Pos, b world.Block) {
 	rid := world.BlockRuntimeID(b)
 	x, y, z := uint8(pos[0]), int16(pos[1]), uint8(pos[2])
 
-	c.SetBlock(x, y, z, 0, rid)
+	c.SetBlock(x, y, z, uint8(layer), rid)
 }
 
 // chunkPosFromBlockPos ...
