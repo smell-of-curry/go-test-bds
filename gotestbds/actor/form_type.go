@@ -11,13 +11,13 @@ const (
 
 // modalForm ...
 type modalForm struct {
-	Button1 Button `json:"button1"`
-	Button2 Button `json:"button2"`
+	Button1 FormButton `json:"button1"`
+	Button2 FormButton `json:"button2"`
 }
 
 // menuForm ...
 type menuForm struct {
-	Buttons []Button `json:"buttons"`
+	Buttons []FormButton `json:"buttons"`
 }
 
 // customForm ...

@@ -53,7 +53,7 @@ func (t Test) RunCtx(ctx context.Context) error {
 	t.Logger.Debug("spawned", "address", t.RemoteAddress)
 
 	b := bot.NewBot(conn, t.Logger.With("src", "bot"))
-	h := NewTestingHandler(t.Instructions, b, t.Logger.With("src", "testing"))
+	h := NewTestingHandler(b, t)
 	b.Execute(func(a *actor.Actor) {
 		a.Handle(h)
 	})

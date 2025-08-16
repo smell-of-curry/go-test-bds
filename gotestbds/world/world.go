@@ -4,6 +4,8 @@ import (
 	"iter"
 	"maps"
 
+	_ "unsafe"
+
 	"github.com/df-mc/dragonfly/server/block"
 	"github.com/df-mc/dragonfly/server/block/cube"
 	"github.com/df-mc/dragonfly/server/world"
@@ -16,9 +18,9 @@ type World struct {
 	players  map[string]Entity
 
 	currentChunkPos world.ChunkPos
-	currentChunk    *chunk.Chunk
+	currentChunk    *Column
 
-	chunks map[world.ChunkPos]*chunk.Chunk
+	chunks map[world.ChunkPos]*Column
 }
 
 // NewWorld ...
@@ -26,7 +28,7 @@ func NewWorld() *World {
 	return &World{
 		entities: make(map[uint64]Entity),
 		players:  make(map[string]Entity),
-		chunks:   make(map[world.ChunkPos]*chunk.Chunk),
+		chunks:   make(map[world.ChunkPos]*Column),
 	}
 }
 
@@ -34,7 +36,7 @@ func NewWorld() *World {
 func (w *World) Chunks() iter.Seq2[world.ChunkPos, *chunk.Chunk] {
 	return func(yield func(world.ChunkPos, *chunk.Chunk) bool) {
 		for pos, ch := range w.chunks {
-			if !yield(pos, ch) {
+			if !yield(pos, ch.Chunk) {
 				return
 			}
 		}
@@ -80,13 +82,13 @@ func (w *World) Entities() iter.Seq[Entity] {
 }
 
 // Chunk ...
-func (w *World) Chunk(pos world.ChunkPos) (*chunk.Chunk, bool) {
+func (w *World) Chunk(pos world.ChunkPos) (*Column, bool) {
 	ch, ok := w.chunks[pos]
 	return ch, ok
 }
 
 // AddChunk ...
-func (w *World) AddChunk(pos world.ChunkPos, c *chunk.Chunk) {
+func (w *World) AddChunk(pos world.ChunkPos, c *Column) {
 	w.chunks[pos] = c
 }
 
@@ -120,13 +122,19 @@ func (w *World) block(pos cube.Pos, layer uint8) world.Block {
 		return block.Air{}
 	}
 	rid := c.Block(uint8(pos[0]), int16(pos[1]), uint8(pos[2]), layer)
+	if layer == 0 && nbtBlocks[rid] {
+		bl, ok := c.BlockEntities[pos]
+		if ok {
+			return bl
+		}
+	}
 
 	bl, _ := world.BlockByRuntimeID(rid)
 	return bl
 }
 
 // chunk returns *chunk.Chunk or nil.
-func (w *World) chunk(pos world.ChunkPos) *chunk.Chunk {
+func (w *World) chunk(pos world.ChunkPos) *Column {
 	if w.currentChunkPos == pos {
 		return w.currentChunk
 	}
@@ -150,6 +158,9 @@ func (w *World) SetBlockOnTheLayer(pos cube.Pos, b world.Block, layer uint32) {
 	}
 	rid := world.BlockRuntimeID(b)
 	x, y, z := uint8(pos[0]), int16(pos[1]), uint8(pos[2])
+	if layer == 0 && nbtBlocks[rid] {
+		c.BlockEntities[pos] = b
+	}
 
 	c.SetBlock(x, y, z, uint8(layer), rid)
 }
@@ -158,3 +169,6 @@ func (w *World) SetBlockOnTheLayer(pos cube.Pos, b world.Block, layer uint32) {
 func chunkPosFromBlockPos(p cube.Pos) world.ChunkPos {
 	return world.ChunkPos{int32(p[0] >> 4), int32(p[2] >> 4)}
 }
+
+//go:linkname nbtBlocks github.com/df-mc/dragonfly/server/world.nbtBlocks
+var nbtBlocks []bool

@@ -31,3 +31,14 @@ func (e ErrToFarAway) Error() string {
 	}
 	return fmt.Sprintf("%T is too far away", e.Subject)
 }
+
+// ErrGamemodeRequired ...
+type ErrGamemodeRequired struct {
+	Action           string
+	RequiredGamemode world.GameMode
+}
+
+// Error ...
+func (g ErrGamemodeRequired) Error() string {
+	return fmt.Sprintf("unable to perform %s action, %T gamemode required", g.Action, g.RequiredGamemode)
+}

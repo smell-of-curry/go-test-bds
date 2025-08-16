@@ -46,6 +46,11 @@ func (source *Handle) SetItem(slot int, it protocol.ItemInstance) error {
 	return nil
 }
 
+// ID ...
+func (source *Handle) ID() uint32 {
+	return source.containerID
+}
+
 // Spend spends one item from the slot.
 // this function is only for internal usage.
 func (source *Handle) Spend(slot int) bool {

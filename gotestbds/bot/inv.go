@@ -17,11 +17,15 @@ func (b *Bot) invByID(id uint32) *inventory.Handle {
 		return b.a.Armour().Inventory()
 	case protocol.WindowIDUI:
 		return b.a.UiInv()
+	case b.currentContainerID:
+		if b.currentContainer != nil {
+			return b.currentContainer.Inventory()
+		}
 	}
 	return nil
 }
 
-// WriteInventoryAction ...
+// WriteInventoryAction implement inventory.ActionWriter.
 func (b *Bot) WriteInventoryAction(action protocol.StackRequestAction, changes *inventory.History) {
 	// decrementing currentRequestID by 2, cause that's how vanilla client does it.
 	b.currentRequestID -= 2

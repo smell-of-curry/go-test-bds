@@ -23,6 +23,9 @@ type Bot struct {
 
 	currentRequestID int32
 
+	currentContainerID uint32
+	currentContainer   *actor.Container
+
 	packets chan packet.Packet
 	logger  *slog.Logger
 }
@@ -90,7 +93,7 @@ func (b *Bot) Execute(fn func(*actor.Actor)) chan struct{} {
 	return done
 }
 
-// Conn ...
+// Conn returns network connection.
 func (b *Bot) Conn() Conn {
 	return b.conn
 }
@@ -150,6 +153,10 @@ func (b *Bot) registerHandlers() {
 		packet.IDText:                        &TextHandler{},
 		packet.IDMobArmourEquipment:          &MobArmourEquipmentHandler{},
 		packet.IDMobEquipment:                &MobEquipmentHandler{},
+		packet.IDBlockActorData:              &BlockActorDataHandler{},
+		packet.IDOpenSign:                    &OpenSignHandler{},
+		packet.IDNPCDialogue:                 &NpcDialogueHandler{},
+		packet.IDContainerOpen:               &ContainerOpenHandler{},
 	}
 }
 

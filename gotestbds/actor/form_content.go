@@ -44,17 +44,17 @@ func (c *Content) UnmarshalJSON(data []byte) error {
 		var formElement FormElement
 		switch element.Type {
 		case "label":
-			formElement = &Label{}
+			formElement = &FormLabel{}
 		case "input":
-			formElement = &Input{}
+			formElement = &FormInput{}
 		case "toggle":
-			formElement = &Toggle{}
+			formElement = &FormToggle{}
 		case "slider":
-			formElement = &Slider{}
+			formElement = &FormSlider{}
 		case "dropdown":
-			formElement = &DropDown{}
+			formElement = &FormDropDown{}
 		case "step_slider":
-			formElement = &StepSlider{}
+			formElement = &FormStepSlider{}
 		default:
 			return fmt.Errorf("unknown element %s", elem)
 		}

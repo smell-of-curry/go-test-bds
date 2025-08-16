@@ -17,6 +17,9 @@ func MultiError(errors ...error) error {
 
 	var errs = make([]string, 0, len(errors))
 	for _, err := range errors {
+		if err == nil {
+			continue
+		}
 		errs = append(errs, err.Error())
 	}
 

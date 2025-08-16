@@ -1,11 +1,16 @@
 package bot
 
 import (
-	"github.com/df-mc/dragonfly/server/world"
+	"bytes"
+
+	"github.com/df-mc/dragonfly/server/block/cube"
+	w "github.com/df-mc/dragonfly/server/world"
 	"github.com/df-mc/dragonfly/server/world/chunk"
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/actor"
+	"github.com/smell-of-curry/go-test-bds/gotestbds/util"
+	"github.com/smell-of-curry/go-test-bds/gotestbds/world"
 )
 
 // LevelChunkHandler adds new chunk to Actor's world.
@@ -15,39 +20,38 @@ type LevelChunkHandler struct{}
 func (*LevelChunkHandler) Handle(p packet.Packet, b *Bot, a *actor.Actor) error {
 	levelChunk := p.(*packet.LevelChunk)
 
-	dim, ok := world.DimensionByID(int(levelChunk.Dimension))
+	dim, ok := w.DimensionByID(int(levelChunk.Dimension))
 	if !ok {
-		dim = world.Overworld
+		dim = w.Overworld
 	}
 
 	dimensionRange := dim.Range()
+	buf := bytes.NewBuffer(levelChunk.RawPayload)
+	var blockEntities []chunk.BlockEntity
 
-	ch, err := chunk.NetworkDecode(airRid, levelChunk.RawPayload, int(levelChunk.SubChunkCount), dimensionRange)
-	if err != nil {
+	ch, err := chunk.NetworkDecodeBuffer(airRid, buf, int(levelChunk.SubChunkCount), dimensionRange)
+	if err == nil {
+		// reading one byte for the border block count.
+		_, _ = buf.ReadByte()
+		blockEntities, err = decodeBlockEntities(buf)
+	} else {
 		ch = chunk.New(airRid, dim.Range())
 	}
 
-	a.World().AddChunk(world.ChunkPos(levelChunk.Position), ch)
+	a.World().AddChunk(w.ChunkPos(levelChunk.Position), world.NewColumn(ch, blockEntities))
+	return util.MultiError(err, b.requestSubchunks(dimensionRange, levelChunk.Dimension, levelChunk.Position))
+}
 
+// requestSubchunks requests subchunks from the server.
+func (b *Bot) requestSubchunks(r cube.Range, dim int32, pos protocol.ChunkPos) error {
 	var offsets []protocol.SubChunkOffset
-	for y := 0; y < dimensionRange.Max()-dimensionRange.Min()+16; y += 16 {
+	for y := 0; y < r.Max()-r.Min()+16; y += 16 {
 		offsets = append(offsets, protocol.SubChunkOffset{0, int8(y), 0})
 	}
 
-	_ = b.Conn().WritePacket(&packet.SubChunkRequest{
-		Dimension: levelChunk.Dimension,
-		Position:  protocol.SubChunkPos{levelChunk.Position.X(), int32(dimensionRange.Min() >> 4), levelChunk.Position.Z()},
+	return b.Conn().WritePacket(&packet.SubChunkRequest{
+		Dimension: dim,
+		Position:  protocol.SubChunkPos{pos.X(), int32(r.Min() >> 4), pos.Z()},
 		Offsets:   offsets,
 	})
-	return err
 }
-
-func init() {
-	rid, ok := chunk.StateToRuntimeID("minecraft:air", nil)
-	if !ok {
-		panic("cannot find air runtime ID")
-	}
-	airRid = rid
-}
-
-var airRid uint32

@@ -10,7 +10,7 @@ import (
 
 // CustomFormRespond ...
 type CustomFormRespond struct {
-	Options []option `json:"options"`
+	Options []Option `json:"options"`
 	Ignore  bool     `json:"ignore"`
 }
 
@@ -42,31 +42,31 @@ func (c *CustomFormRespond) Run(ctx context.Context, b *bot.Bot) error {
 				return fmt.Errorf("incorrect option index %v", o.Index)
 			}
 			switch el := elements[o.Index].(type) {
-			case *actor.Input:
+			case *actor.FormInput:
 				val, ok := o.Value.(string)
 				if !ok {
 					return fmt.Errorf("unable to cast %T into %T", o.Value, string(""))
 				}
 				el.SetValue(val)
-			case *actor.Toggle:
+			case *actor.FormToggle:
 				val, ok := o.Value.(bool)
 				if !ok {
 					return fmt.Errorf("unable to cast %T into %T", o.Value, bool(true))
 				}
 				el.SetValue(val)
-			case *actor.Slider:
+			case *actor.FormSlider:
 				val, ok := o.Value.(float64)
 				if !ok {
 					return fmt.Errorf("unable to cast %T into %T", o.Value, float64(0))
 				}
 				el.SetValue(val)
-			case *actor.DropDown:
+			case *actor.FormDropDown:
 				val, ok := o.Value.(int)
 				if !ok {
 					return fmt.Errorf("unable to cast %T into %T", o.Value, int(0))
 				}
 				el.SetValue(val)
-			case *actor.StepSlider:
+			case *actor.FormStepSlider:
 				val, ok := o.Value.(int)
 				if !ok {
 					return fmt.Errorf("unable to cast %T into %T", o.Value, int(0))
@@ -80,8 +80,8 @@ func (c *CustomFormRespond) Run(ctx context.Context, b *bot.Bot) error {
 	})
 }
 
-// option ...
-type option struct {
+// Option stores index to custom form element & it's value.
+type Option struct {
 	Index int `json:"index"`
 	Value any `json:"value"`
 }

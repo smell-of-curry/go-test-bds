@@ -24,7 +24,11 @@ type actorData struct {
 	chunkRadius   int
 	loadingCenter cube.Pos
 
-	lastForm *Form
+	lastForm     *Form
+	lastSign     *Sign
+	lastDialogue *Dialogue
+
+	container *Container
 
 	movementData
 }

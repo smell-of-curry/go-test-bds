@@ -13,19 +13,19 @@ type FormElement interface {
 	ResponseValue() any
 }
 
-// Button ...
-type Button struct {
+// FormButton ...
+type FormButton struct {
 	b buttonInternals
 	f *Form
 }
 
 // UnmarshalJSON ...
-func (b *Button) UnmarshalJSON(data []byte) error {
+func (b *FormButton) UnmarshalJSON(data []byte) error {
 	return json.Unmarshal(data, &b.b)
 }
 
 // Press ...
-func (b *Button) Press() error {
+func (b *FormButton) Press() error {
 	switch b.f.Type() {
 	case FormTypeCustom:
 		return fmt.Errorf("form should not contain buttons")
@@ -47,12 +47,12 @@ func (b *Button) Press() error {
 }
 
 // Text ...
-func (b *Button) Text() string {
+func (b *FormButton) Text() string {
 	return b.b.Text
 }
 
 // Image ...
-func (b *Button) Image() struct {
+func (b *FormButton) Image() struct {
 	Type string `json:"type"`
 	Data string `json:"data"`
 } {
@@ -60,7 +60,7 @@ func (b *Button) Image() struct {
 }
 
 // ResponseValue ...
-func (b *Button) ResponseValue() any {
+func (b *FormButton) ResponseValue() any {
 	return nil
 }
 
@@ -73,18 +73,18 @@ type buttonInternals struct {
 	} `json:"image"`
 }
 
-// Label ...
-type Label struct {
+// FormLabel ...
+type FormLabel struct {
 	text string
 }
 
 // ResponseValue ...
-func (l *Label) ResponseValue() any {
+func (l *FormLabel) ResponseValue() any {
 	return nil
 }
 
 // UnmarshalJSON ...
-func (l *Label) UnmarshalJSON(data []byte) error {
+func (l *FormLabel) UnmarshalJSON(data []byte) error {
 	var text = struct {
 		Text string `json:"text"`
 	}{}
@@ -94,43 +94,43 @@ func (l *Label) UnmarshalJSON(data []byte) error {
 }
 
 // Text ...
-func (l *Label) Text() string {
+func (l *FormLabel) Text() string {
 	return l.text
 }
 
-// Input ...
-type Input struct {
+// FormInput ...
+type FormInput struct {
 	i     inputInternals
 	value string
 }
 
 // Text ...
-func (i *Input) Text() string {
+func (i *FormInput) Text() string {
 	return i.i.Text
 }
 
 // Default ...
-func (i *Input) Default() string {
+func (i *FormInput) Default() string {
 	return i.i.Default
 }
 
 // Placeholder ...
-func (i *Input) Placeholder() string {
+func (i *FormInput) Placeholder() string {
 	return i.i.Placeholder
 }
 
 // ResponseValue ...
-func (i *Input) ResponseValue() any {
+func (i *FormInput) ResponseValue() any {
 	return i.value
 }
 
 // SetValue ...
-func (i *Input) SetValue(str string) {
+func (i *FormInput) SetValue(str string) {
 	i.value = str
 }
 
 // UnmarshalJSON ...
-func (i *Input) UnmarshalJSON(data []byte) error {
+func (i *FormInput) UnmarshalJSON(data []byte) error {
 	err := json.Unmarshal(data, &i.i)
 	i.value = i.i.Default
 	return err
@@ -143,34 +143,34 @@ type inputInternals struct {
 	Placeholder string `json:"placeholder"`
 }
 
-// Toggle ...
-type Toggle struct {
+// FormToggle ...
+type FormToggle struct {
 	t     toggleInternals
 	value bool
 }
 
 // Text ...
-func (t *Toggle) Text() string {
+func (t *FormToggle) Text() string {
 	return t.t.Text
 }
 
 // Default ...
-func (t *Toggle) Default() bool {
+func (t *FormToggle) Default() bool {
 	return t.t.Default
 }
 
 // ResponseValue ...
-func (t *Toggle) ResponseValue() any {
+func (t *FormToggle) ResponseValue() any {
 	return t.value
 }
 
 // SetValue ...
-func (t *Toggle) SetValue(val bool) {
+func (t *FormToggle) SetValue(val bool) {
 	t.value = val
 }
 
 // UnmarshalJSON ...
-func (t *Toggle) UnmarshalJSON(data []byte) error {
+func (t *FormToggle) UnmarshalJSON(data []byte) error {
 	err := json.Unmarshal(data, &t.t)
 	t.value = t.t.Default
 	return err
@@ -182,49 +182,49 @@ type toggleInternals struct {
 	Default bool   `json:"default"`
 }
 
-// Slider ...
-type Slider struct {
+// FormSlider ...
+type FormSlider struct {
 	s     sliderInternals
 	value float64
 }
 
 // Text ...
-func (s *Slider) Text() string {
+func (s *FormSlider) Text() string {
 	return s.s.Text
 }
 
 // Default ...
-func (s *Slider) Default() float64 {
+func (s *FormSlider) Default() float64 {
 	return s.s.Default
 }
 
 // Min ...
-func (s *Slider) Min() float64 {
+func (s *FormSlider) Min() float64 {
 	return s.s.Min
 }
 
 // Max ...
-func (s *Slider) Max() float64 {
+func (s *FormSlider) Max() float64 {
 	return s.s.Max
 }
 
 // StepSize ...
-func (s *Slider) StepSize() float64 {
+func (s *FormSlider) StepSize() float64 {
 	return s.s.StepSize
 }
 
 // ResponseValue ...
-func (s *Slider) ResponseValue() any {
+func (s *FormSlider) ResponseValue() any {
 	return s.value
 }
 
 // SetValue ...
-func (s *Slider) SetValue(val float64) {
+func (s *FormSlider) SetValue(val float64) {
 	s.value = val
 }
 
 // UnmarshalJSON ...
-func (s *Slider) UnmarshalJSON(data []byte) error {
+func (s *FormSlider) UnmarshalJSON(data []byte) error {
 	err := json.Unmarshal(data, &s.s)
 	s.value = s.s.Default
 	return err
@@ -239,39 +239,39 @@ type sliderInternals struct {
 	Default  float64 `json:"default"`
 }
 
-// DropDown ...
-type DropDown struct {
+// FormDropDown ...
+type FormDropDown struct {
 	d     dropdownInternals
 	value int
 }
 
 // Text ...
-func (d *DropDown) Text() string {
+func (d *FormDropDown) Text() string {
 	return d.d.Text
 }
 
 // Default ...
-func (d *DropDown) Default() int {
+func (d *FormDropDown) Default() int {
 	return d.d.DefaultIndex
 }
 
 // Options ...
-func (d *DropDown) Options() []string {
+func (d *FormDropDown) Options() []string {
 	return slices.Clone(d.d.Options)
 }
 
 // ResponseValue ...
-func (d *DropDown) ResponseValue() any {
+func (d *FormDropDown) ResponseValue() any {
 	return d.value
 }
 
 // SetValue ...
-func (d *DropDown) SetValue(val int) {
+func (d *FormDropDown) SetValue(val int) {
 	d.value = val
 }
 
 // UnmarshalJSON ...
-func (d *DropDown) UnmarshalJSON(data []byte) error {
+func (d *FormDropDown) UnmarshalJSON(data []byte) error {
 	err := json.Unmarshal(data, &d.d)
 	d.value = d.d.DefaultIndex
 	return err
@@ -284,12 +284,13 @@ type dropdownInternals struct {
 	DefaultIndex int      `json:"default"`
 }
 
-// StepSlider ...
-type StepSlider struct {
-	DropDown
+// FormStepSlider ...
+type FormStepSlider struct {
+	FormDropDown
 }
 
-func (s *StepSlider) UnmarshalJSON(data []byte) error {
+// UnmarshalJSON ...
+func (s *FormStepSlider) UnmarshalJSON(data []byte) error {
 	var i sliderInternals
 	err := json.Unmarshal(data, &i)
 	s.d = *(*dropdownInternals)(unsafe.Pointer(&i))

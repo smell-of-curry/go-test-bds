@@ -47,6 +47,10 @@ type Handler interface {
 	// HandleReceiveForm handles Actor receiving Form.
 	// If the form was not used and the ctx is not canceled, then the form will be ignored.
 	HandleReceiveForm(ctx *Context, form *Form)
+	// HandleReceiveSign handles Actor receiving Sign.
+	HandleReceiveSign(actor *Actor, sign *Sign)
+	// HandleReceiveDialogue handles Actor receiving Dialogue.
+	HandleReceiveDialogue(ctx *Context, dialogue *Dialogue)
 	// HandleReachTarget ...
 	HandleReachTarget(actor *Actor)
 	// HandleStopNavigation ...
@@ -73,5 +77,7 @@ func (NopHandler) HandleUseItemOnEntity(ctx *Context, item item.Stack, ent world
 func (NopHandler) HandleReleaseItem(ctx *Context, item item.Stack)                       {}
 func (NopHandler) HandleReceiveMessage(actor *Actor, msg string)                         {}
 func (NopHandler) HandleReceiveForm(ctx *Context, form *Form)                            {}
+func (NopHandler) HandleReceiveSign(actor *Actor, sign *Sign)                            {}
+func (NopHandler) HandleReceiveDialogue(ctx *Context, dialogue *Dialogue)                {}
 func (NopHandler) HandleReachTarget(actor *Actor)                                        {}
 func (NopHandler) HandleStopNavigation(actor *Actor)                                     {}

@@ -8,7 +8,7 @@ require (
 	github.com/df-mc/dragonfly v0.10.5
 	github.com/go-gl/mathgl v1.2.0
 	github.com/google/uuid v1.6.0
-	github.com/sandertv/gophertunnel v1.48.1
+	github.com/sandertv/gophertunnel v1.49.0
 )
 
 require (
@@ -26,3 +26,6 @@ require (
 	golang.org/x/oauth2 v0.25.0 // indirect
 	golang.org/x/text v0.23.0 // indirect
 )
+
+// remove when https://github.com/df-mc/dragonfly/pull/1111 gonna be merged
+replace github.com/df-mc/dragonfly v0.10.5 => github.com/FDUTCH/dragonfly v0.0.0-20250816150823-83e572b5df2e

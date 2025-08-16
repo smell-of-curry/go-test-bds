@@ -46,14 +46,14 @@ func (*SubChunkHandler) Handle(p packet.Packet, b *Bot, a *actor.Actor) error {
 
 		c, ok := w.Chunk(chunkPos)
 		if !ok {
-			c = chunk.New(airRid, dim.Range())
+			c.Chunk = chunk.New(airRid, dim.Range())
 			w.AddChunk(chunkPos, c)
 		}
 
 		buf.Write(entry.RawPayload)
 
 		var index byte
-		decodedSC, err := decodeSubChunk(buf, c, &index, chunk.NetworkEncoding)
+		decodedSC, err := decodeSubChunk(buf, c.Chunk, &index, chunk.NetworkEncoding)
 		if err != nil {
 			errors = append(errors, fmt.Errorf("error decoding subchunk, err: %w", err))
 			continue
@@ -62,6 +62,3 @@ func (*SubChunkHandler) Handle(p packet.Packet, b *Bot, a *actor.Actor) error {
 	}
 	return util.MultiError(errors...)
 }
-
-//go:linkname decodeSubChunk github.com/df-mc/dragonfly/server/world/chunk.decodeSubChunk
-func decodeSubChunk(buf *bytes.Buffer, c *chunk.Chunk, index *byte, e chunk.Encoding) (*chunk.SubChunk, error)

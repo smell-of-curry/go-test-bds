@@ -76,7 +76,7 @@ func (f *Form) CustomFormContent() (*Content, bool) {
 }
 
 // MenuFormButtons ...
-func (f *Form) MenuFormButtons() ([]Button, bool) {
+func (f *Form) MenuFormButtons() ([]FormButton, bool) {
 	if f.Type() != FormTypeMenu {
 		return nil, false
 	}
@@ -84,7 +84,7 @@ func (f *Form) MenuFormButtons() ([]Button, bool) {
 }
 
 // ModalFormButtons ...
-func (f *Form) ModalFormButtons() (yes *Button, no *Button, ok bool) {
+func (f *Form) ModalFormButtons() (yes *FormButton, no *FormButton, ok bool) {
 	if f.Type() != FormTypeModal {
 		return
 	}

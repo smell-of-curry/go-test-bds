@@ -479,12 +479,47 @@ func (a *Actor) ReceiveForm(form *Form) {
 	}
 }
 
-// LastForm ...
+// LastForm returns last Form received.
 func (a *Actor) LastForm() (*Form, bool) {
 	if a.lastForm == nil || a.lastForm.used {
 		return nil, false
 	}
 	return a.lastForm, true
+}
+
+// ReceiveSign ...
+func (a *Actor) ReceiveSign(s *Sign) {
+	a.Handler().HandleReceiveSign(a, s)
+	if !s.edited {
+		a.lastSign = s
+	}
+}
+
+// LastSign returns last Sign received.
+func (a *Actor) LastSign() (*Sign, bool) {
+	if a.lastSign == nil || a.lastSign.edited {
+		return nil, false
+	}
+	return a.lastSign, true
+}
+
+// ReceiveDialogue ...
+func (a *Actor) ReceiveDialogue(d *Dialogue) {
+	ctx := event.C(a)
+	a.Handler().HandleReceiveDialogue(ctx, d)
+	if !d.used && !ctx.Cancelled() {
+		_ = d.Ignore()
+	} else {
+		a.lastDialogue = d
+	}
+}
+
+// LastDialogue returns last Dialogue received.
+func (a *Actor) LastDialogue() (*Dialogue, bool) {
+	if a.lastDialogue == nil || a.lastDialogue.used {
+		return nil, false
+	}
+	return a.lastDialogue, true
 }
 
 // UseItem uses item in heldSlot.
@@ -758,6 +793,76 @@ func (a *Actor) AbleToInteractWithEntity(e world.Entity) (clickPos mgl64.Vec3, e
 		return mgl64.Vec3{}, ErrToFarAway{e}
 	}
 	return resultPos.Sub(e.Position()), nil
+}
+
+// PickBlock tries to pick block.
+func (a *Actor) PickBlock(pos cube.Pos, slot int, addNbt bool) error {
+	if a.Gamemode() != 1 {
+		return ErrGamemodeRequired{
+			Action:           "PickBlock",
+			RequiredGamemode: w.GameModeCreative,
+		}
+	}
+
+	return a.conn.WritePacket(&packet.BlockPickRequest{
+		Position:    posToProtocol(pos),
+		AddBlockNBT: addNbt,
+		HotBarSlot:  byte(slot),
+	})
+}
+
+// PickActor tries to pick entity.
+func (a *Actor) PickActor(ent world.Entity, slot int, includeData bool) error {
+	if a.Gamemode() != 1 {
+		return ErrGamemodeRequired{
+			Action:           "PickActor",
+			RequiredGamemode: w.GameModeCreative,
+		}
+	}
+
+	return a.conn.WritePacket(&packet.ActorPickRequest{
+		EntityUniqueID: int64(ent.RuntimeID()),
+		HotBarSlot:     byte(slot),
+		WithData:       includeData,
+	})
+}
+
+// EditBook edits BookAndQuill.
+func (a *Actor) EditBook(action BookAction, slot int) error {
+	it, err := a.Inventory().Item(slot)
+	if err != nil {
+		return err
+	}
+	if it.Empty() {
+		return fmt.Errorf("item is empty")
+	}
+	book, ok := it.Item().(item.BookAndQuill)
+	if !ok {
+		return fmt.Errorf("item is not BookAndQuill")
+	}
+
+	pk, err := action.Perform(book, a)
+	if err != nil {
+		return err
+	}
+	pk.InventorySlot = byte(slot)
+	return a.conn.WritePacket(pk)
+}
+
+// OpenContainer ...
+func (a *Actor) OpenContainer(container *Container) {
+	if a.container != nil || !a.container.closed {
+		_ = a.container.Close()
+	}
+	a.container = container
+}
+
+// CurrentContainer returns current opened container.
+func (a *Actor) CurrentContainer() (*Container, bool) {
+	if a.container != nil || !a.container.closed {
+		return nil, false
+	}
+	return a.container, true
 }
 
 //go:linkname skinToProtocol github.com/df-mc/dragonfly/server/player/skin.skinToProtocol
