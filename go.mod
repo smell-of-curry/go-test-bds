@@ -4,7 +4,6 @@ go 1.24
 
 require (
 	github.com/FDUTCH/Pathfinder v0.0.0-20250802000749-2bc6b6bbf97d
-	github.com/FDUTCH/dummy_item_blocks v0.0.0-20250723120814-3e58bad00d1e
 	github.com/df-mc/dragonfly v0.10.5
 	github.com/go-gl/mathgl v1.2.0
 	github.com/google/uuid v1.6.0
