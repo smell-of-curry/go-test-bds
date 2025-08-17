@@ -3,6 +3,7 @@ package instruction
 import (
 	"context"
 	"fmt"
+
 	"github.com/smell-of-curry/go-test-bds/gotestbds/actor"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/bot"
 )
@@ -24,9 +25,6 @@ func (action *AttackEntity) Run(_ context.Context, b *bot.Bot) error {
 		if !ok {
 			return fmt.Errorf("entity does not exist")
 		}
-		if !a.AttackEntity(ent) {
-			return fmt.Errorf("failed to attack entity")
-		}
-		return nil
+		return a.AttackEntity(ent)
 	})
 }
