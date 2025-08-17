@@ -68,3 +68,4 @@ For list of all instructions follow https://github.com/smell-of-curry/go-test-bd
 
 Documentation for all packages may be found [here](https://pkg.go.dev/github.com/smell-of-curry/go-test-bds/gotestbds) 
 
+Note: in order for the bot to use commands, you may want to give it op permission.
