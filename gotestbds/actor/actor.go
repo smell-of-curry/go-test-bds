@@ -287,7 +287,7 @@ func (a *Actor) Armour() *inventory.Armour {
 	return a.armor
 }
 
-// HeldItems ...
+// HeldItems returns held item.
 func (a *Actor) HeldItems() (item.Stack, item.Stack) {
 	main := a.HeldItem()
 	off, _ := a.Offhand().Item(0)
@@ -464,12 +464,12 @@ func (a *Actor) Chat(message string) {
 	})
 }
 
-// ReceiveMessage ...
+// ReceiveMessage makes Actor receive message.
 func (a *Actor) ReceiveMessage(message string) {
 	a.Handler().HandleReceiveMessage(a, message)
 }
 
-// ReceiveForm ...
+// ReceiveForm makes Actor receive Form.
 func (a *Actor) ReceiveForm(form *Form) {
 	ctx := event.C(a)
 	a.Handler().HandleReceiveForm(ctx, form)
@@ -488,7 +488,7 @@ func (a *Actor) LastForm() (*Form, bool) {
 	return a.lastForm, true
 }
 
-// ReceiveSign ...
+// ReceiveSign makes Actor receive Sign.
 func (a *Actor) ReceiveSign(s *Sign) {
 	a.Handler().HandleReceiveSign(a, s)
 	if !s.edited {
@@ -504,7 +504,7 @@ func (a *Actor) LastSign() (*Sign, bool) {
 	return a.lastSign, true
 }
 
-// ReceiveDialogue ...
+// ReceiveDialogue makes Actor receive Dialogue.
 func (a *Actor) ReceiveDialogue(d *Dialogue) {
 	ctx := event.C(a)
 	a.Handler().HandleReceiveDialogue(ctx, d)

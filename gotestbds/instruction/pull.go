@@ -101,6 +101,9 @@ func DefaultPull(callbacker Callbacker) *Pull {
 	pull.Register(create[MenuFormRespond]())
 	pull.Register(create[ModalFormRespond]())
 	pull.Register(create[RunCommand]())
+	pull.Register(create[Rejoin]())
+	pull.Register(create[EditSign]())
+	pull.Register(create[ToggleCrafterSlot]())
 	return pull
 }
 

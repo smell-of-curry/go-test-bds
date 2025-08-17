@@ -25,23 +25,17 @@ type TestingHandler struct {
 	logger *slog.Logger
 	callbacks
 
-	t Test
-
-	cancelForms bool
+	cfg *Test
 }
 
 // NewTestingHandler ...
-func NewTestingHandler(b *bot.Bot, t Test) actor.Handler {
-	_, ok1 := t.Instructions.Instruction("customFormRespond")
-	_, ok2 := t.Instructions.Instruction("menuFormRespond")
-	_, ok3 := t.Instructions.Instruction("modalFormRespond")
+func NewTestingHandler(b *bot.Bot, t *Test) actor.Handler {
 
 	handler := &TestingHandler{
 		pull:   t.Instructions,
 		b:      b,
 		logger: t.Logger,
-
-		cancelForms: ok1 || ok2 || ok3,
+		cfg:    t,
 	}
 	handler.pull.Callbacker = handler
 
@@ -50,13 +44,13 @@ func NewTestingHandler(b *bot.Bot, t Test) actor.Handler {
 
 // HandleReceiveMessage ...
 func (h *TestingHandler) HandleReceiveMessage(a *actor.Actor, msg string) {
-	actionData := strings.TrimPrefix(msg, h.t.InstructionPrefix)
+	actionData := strings.TrimPrefix(msg, h.cfg.InstructionPrefix)
 	if actionData != msg {
 		go h.runAction(actionData)
 	}
 }
 
-// runAction ...
+// runAction runs encoded instruction.
 func (h *TestingHandler) runAction(data string) {
 	i, err := h.pull.Decode(data)
 	if err != nil {
@@ -83,12 +77,15 @@ func (h *TestingHandler) runAction(data string) {
 
 // HandleReceiveForm ...
 func (h *TestingHandler) HandleReceiveForm(ctx *actor.Context, form *actor.Form) {
-	if h.cancelForms {
-		ctx.Cancel()
-	}
+	ctx.Cancel()
 }
 
-// broadcastStatus ...
+// HandleReceiveDialogue ...
+func (h *TestingHandler) HandleReceiveDialogue(ctx *actor.Context, _ *actor.Dialogue) {
+	ctx.Cancel()
+}
+
+// broadcastStatus broadcasts status.
 func broadcastStatus(status, message string, b *bot.Bot) {
 	b.Execute(func(a *actor.Actor) {
 		data, _ := json.Marshal(struct {

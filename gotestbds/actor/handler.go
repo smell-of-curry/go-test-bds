@@ -50,6 +50,7 @@ type Handler interface {
 	// HandleReceiveSign handles Actor receiving Sign.
 	HandleReceiveSign(actor *Actor, sign *Sign)
 	// HandleReceiveDialogue handles Actor receiving Dialogue.
+	// If the dialogue was not used and the ctx is not canceled, then the dialogue will be ignored.
 	HandleReceiveDialogue(ctx *Context, dialogue *Dialogue)
 	// HandleReachTarget ...
 	HandleReachTarget(actor *Actor)

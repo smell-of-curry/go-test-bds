@@ -6,7 +6,7 @@ import (
 	"github.com/smell-of-curry/go-test-bds/gotestbds/inventory"
 )
 
-// invByID ...
+// invByID returns inventory by it id.
 func (b *Bot) invByID(id uint32) *inventory.Handle {
 	switch id {
 	case protocol.WindowIDInventory:

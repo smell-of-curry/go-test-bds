@@ -7,7 +7,7 @@ import (
 	"github.com/smell-of-curry/go-test-bds/gotestbds/actor"
 )
 
-// MobArmourEquipmentHandler ...
+// MobArmourEquipmentHandler handles MobArmourEquipment packet.
 type MobArmourEquipmentHandler struct{}
 
 // Handle ...

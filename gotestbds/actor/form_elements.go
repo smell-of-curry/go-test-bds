@@ -7,7 +7,7 @@ import (
 	"unsafe"
 )
 
-// FormElement ...
+// FormElement represents form element.
 type FormElement interface {
 	Text() string
 	ResponseValue() any

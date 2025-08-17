@@ -6,7 +6,7 @@ import (
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 )
 
-// Conn ...
+// Conn is the way to Actor to interact with the server.
 type Conn interface {
 	IdentityData() login.IdentityData
 	WritePacket(pk packet.Packet) error

@@ -2,7 +2,9 @@ package entity
 
 import (
 	"fmt"
+
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
+	"github.com/smell-of-curry/go-test-bds/gotestbds/internal"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/mcmath"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/world"
 )
@@ -20,7 +22,7 @@ func CreateFromPacket(p packet.Packet) world.Entity {
 	case *packet.AddItemActor:
 		return &Item{
 			Ent:  NewEnt(mcmath.Vec32To64(pk.Position), pk.EntityMetadata, pk.EntityRuntimeID, ""),
-			item: pk.Item,
+			item: internal.StackToItem(pk.Item.Stack),
 		}
 	case *packet.AddActor:
 		return NewEnt(mcmath.Vec32To64(pk.Position), pk.EntityMetadata, pk.EntityRuntimeID, pk.EntityType)

@@ -8,7 +8,7 @@ import (
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 )
 
-// Dialogue ...
+// Dialogue represents NPC dialogue.
 type Dialogue struct {
 	title    string
 	dialogue string
@@ -34,7 +34,7 @@ func (n *Dialogue) UnmarshalJSON(data []byte) error {
 	return err
 }
 
-// Title ...
+// Title returns title of the Dialogue.
 func (n *Dialogue) Title() string {
 	return n.title
 }
@@ -48,7 +48,7 @@ func (n *Dialogue) use() error {
 	return nil
 }
 
-// Ignore ...
+// Ignore ignores Dialogue.
 func (n *Dialogue) Ignore() error {
 	if err := n.use(); err != nil {
 		return err
@@ -60,7 +60,7 @@ func (n *Dialogue) Ignore() error {
 	})
 }
 
-// DialogueButton ...
+// DialogueButton represents button in the NPC dialogue.
 type DialogueButton struct {
 	text     string
 	dialogue *Dialogue

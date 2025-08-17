@@ -2,7 +2,7 @@ package gotestbds
 
 const (
 	StatusSuccess = "success"
-	StatusError   = "err"
+	StatusError   = "error"
 	StatusTimeOut = "timeout"
 )
 

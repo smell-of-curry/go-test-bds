@@ -19,15 +19,18 @@ type Test struct {
 	Logger            *slog.Logger
 	Instructions      *instruction.Pull
 	InstructionPrefix string
+	rejoin            bool
 }
 
 // Run runs test.
-func (t Test) Run() error {
+func (t *Test) Run() error {
 	return t.RunCtx(context.Background())
 }
 
 // RunCtx runs text with context.
-func (t Test) RunCtx(ctx context.Context) error {
+func (t *Test) RunCtx(ctx context.Context) error {
+	// resetting rejoin value.
+	t.rejoin = false
 	if t.Logger == nil {
 		t.Logger = slog.Default()
 	}
@@ -61,19 +64,22 @@ func (t Test) RunCtx(ctx context.Context) error {
 	// without this delay BDS won't let Actor move.
 	time.Sleep(time.Second * 2)
 	b.StartTickLoop()
+
+	if t.rejoin {
+		// rejoining...
+		return t.RunCtx(ctx)
+	}
 	return nil
-}
-
-func (t Test) rejoin() {
-
 }
 
 // RunTest ...
 func RunTest(addr string) error {
-	return Test{RemoteAddress: addr}.Run()
+	t := Test{RemoteAddress: addr}
+	return t.Run()
 }
 
 // RunTestCtx ...
 func RunTestCtx(ctx context.Context, addr string) error {
-	return Test{RemoteAddress: addr}.RunCtx(ctx)
+	t := Test{RemoteAddress: addr}
+	return t.RunCtx(ctx)
 }

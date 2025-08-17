@@ -7,7 +7,7 @@ import (
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 )
 
-// BookAction ...
+// BookAction represents action that can be executed on book.
 type BookAction interface {
 	Perform(book item.BookAndQuill, actor *Actor) (*packet.BookEdit, error)
 }

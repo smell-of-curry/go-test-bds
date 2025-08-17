@@ -53,10 +53,18 @@ func main() {
 ## API
 
 To call the API from the server side, you must send a JSON message with the prefix `[RUN_ACTION]`, which must contain two fields:
-The first: “action” — this is like the name of the function.
-The second: “parameters” — theis is like the parameters that you pass to the function.
+first: “action” — this is like the name of the function,
+second: “parameters” — theis is like the parameters that you pass to the function.
 
 Example: `[RUN_ACTION]{"action":"placeBlock","parameters":{"pos":[100,60,-10]}}`
 
+And the bot will respond with another JSON message with the prefix ```[STATUS]```, which may contain 2 fields:
+first (mandatory) field: "status" which can have one of three values: "success", "error" or "timeout",
+second (optional) field "message" which may contain some information.
+
+Example: ```[STATUS]{"status":"error","message":"main hand is empty"}```
+
 For list of all instructions follow https://github.com/smell-of-curry/go-test-bds/tree/main/gotestbds/instruction
+
+Documentation for all packages may be found [here](https://pkg.go.dev/github.com/smell-of-curry/go-test-bds/gotestbds) 
 

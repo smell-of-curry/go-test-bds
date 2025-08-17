@@ -6,7 +6,7 @@ import (
 	"github.com/smell-of-curry/go-test-bds/gotestbds/inventory"
 )
 
-// actorData ...
+// actorData stores all Actor's data.
 type actorData struct {
 	heldSlot int
 	inv      *inventory.Handle

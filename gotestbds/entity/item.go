@@ -1,15 +1,17 @@
 package entity
 
-import "github.com/sandertv/gophertunnel/minecraft/protocol"
+import (
+	"github.com/df-mc/dragonfly/server/item"
+)
 
 // Item is an implementation of an item entity.
 type Item struct {
 	*Ent
-	item protocol.ItemInstance
+	item item.Stack
 }
 
-// Item ...
-func (i *Item) Item() protocol.ItemInstance {
+// Item returns item.Stack.
+func (i *Item) Item() item.Stack {
 	return i.item
 }
 
