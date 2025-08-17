@@ -52,7 +52,7 @@ func (s *Sign) Pos() cube.Pos {
 	return s.pos
 }
 
-// Front returns weather the editable side is front.
+// Front returns whether the editable side is front.
 func (s *Sign) Front() bool {
 	return s.isFrontSide
 }

@@ -182,6 +182,7 @@ func (a *Actor) StartBreakingBlock(pos cube.Pos) (time.Duration, error) {
 
 		supporter, _ := a.resolveBlockSupporter(pos)
 
+		a.world.SetBlock(pos, block.Air{})
 		return 0, a.conn.WritePacket(&packet.PlayerAction{
 			EntityRuntimeID: a.RuntimeID(),
 			ActionType:      protocol.PlayerActionCreativePlayerDestroyBlock,
@@ -648,12 +649,12 @@ func (a *Actor) SetSkin(skin skin.Skin) {
 	})
 }
 
-// Health ...
+// Health returns Actor's health.
 func (a *Actor) Health() float64 {
 	return a.Attributes().Health()
 }
 
-// CanSprint ...
+// CanSprint returns whether the Actor is able to sprint.
 func (a *Actor) CanSprint() bool {
 	return a.Attributes().Food() > 6
 }
@@ -670,17 +671,17 @@ func (a *Actor) RunCommand(cmd string) {
 	})
 }
 
-// SetChunkLoadCenter ...
+// SetChunkLoadCenter sets chunk loading center.
 func (a *Actor) SetChunkLoadCenter(pos cube.Pos) {
 	a.loadingCenter = pos
 }
 
-// RequestRenderDistance ...
+// RequestRenderDistance requests new chunk radius.
 func (a *Actor) RequestRenderDistance(chunkRadius int) {
 	_ = a.conn.WritePacket(&packet.RequestChunkRadius{ChunkRadius: int32(chunkRadius)})
 }
 
-// SetChunkRadius ...
+// SetChunkRadius sets chunk radius.
 func (a *Actor) SetChunkRadius(chunkRadius int) {
 	a.chunkRadius = chunkRadius
 }
@@ -690,7 +691,7 @@ func (a *Actor) ChunkRadius() int {
 	return a.chunkRadius
 }
 
-// unloadChunks ...
+// unloadChunks unloads chunks.
 func (a *Actor) unloadChunks() {
 	current := w.ChunkPos{int32(a.loadingCenter.X() >> 4), int32(a.loadingCenter.Z() >> 4)}
 	for pos := range a.world.Chunks() {
@@ -702,7 +703,7 @@ func (a *Actor) unloadChunks() {
 	}
 }
 
-// PlaceBlock ...
+// PlaceBlock makes Actor to place a block.
 func (a *Actor) PlaceBlock(pos cube.Pos) error {
 	held := a.HeldItem()
 	if held.Empty() {
@@ -863,6 +864,21 @@ func (a *Actor) CurrentContainer() (*Container, bool) {
 		return nil, false
 	}
 	return a.container, true
+}
+
+// ToggleCrafterSlot enables or disables crafter slot.
+func (a *Actor) ToggleCrafterSlot(pos cube.Pos, slot int, disabled bool) error {
+	bl := a.world.Block(pos)
+	if name, _ := bl.EncodeBlock(); name != "minecraft:crafter" {
+		return fmt.Errorf("block %s is not minecraft:crafter", name)
+	}
+	return a.conn.WritePacket(&packet.PlayerToggleCrafterSlotRequest{
+		PosX:     int32(pos.X()),
+		PosY:     int32(pos.Y()),
+		PosZ:     int32(pos.Z()),
+		Slot:     byte(slot),
+		Disabled: disabled,
+	})
 }
 
 //go:linkname skinToProtocol github.com/df-mc/dragonfly/server/player/skin.skinToProtocol
