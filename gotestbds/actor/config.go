@@ -42,6 +42,7 @@ func (c Config) New() (actor *Actor) {
 		inv:           c.Inventory,
 		offhand:       c.Offhand,
 		armor:         c.Armour,
+		ui:            c.Ui,
 		effectManager: entity.NewEffectManager(),
 		chunkRadius:   int(gameData.ChunkRadius),
 	}
