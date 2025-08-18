@@ -24,6 +24,6 @@ func MultiError(errors ...error) error {
 	}
 
 	return fmt.Errorf("%d errors: \n\t%s",
-		len(errors),
+		len(errs),
 		strings.Join(errs, "\n\t"))
 }

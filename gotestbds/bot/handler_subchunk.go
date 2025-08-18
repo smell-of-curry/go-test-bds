@@ -5,13 +5,14 @@ import (
 	"fmt"
 	_ "unsafe"
 
-	"github.com/df-mc/dragonfly/server/world"
+	w "github.com/df-mc/dragonfly/server/world"
 	"github.com/df-mc/dragonfly/server/world/chunk"
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/actor"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/internal"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/util"
+	"github.com/smell-of-curry/go-test-bds/gotestbds/world"
 )
 
 // SubChunkHandler updates subchunk it the Actor's world.
@@ -21,9 +22,7 @@ type SubChunkHandler struct{}
 func (*SubChunkHandler) Handle(p packet.Packet, b *Bot, a *actor.Actor) error {
 	subChunk := p.(*packet.SubChunk)
 	pos := subChunk.Position
-	dim, _ := world.DimensionByID(int(subChunk.Dimension))
-
-	w := a.World()
+	dim, _ := w.DimensionByID(int(subChunk.Dimension))
 
 	buf := internal.BufferPool.Get().(*bytes.Buffer)
 	defer func() {
@@ -39,15 +38,15 @@ func (*SubChunkHandler) Handle(p packet.Packet, b *Bot, a *actor.Actor) error {
 			continue
 		}
 
-		chunkPos := world.ChunkPos{
+		chunkPos := w.ChunkPos{
 			pos[0] + int32(entry.Offset[0]),
 			pos[2] + int32(entry.Offset[2]),
 		}
 
-		c, ok := w.Chunk(chunkPos)
+		c, ok := a.World().Chunk(chunkPos)
 		if !ok {
 			c.Chunk = chunk.New(airRid, dim.Range())
-			w.AddChunk(chunkPos, c)
+			a.World().AddChunk(chunkPos, c)
 		}
 
 		buf.Write(entry.RawPayload)
@@ -57,6 +56,13 @@ func (*SubChunkHandler) Handle(p packet.Packet, b *Bot, a *actor.Actor) error {
 		if err != nil {
 			errors = append(errors, fmt.Errorf("error decoding subchunk, err: %w", err))
 			continue
+		}
+		if buf.Len() != 0 {
+			blockEntity, err := decodeBlockEntities(buf)
+			if err != nil {
+				col := world.NewColumn(c.Chunk, blockEntity)
+				c.BlockEntities = col.BlockEntities
+			}
 		}
 		c.Sub()[index] = decodedSC
 	}

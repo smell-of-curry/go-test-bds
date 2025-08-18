@@ -9,7 +9,6 @@ import (
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/actor"
-	"github.com/smell-of-curry/go-test-bds/gotestbds/util"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/world"
 )
 
@@ -29,6 +28,7 @@ func (*LevelChunkHandler) Handle(p packet.Packet, b *Bot, a *actor.Actor) error 
 	buf := bytes.NewBuffer(levelChunk.RawPayload)
 	var blockEntities []chunk.BlockEntity
 
+	// in case of an error we are just ignoring it, cause blocks are sent via SubChunk.
 	ch, err := chunk.NetworkDecodeBuffer(airRid, buf, int(levelChunk.SubChunkCount), dimensionRange)
 	if err == nil {
 		// reading one byte for the border block count.
@@ -39,7 +39,7 @@ func (*LevelChunkHandler) Handle(p packet.Packet, b *Bot, a *actor.Actor) error 
 	}
 
 	a.World().AddChunk(w.ChunkPos(levelChunk.Position), world.NewColumn(ch, blockEntities))
-	return util.MultiError(err, b.requestSubchunks(dimensionRange, levelChunk.Dimension, levelChunk.Position))
+	return b.requestSubchunks(dimensionRange, levelChunk.Dimension, levelChunk.Position)
 }
 
 // requestSubchunks requests subchunks from the server.

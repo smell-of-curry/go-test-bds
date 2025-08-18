@@ -14,7 +14,7 @@ type Column struct {
 
 // NewColumn ...
 func NewColumn(c *chunk.Chunk, nbters []chunk.BlockEntity) *Column {
-	col := &Column{Chunk: c}
+	col := &Column{Chunk: c, BlockEntities: make(map[cube.Pos]world.Block, len(nbters))}
 	for _, be := range nbters {
 		rid := c.Block(uint8(be.Pos[0]), int16(be.Pos[1]), uint8(be.Pos[2]), 0)
 		b, ok := world.BlockByRuntimeID(rid)
