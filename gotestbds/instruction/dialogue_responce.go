@@ -30,6 +30,9 @@ func (d *DialogueResponse) Run(ctx context.Context, b *bot.Bot) error {
 		if d.ButtonIndex >= len(buttons) {
 			return fmt.Errorf("invalid button index")
 		}
+		if d.Ignore {
+			return dialogue.Ignore()
+		}
 		return buttons[d.ButtonIndex].Press()
 	})
 }
