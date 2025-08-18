@@ -4,7 +4,7 @@ go 1.24
 
 require (
 	github.com/FDUTCH/Pathfinder v0.0.0-20250802000749-2bc6b6bbf97d
-	github.com/df-mc/dragonfly v0.10.5
+	github.com/df-mc/dragonfly v0.10.6-0.20250817203556-60bcf6b7432b
 	github.com/go-gl/mathgl v1.2.0
 	github.com/google/uuid v1.6.0
 	github.com/sandertv/gophertunnel v1.49.0
@@ -25,6 +25,3 @@ require (
 	golang.org/x/oauth2 v0.25.0 // indirect
 	golang.org/x/text v0.23.0 // indirect
 )
-
-// remove when https://github.com/df-mc/dragonfly/pull/1111 gonna be merged
-replace github.com/df-mc/dragonfly v0.10.5 => github.com/FDUTCH/dragonfly v0.0.0-20250816150823-83e572b5df2e
