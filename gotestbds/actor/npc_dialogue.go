@@ -20,6 +20,11 @@ type Dialogue struct {
 	conn Conn
 }
 
+// Buttons returns dialogue buttons.
+func (n *Dialogue) Buttons() []DialogueButton {
+	return n.buttons
+}
+
 // NewDialogue ...
 func NewDialogue(title string, dialogue string, scene string, entity uint64, conn Conn) *Dialogue {
 	return &Dialogue{title: title, dialogue: dialogue, scene: scene, entity: entity, conn: conn}
