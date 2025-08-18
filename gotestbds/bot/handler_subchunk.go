@@ -3,6 +3,7 @@ package bot
 import (
 	"bytes"
 	"fmt"
+	"maps"
 	_ "unsafe"
 
 	w "github.com/df-mc/dragonfly/server/world"
@@ -59,9 +60,8 @@ func (*SubChunkHandler) Handle(p packet.Packet, b *Bot, a *actor.Actor) error {
 		}
 		if buf.Len() != 0 {
 			blockEntity, err := decodeBlockEntities(buf)
-			if err != nil {
-				col := world.NewColumn(c.Chunk, blockEntity)
-				c.BlockEntities = col.BlockEntities
+			if err == nil {
+				maps.Copy(c.BlockEntities, world.NewColumn(c.Chunk, blockEntity).BlockEntities)
 			}
 		}
 		c.Sub()[index] = decodedSC
