@@ -104,6 +104,7 @@ func DefaultPull(callbacker Callbacker) *Pull {
 	pull.Register(create[Rejoin]())
 	pull.Register(create[EditSign]())
 	pull.Register(create[ToggleCrafterSlot]())
+	pull.Register(create[InventoryAction]())
 	return pull
 }
 
