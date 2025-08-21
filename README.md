@@ -15,10 +15,6 @@ GoTestBDS is a designed to be a complete end-to-end testing framework for Minecr
 - [x] Smooth Navigation simulation
 - [x] Full UI and Form Automation
 
-## License
-
-...
-
 ## How it works
 
 GoTestBds enables a script api project to completely fake a player on its server and run tests on it.
@@ -129,3 +125,7 @@ This makes it easy and can be setup easily:
 
 4. Create a main `index.ts` file that will actually run the tests and such.
    TODO: Add example
+
+## License
+
+...
