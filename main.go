@@ -24,7 +24,8 @@ func main() {
 
 	err = (&gotestbds.Test{
 		Dialer: minecraft.Dialer{
-			// your Dialer settings
+			// TODO: Handle Token Source handling through config.toml
+			// TokenSource: auth.TokenSource,
 		},
 		RemoteAddress: config.Network.ServerAddress,
 		Logger: slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
