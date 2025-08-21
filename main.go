@@ -19,13 +19,16 @@ func main() {
 	// This is recommended so that the bot has more information about the blocks, making its actions more accurate.
 	dummy.Register()
 
+	var logLevel slog.Level
+	logLevel.UnmarshalText([]byte(config.Network.LogLevel))
+
 	err = (&gotestbds.Test{
 		Dialer: minecraft.Dialer{
 			// your Dialer settings
 		},
 		RemoteAddress: config.Network.ServerAddress,
 		Logger: slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
-			Level: slog.LevelDebug,
+			Level: logLevel,
 		})),
 	}).RunCtx(context.Background())
 
