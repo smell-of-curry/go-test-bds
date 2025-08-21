@@ -2,6 +2,7 @@ package instruction
 
 import (
 	"context"
+
 	"github.com/df-mc/dragonfly/server/block/cube"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/actor"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/bot"
@@ -9,7 +10,7 @@ import (
 
 // LookAtBlock ...
 type LookAtBlock struct {
-	Pos cube.Pos `json:"pos"`
+	Pos Pos `json:"pos"`
 }
 
 // Name ...
@@ -20,7 +21,7 @@ func (*LookAtBlock) Name() string {
 // Run ...
 func (l *LookAtBlock) Run(ctx context.Context, b *bot.Bot) error {
 	return execute(b, func(a *actor.Actor) error {
-		a.LookAtBlock(l.Pos)
+		a.LookAtBlock(cube.Pos(l.Pos))
 		return nil
 	})
 }

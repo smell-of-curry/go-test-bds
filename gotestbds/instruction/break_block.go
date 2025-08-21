@@ -12,7 +12,7 @@ import (
 // BreakBlock ...
 type BreakBlock struct {
 	Callbacker Callbacker `json:"_"`
-	Pos        cube.Pos   `json:"pos"`
+	Pos        Pos        `json:"pos"`
 }
 
 // Name ...
@@ -25,7 +25,7 @@ func (action *BreakBlock) Run(ctx context.Context, b *bot.Bot) error {
 	breakCh := make(chan bool)
 	err := execute(b, func(a *actor.Actor) error {
 		action.Callbacker.SetBreakingCallback(func(b bool) { breakCh <- b })
-		_, err := a.StartBreakingBlock(action.Pos)
+		_, err := a.StartBreakingBlock(cube.Pos(action.Pos))
 		if err != nil {
 			return fmt.Errorf("unable to start breaking block err: %w", err)
 		}

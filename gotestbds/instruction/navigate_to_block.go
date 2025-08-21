@@ -3,6 +3,7 @@ package instruction
 import (
 	"context"
 	"fmt"
+
 	"github.com/df-mc/dragonfly/server/block/cube"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/actor"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/bot"
@@ -11,7 +12,7 @@ import (
 // NavigateToBlock ...
 type NavigateToBlock struct {
 	Callbacker Callbacker `json:"_"`
-	Pos        cube.Pos   `json:"pos"`
+	Pos        Pos        `json:"pos"`
 }
 
 // Name ...
@@ -24,7 +25,7 @@ func (n *NavigateToBlock) Run(ctx context.Context, b *bot.Bot) error {
 	navigateCh := make(chan bool)
 	_ = execute(b, func(a *actor.Actor) error {
 		n.Callbacker.SetNavigationCallback(func(b bool) { navigateCh <- b })
-		a.Navigate(n.Pos)
+		a.Navigate(cube.Pos(n.Pos))
 		return nil
 	})
 

@@ -2,6 +2,7 @@ package instruction
 
 import (
 	"context"
+
 	"github.com/df-mc/dragonfly/server/block/cube"
 	"github.com/go-gl/mathgl/mgl64"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/actor"
@@ -10,7 +11,7 @@ import (
 
 // InteractWithBlock ...
 type InteractWithBlock struct {
-	Pos      cube.Pos   `json:"pos"`
+	Pos      Pos        `json:"pos"`
 	Face     cube.Face  `json:"face"`
 	ClickPos mgl64.Vec3 `json:"clickPos"`
 }
@@ -23,7 +24,7 @@ func (*InteractWithBlock) Name() string {
 // Run ...
 func (i *InteractWithBlock) Run(ctx context.Context, b *bot.Bot) error {
 	return execute(b, func(a *actor.Actor) error {
-		a.UseItemOnBlock(i.Pos, i.Face, i.ClickPos)
+		a.UseItemOnBlock(cube.Pos(i.Pos), i.Face, i.ClickPos)
 		return nil
 	})
 }

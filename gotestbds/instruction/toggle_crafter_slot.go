@@ -10,9 +10,9 @@ import (
 
 // ToggleCrafterSlot toggles crafter slot.
 type ToggleCrafterSlot struct {
-	Slot     int      `json:"slot"`
-	Pos      cube.Pos `json:"pos"`
-	Disabled bool     `json:"disabled"`
+	Slot     int  `json:"slot"`
+	Pos      Pos  `json:"pos"`
+	Disabled bool `json:"disabled"`
 }
 
 // Name ...
@@ -23,6 +23,6 @@ func (*ToggleCrafterSlot) Name() string {
 // Run ...
 func (t *ToggleCrafterSlot) Run(ctx context.Context, b *bot.Bot) error {
 	return execute(b, func(a *actor.Actor) error {
-		return a.ToggleCrafterSlot(t.Pos, t.Slot, t.Disabled)
+		return a.ToggleCrafterSlot(cube.Pos(t.Pos), t.Slot, t.Disabled)
 	})
 }
