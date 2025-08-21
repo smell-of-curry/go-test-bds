@@ -122,7 +122,7 @@ func (w *World) block(pos cube.Pos, layer uint8) world.Block {
 		return block.Air{}
 	}
 	rid := c.Block(uint8(pos[0]), int16(pos[1]), uint8(pos[2]), layer)
-	if layer == 0 && nbtBlocks[rid] {
+	if layer == 0 && isNbtBlock(rid) {
 		bl, ok := c.BlockEntities[pos]
 		if ok {
 			return bl
@@ -158,7 +158,7 @@ func (w *World) SetBlockOnTheLayer(pos cube.Pos, b world.Block, layer uint32) {
 	}
 	rid := world.BlockRuntimeID(b)
 	x, y, z := uint8(pos[0]), int16(pos[1]), uint8(pos[2])
-	if layer == 0 && nbtBlocks[rid] {
+	if layer == 0 && isNbtBlock(rid) {
 		c.BlockEntities[pos] = b
 	}
 
@@ -172,3 +172,11 @@ func chunkPosFromBlockPos(p cube.Pos) world.ChunkPos {
 
 //go:linkname nbtBlocks github.com/df-mc/dragonfly/server/world.nbtBlocks
 var nbtBlocks []bool
+
+// isNbtBlock returns whether the block does contain nbt.
+func isNbtBlock(rid uint32) bool {
+	if len(nbtBlocks) < int(rid+1) {
+		return false
+	}
+	return nbtBlocks[rid]
+}
