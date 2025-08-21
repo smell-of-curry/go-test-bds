@@ -114,6 +114,7 @@ func (b *Bot) handlePackets() {
 func (b *Bot) HandlePacket(pk packet.Packet) {
 	handler, ok := b.handlers[pk.ID()]
 	if !ok {
+		b.logger.Debug("unhandled packet", "packet", fmt.Sprintf("%T", pk))
 		return
 	}
 
