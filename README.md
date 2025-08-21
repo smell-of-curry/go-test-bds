@@ -4,7 +4,7 @@
 
 ## Overview
 
-GoTestBDS is a designed to be a complete end-to-end testing framework for Minecraft Bedrock Dedicated Servers written in Go. GoTestBDS is built on top of [GopherTunnel](https://github.com/Sandertv/gophertunnel) and gives the ability to register fake clients to test your Script API BDS Addons.
+GoTestBDS is a designed to be a complete end-to-end testing framework for Minecraft Bedrock Dedicated Servers written in Go and TypeScript. GoTestBDS is built on top of [GopherTunnel](https://github.com/Sandertv/gophertunnel) giving the ability to register fake clients to test your Script API BDS Addons.
 
 ## Features
 
@@ -14,37 +14,6 @@ GoTestBDS is a designed to be a complete end-to-end testing framework for Minecr
 - [x] Sends text JSON packets to the BDS Server
 - [x] Smooth Navigation simulation
 - [x] Full UI and Form Automation
-
-## Example
-```go
-package main
-
-import (
-	"context"
-	"log/slog"
-
-	"github.com/FDUTCH/dummy_item_blocks/dummy"
-	"github.com/sandertv/gophertunnel/minecraft"
-	"github.com/smell-of-curry/go-test-bds/gotestbds"
-)
-
-func main() {
-	//This is recommended so that the bot has more information about the blocks, making its actions more accurate.
-	dummy.Register()
-
-	err := gotestbds.Test{
-		Dialer: minecraft.Dialer{
-			// your Dialer settings
-		},
-		RemoteAddress: "your_server.com:19132",
-		Logger:        slog.Default(),
-	}.RunCtx(context.Background())
-	
-	if err != nil {
-		slog.Error(err.Error())
-	}
-}
-```
 
 ## License
 
