@@ -43,6 +43,7 @@ func (t *Test) RunCtx(ctx context.Context) error {
 		t.InstructionPrefix = DefaultInstructionPrefix
 	}
 
+	t.Logger.Debug("dialing", "address", t.RemoteAddress)
 	conn, err := t.Dialer.DialContext(ctx, "raknet", t.RemoteAddress)
 	if err != nil {
 		return err

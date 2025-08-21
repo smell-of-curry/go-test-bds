@@ -1,0 +1,4 @@
+[Network]
+# The address of the server to connect to
+ServerAddress = "127.0.0.1:19132"
+LogLevel = "warn"
