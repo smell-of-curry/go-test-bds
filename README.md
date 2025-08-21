@@ -1,6 +1,6 @@
 # GO TEST BDS
 
-![Logo](images/logo.png)
+![Logo](images/banner.png)
 
 ## Overview
 
@@ -14,6 +14,7 @@ GoTestBDS is a designed to be a complete end-to-end testing framework for Minecr
 - [x] Sends text JSON packets to the BDS Server
 - [x] Smooth Navigation simulation
 - [x] Full UI and Form Automation
+- [ ] Auto tests itself by spinning up BDS Servers in github actions.
 
 ## How it works
 
