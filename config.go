@@ -8,9 +8,9 @@ import (
 
 // Config ...
 type Config struct {
-	Network struct {
+	LogLevel string
+	Network  struct {
 		ServerAddress string
-		LogLevel      string
 	}
 }
 
@@ -18,8 +18,8 @@ type Config struct {
 func DefaultConfig() Config {
 	c := Config{}
 
+	c.LogLevel = "debug"
 	c.Network.ServerAddress = "127.0.0.1:19132"
-	c.Network.LogLevel = "debug"
 
 	return c
 }

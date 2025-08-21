@@ -20,7 +20,7 @@ func main() {
 	dummy.Register()
 
 	var logLevel slog.Level
-	logLevel.UnmarshalText([]byte(config.Network.LogLevel))
+	logLevel.UnmarshalText([]byte(config.LogLevel))
 
 	err = (&gotestbds.Test{
 		Dialer: minecraft.Dialer{
