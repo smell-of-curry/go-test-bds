@@ -14,7 +14,7 @@
       "prettier --write",
       "npm run lint"
     ],
-    "*.{md}": [
+    "*.md": [
       "prettier --write"
     ]
   },
