@@ -1,13 +1,13 @@
-name: Go Lint
+name: Linter
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [main, master]
   pull_request:
 
 jobs:
   golangci:
-    name: Linter
+    name: GoLang Linter
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -22,3 +22,33 @@ jobs:
 
       - name: Formatting
         run: test -z $(go fmt ./...)
+
+  eslint:
+    name: ESLint Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js & Cache Dependencies
+        uses: actions/setup-node@v4
+        with:
+          node-version: "latest"
+          cache: "npm"
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Run ESLint (SARIF)
+        run: |
+          npx eslint --config eslint.config.mjs . \
+            --format=@microsoft/eslint-formatter-sarif \
+            --output-file=eslint-results.sarif || echo "ESLint completed with warnings/errors"
+
+      - name: Upload ESLint SARIF
+        if: always() && hashFiles('eslint-results.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: eslint-results.sarif
+          wait-for-processing: true

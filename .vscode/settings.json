@@ -1,20 +1,32 @@
 {
-    "cSpell.words": [
-        "Chestplate",
-        "Elytra",
-        "gamemode",
-        "gophertunnel",
-        "gotestbds",
-        "hitbox",
-        "hotbar",
-        "mathgl",
-        "mcmath",
-        "nbtconv",
-        "nbter",
-        "Overworld",
-        "Respawn",
-        "sandertv",
-        "subchunk",
-        "XUID"
-    ]
+  "eslint.validate": ["typescript"],
+  "editor.codeActionsOnSave": {
+    "source.fixAll.eslint": "explicit"
+  },
+  "eslint.run": "onSave",
+  "editor.formatOnSave": true,
+  "typescript.validate.enable": true,
+  "files.autoSave": "off",
+  "files.eol": "\n",
+  "cSpell.ignoreRegExpList": ["/§./g"],
+  "cSpell.words": [
+    "Chestplate",
+    "Elytra",
+    "equippable",
+    "gamemode",
+    "gophertunnel",
+    "gotestbds",
+    "hitbox",
+    "hotbar",
+    "mathgl",
+    "mcmath",
+    "nbtconv",
+    "nbter",
+    "Overworld",
+    "Respawn",
+    "sandertv",
+    "SARIF",
+    "subchunk",
+    "XUID"
+  ]
 }

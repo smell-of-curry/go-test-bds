@@ -1,0 +1,25 @@
+# Universal command helper for cross-platform compatibility
+get_cmd() {
+  local cmd="$1"
+  case "$(uname)" in
+  *CYGWIN* | *MINGW* | *MSYS*)
+    echo "${cmd}.cmd"
+    ;;
+  *)
+    echo "$cmd"
+    ;;
+  esac
+}
+
+# If /gotestbds/ has changes, run typescript type generator.
+if git diff --cached --name-only | grep -q '^gotestbds/'; then
+  echo "🔍 Running TypeScript type generator..."
+  $(get_cmd npm) run generate:types
+fi
+
+# Run TypeScript type check on all files
+echo "🔍 Running TypeScript type check..."
+$(get_cmd npx) tsc --noEmit
+
+# Run lint-staged on staged files
+lint-staged

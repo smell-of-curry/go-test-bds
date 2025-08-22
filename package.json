@@ -1,0 +1,53 @@
+{
+  "name": "go-test-bds",
+  "version": "1.0.0",
+  "description": "A library for using go-test-bds in script API",
+  "main": "scripts/index.ts",
+  "scripts": {
+    "prepare": "husky",
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "lint": "eslint --config eslint.config.mjs . --fix",
+    "generate:types": "ts-node --project tsconfig.json scripts/generateTypes.ts"
+  },
+  "lint-staged": {
+    "*.ts": [
+      "prettier --write",
+      "npm run lint"
+    ],
+    "*.md": [
+      "prettier --write"
+    ]
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/smell-of-curry/go-test-bds.git"
+  },
+  "keywords": [
+    "script",
+    "api",
+    "minecraft",
+    "bds",
+    "gophertunnel",
+    "servers",
+    "testing"
+  ],
+  "author": "Smell of Curry",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/smell-of-curry/go-test-bds/issues"
+  },
+  "homepage": "https://github.com/smell-of-curry/go-test-bds#readme",
+  "dependencies": {
+    "@minecraft/server": "^2.2.0-beta.1.21.100-stable"
+  },
+  "devDependencies": {
+    "@typescript-eslint/eslint-plugin": "^8.33.0",
+    "@typescript-eslint/parser": "^8.33.0",
+    "eslint": "^9.33.0",
+    "eslint-plugin-import": "^2.31.0",
+    "eslint-plugin-minecraft-linting": "^2.0.5",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.1.5",
+    "ts-node": "^10.9.2"
+  }
+}
