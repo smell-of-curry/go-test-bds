@@ -7,6 +7,7 @@ import (
 	"github.com/df-mc/dragonfly/server/item"
 	w "github.com/df-mc/dragonfly/server/world"
 	"github.com/go-gl/mathgl/mgl64"
+	"github.com/sandertv/gophertunnel/minecraft/protocol"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/mcmath/physics/movement"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/world"
 )
@@ -56,29 +57,32 @@ type Handler interface {
 	HandleReachTarget(actor *Actor)
 	// HandleStopNavigation ...
 	HandleStopNavigation(actor *Actor)
+	// HandleCommandOutput ...
+	HandleCommandOutput(actor *Actor, messages []protocol.CommandOutputMessage)
 }
 
 var _ Handler = NopHandler{}
 
 type NopHandler struct{}
 
-func (NopHandler) HandleTick(actor *Actor, tick uint64)                                  {}
-func (NopHandler) HandleMove(ctx *Context, rot *cube.Rotation, pos *mgl64.Vec3)          {}
-func (NopHandler) HandleInput(ctx *Context, input *movement.Input)                       {}
-func (NopHandler) HandleStartBreak(ctx *Context, pos cube.Pos)                           {}
-func (NopHandler) HandleBlockBreak(ctx *Context, pos cube.Pos, block w.Block)            {}
-func (NopHandler) HandleAbortBreaking(ctx *Context, pos cube.Pos)                        {}
-func (NopHandler) HandleAttack(ctx *Context, entity world.Entity)                        {}
-func (NopHandler) HandleJump(ctx *Context)                                               {}
-func (NopHandler) HandleAddEffect(ctx *Context, eff effect.Effect)                       {}
-func (NopHandler) HandleRemoveEffect(ctx *Context, eff effect.Type)                      {}
-func (NopHandler) HandleUseItem(ctx *Context, item item.Stack)                           {}
-func (NopHandler) HandleUseItemOnBlock(ctx *Context, item item.Stack, pos cube.Pos)      {}
-func (NopHandler) HandleUseItemOnEntity(ctx *Context, item item.Stack, ent world.Entity) {}
-func (NopHandler) HandleReleaseItem(ctx *Context, item item.Stack)                       {}
-func (NopHandler) HandleReceiveMessage(actor *Actor, msg string)                         {}
-func (NopHandler) HandleReceiveForm(ctx *Context, form *Form)                            {}
-func (NopHandler) HandleReceiveSign(actor *Actor, sign *Sign)                            {}
-func (NopHandler) HandleReceiveDialogue(ctx *Context, dialogue *Dialogue)                {}
-func (NopHandler) HandleReachTarget(actor *Actor)                                        {}
-func (NopHandler) HandleStopNavigation(actor *Actor)                                     {}
+func (NopHandler) HandleTick(actor *Actor, tick uint64)                                         {}
+func (NopHandler) HandleMove(ctx *Context, rot *cube.Rotation, pos *mgl64.Vec3)                 {}
+func (NopHandler) HandleInput(ctx *Context, input *movement.Input)                              {}
+func (NopHandler) HandleStartBreak(ctx *Context, pos cube.Pos)                                  {}
+func (NopHandler) HandleBlockBreak(ctx *Context, pos cube.Pos, block w.Block)                   {}
+func (NopHandler) HandleAbortBreaking(ctx *Context, pos cube.Pos)                               {}
+func (NopHandler) HandleAttack(ctx *Context, entity world.Entity)                               {}
+func (NopHandler) HandleJump(ctx *Context)                                                      {}
+func (NopHandler) HandleAddEffect(ctx *Context, eff effect.Effect)                              {}
+func (NopHandler) HandleRemoveEffect(ctx *Context, eff effect.Type)                             {}
+func (NopHandler) HandleUseItem(ctx *Context, item item.Stack)                                  {}
+func (NopHandler) HandleUseItemOnBlock(ctx *Context, item item.Stack, pos cube.Pos)             {}
+func (NopHandler) HandleUseItemOnEntity(ctx *Context, item item.Stack, ent world.Entity)        {}
+func (NopHandler) HandleReleaseItem(ctx *Context, item item.Stack)                              {}
+func (NopHandler) HandleReceiveMessage(actor *Actor, msg string)                                {}
+func (NopHandler) HandleReceiveForm(ctx *Context, form *Form)                                   {}
+func (NopHandler) HandleReceiveSign(actor *Actor, sign *Sign)                                   {}
+func (NopHandler) HandleReceiveDialogue(ctx *Context, dialogue *Dialogue)                       {}
+func (NopHandler) HandleReachTarget(actor *Actor)                                               {}
+func (NopHandler) HandleStopNavigation(actor *Actor)                                            {}
+func (h NopHandler) HandleCommandOutput(actor *Actor, messages []protocol.CommandOutputMessage) {}

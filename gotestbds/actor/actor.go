@@ -523,6 +523,11 @@ func (a *Actor) LastDialogue() (*Dialogue, bool) {
 	return a.lastDialogue, true
 }
 
+// ReceiveCommandOutput makes Actor receive command output messages.
+func (a *Actor) ReceiveCommandOutput(messages []protocol.CommandOutputMessage) {
+	a.Handler().HandleCommandOutput(a, messages)
+}
+
 // UseItem uses item in heldSlot.
 func (a *Actor) UseItem() error {
 	ctx := event.C(a)
