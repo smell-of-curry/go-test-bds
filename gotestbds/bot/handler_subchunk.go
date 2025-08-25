@@ -46,7 +46,7 @@ func (*SubChunkHandler) Handle(p packet.Packet, b *Bot, a *actor.Actor) error {
 
 		c, ok := a.World().Chunk(chunkPos)
 		if !ok {
-			c.Chunk = chunk.New(airRid, dim.Range())
+			c.Chunk = chunk.New(b.airRid, dim.Range())
 			a.World().AddChunk(chunkPos, c)
 		}
 

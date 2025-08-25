@@ -29,13 +29,13 @@ func (*LevelChunkHandler) Handle(p packet.Packet, b *Bot, a *actor.Actor) error 
 	var blockEntities []chunk.BlockEntity
 
 	// in case of an error we are just ignoring it, cause blocks are sent via SubChunk.
-	ch, err := chunk.NetworkDecodeBuffer(airRid, buf, int(levelChunk.SubChunkCount), dimensionRange)
+	ch, err := chunk.NetworkDecodeBuffer(b.airRid, buf, int(levelChunk.SubChunkCount), dimensionRange)
 	if err == nil {
 		// reading one byte for the border block count.
 		_, _ = buf.ReadByte()
 		blockEntities, err = decodeBlockEntities(buf)
 	} else {
-		ch = chunk.New(airRid, dim.Range())
+		ch = chunk.New(b.airRid, dim.Range())
 	}
 
 	a.World().AddChunk(w.ChunkPos(levelChunk.Position), world.NewColumn(ch, blockEntities))

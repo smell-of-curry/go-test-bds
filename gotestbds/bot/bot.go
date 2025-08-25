@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/df-mc/dragonfly/server/world/chunk"
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/actor"
@@ -16,6 +17,7 @@ type Bot struct {
 	a      *actor.Actor
 	closed chan struct{}
 	conn   Conn
+	airRid uint32
 
 	handlers                  map[uint32]packetHandler
 	tasks                     chan task
@@ -41,6 +43,7 @@ func NewBot(conn Conn, logger *slog.Logger) *Bot {
 		packets:                   make(chan packet.Packet, 256),
 		logger:                    logger,
 	}
+	bot.airRid, _ = chunk.StateToRuntimeID("minecraft:air", nil)
 	bot.a = actor.Config{
 		Conn:      conn,
 		Inventory: inventory.NewHandle(36, protocol.ContainerInventory, bot),

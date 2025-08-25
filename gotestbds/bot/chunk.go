@@ -13,16 +13,6 @@ import (
 //go:linkname decodeSubChunk github.com/df-mc/dragonfly/server/world/chunk.decodeSubChunk
 func decodeSubChunk(buf *bytes.Buffer, c *chunk.Chunk, index *byte, e chunk.Encoding) (*chunk.SubChunk, error)
 
-func init() {
-	rid, ok := chunk.StateToRuntimeID("minecraft:air", nil)
-	if !ok {
-		panic("cannot find air runtime ID")
-	}
-	airRid = rid
-}
-
-var airRid uint32
-
 // decodeBlockEntities decodes blockEntities from buf.
 func decodeBlockEntities(buf *bytes.Buffer) ([]chunk.BlockEntity, error) {
 	var blockEntities []chunk.BlockEntity
