@@ -8,18 +8,18 @@ import (
 	"github.com/smell-of-curry/go-test-bds/gotestbds/bot"
 )
 
-// CustomFormRespond ...
+// CustomFormRespond is an instruction to respond to a custom form.
 type CustomFormRespond struct {
 	Options []Option `json:"options"`
 	Ignore  bool     `json:"ignore"`
 }
 
-// Name ...
+// Name is the name of the instruction.
 func (*CustomFormRespond) Name() string {
 	return "customFormRespond"
 }
 
-// Run ...
+// Run is the function that runs the instruction.
 func (c *CustomFormRespond) Run(ctx context.Context, b *bot.Bot) error {
 	return execute(b, func(a *actor.Actor) error {
 		f, ok := a.LastForm()
@@ -80,7 +80,7 @@ func (c *CustomFormRespond) Run(ctx context.Context, b *bot.Bot) error {
 	})
 }
 
-// Option stores index to custom form element & it's value.
+// Option stores index to custom form element & its value.
 type Option struct {
 	Index int `json:"index"`
 	Value any `json:"value"`

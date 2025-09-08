@@ -4,6 +4,9 @@ import { TemporaryCallback } from "../utils/temporaryCallback";
 
 world.afterEvents.playerSpawn.subscribe(async (e) => {
   const message = "Hello, World!";
+
+  // This is a callback that just verifies that the bot successfully sent the message.
+  // This is not necessary for the test to pass, but it's a good way to verify that the bot is working.
   TemporaryCallback.subscribe("beforeEvents", "chatSend", (remove, data) => {
     // Check if e.player, sends a message that contains "Hello, World!"
     if (data.sender.id !== e.player.id) return;
@@ -14,7 +17,5 @@ world.afterEvents.playerSpawn.subscribe(async (e) => {
     console.log("Bot successfully sent the message");
   });
 
-  await runAction(e.player, "chat", {
-    message,
-  });
+  await runAction(e.player, "chat", { message });
 });

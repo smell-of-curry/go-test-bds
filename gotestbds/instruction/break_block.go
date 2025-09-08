@@ -9,18 +9,18 @@ import (
 	"github.com/smell-of-curry/go-test-bds/gotestbds/bot"
 )
 
-// BreakBlock ...
+// BreakBlock is an instruction to break a block at a given position.
 type BreakBlock struct {
 	Callbacker Callbacker `json:"_"`
 	Pos        Pos        `json:"pos"`
 }
 
-// Name ...
+// Name is the name of the instruction.
 func (*BreakBlock) Name() string {
 	return "breakBlock"
 }
 
-// Run ...
+// Run is the function that runs the instruction.
 func (action *BreakBlock) Run(ctx context.Context, b *bot.Bot) error {
 	breakCh := make(chan bool)
 	err := execute(b, func(a *actor.Actor) error {

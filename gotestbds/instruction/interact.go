@@ -6,15 +6,15 @@ import (
 	"github.com/smell-of-curry/go-test-bds/gotestbds/bot"
 )
 
-// Interact ...
+// Interact uses the item currently held by the Actor.
 type Interact struct{}
 
-// Name ...
+// Name is the name of the instruction.
 func (*Interact) Name() string {
 	return "interact"
 }
 
-// Run ...
+// Run is the function that runs the instruction.
 func (*Interact) Run(ctx context.Context, b *bot.Bot) error {
 	return execute(b, func(a *actor.Actor) error {
 		a.UseItem()

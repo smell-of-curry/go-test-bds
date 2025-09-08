@@ -10,12 +10,12 @@ import (
 // Attack attacks entity from Actor's view direction.
 type Attack struct{}
 
-// Name ...
+// Name is the name of the instruction.
 func (*Attack) Name() string {
 	return "attack"
 }
 
-// Run ...
+// Run is the function that runs the instruction.
 func (a *Attack) Run(ctx context.Context, b *bot.Bot) error {
 	return execute(b, func(a *actor.Actor) error {
 		return a.Attack()

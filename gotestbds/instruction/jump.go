@@ -6,15 +6,15 @@ import (
 	"github.com/smell-of-curry/go-test-bds/gotestbds/bot"
 )
 
-// Jump ...
+// Jump makes the Actor jump.
 type Jump struct{}
 
-// Name ...
+// Name is the name of the instruction.
 func (*Jump) Name() string {
 	return "jump"
 }
 
-// Run ...
+// Run is the function that runs the instruction.
 func (*Jump) Run(ctx context.Context, b *bot.Bot) error {
 	return execute(b, func(a *actor.Actor) error {
 		a.Jump()

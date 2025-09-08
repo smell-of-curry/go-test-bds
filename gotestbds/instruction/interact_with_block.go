@@ -9,19 +9,19 @@ import (
 	"github.com/smell-of-curry/go-test-bds/gotestbds/bot"
 )
 
-// InteractWithBlock ...
+// InteractWithBlock uses the held item on a block at the given position.
 type InteractWithBlock struct {
 	Pos      Pos        `json:"pos"`
 	Face     cube.Face  `json:"face"`
 	ClickPos mgl64.Vec3 `json:"clickPos"`
 }
 
-// Name ...
+// Name is the name of the instruction.
 func (*InteractWithBlock) Name() string {
 	return "interactWithBlock"
 }
 
-// Run ...
+// Run is the function that runs the instruction.
 func (i *InteractWithBlock) Run(ctx context.Context, b *bot.Bot) error {
 	return execute(b, func(a *actor.Actor) error {
 		a.UseItemOnBlock(cube.Pos(i.Pos), i.Face, i.ClickPos)

@@ -9,18 +9,18 @@ import (
 	"github.com/smell-of-curry/go-test-bds/gotestbds/bot"
 )
 
-// Rejoin ...
+// Rejoin triggers the handler's Rejoin() after a configurable delay.
 type Rejoin struct {
 	// Delay is a delay in seconds before re-run.
 	Delay int `json:"delay"`
 }
 
-// Name ...
+// Name is the name of the instruction.
 func (*Rejoin) Name() string {
 	return "rejoin"
 }
 
-// Run ...
+// Run is the function that runs the instruction.
 func (r *Rejoin) Run(ctx context.Context, b *bot.Bot) error {
 	return execute(b, func(a *actor.Actor) error {
 		handler := a.Handler()

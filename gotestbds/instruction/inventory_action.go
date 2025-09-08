@@ -31,12 +31,12 @@ type InventoryAction struct {
 	Count       int    `json:"count"`
 }
 
-// Name ...
+// Name is the name of the instruction.
 func (i *InventoryAction) Name() string {
 	return "inventoryAction"
 }
 
-// Run ...
+// Run is the function that runs the instruction.
 func (i *InventoryAction) Run(ctx context.Context, b *bot.Bot) error {
 	return execute(b, func(a *actor.Actor) error {
 		source, ok := invByName(a, i.Source.Inventory)

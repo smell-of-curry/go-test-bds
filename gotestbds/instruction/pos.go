@@ -9,7 +9,7 @@ import (
 // Pos is a position of the block.
 type Pos cube.Pos
 
-// UnmarshalJSON ...
+// UnmarshalJSON supports both array-style and object-style position inputs.
 func (p *Pos) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, p); err == nil {
 		return nil

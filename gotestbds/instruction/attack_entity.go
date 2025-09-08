@@ -8,17 +8,17 @@ import (
 	"github.com/smell-of-curry/go-test-bds/gotestbds/bot"
 )
 
-// AttackEntity ...
+// AttackEntity is an instruction to attack an entity.
 type AttackEntity struct {
 	EntityRuntimeID uint64 `json:"entityRuntimeID"`
 }
 
-// Name ...
+// Name is the name of the instruction.
 func (*AttackEntity) Name() string {
 	return "attackEntity"
 }
 
-// Run ...
+// Run is the function that runs the instruction.
 func (action *AttackEntity) Run(_ context.Context, b *bot.Bot) error {
 	return execute(b, func(a *actor.Actor) error {
 		ent, ok := a.World().Entity(action.EntityRuntimeID)

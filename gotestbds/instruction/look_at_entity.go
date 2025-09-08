@@ -7,17 +7,17 @@ import (
 	"github.com/smell-of-curry/go-test-bds/gotestbds/bot"
 )
 
-// LookAtEntity ...
+// LookAtEntity turns the Actor to look at an entity by runtime ID.
 type LookAtEntity struct {
 	RuntimeID uint64 `json:"runtimeID"`
 }
 
-// Name ...
+// Name is the name of the instruction.
 func (*LookAtEntity) Name() string {
 	return "lookAtEntity"
 }
 
-// Run ...
+// Run is the function that runs the instruction.
 func (l *LookAtEntity) Run(ctx context.Context, b *bot.Bot) error {
 	return execute(b, func(a *actor.Actor) error {
 		ent, ok := a.World().Entity(l.RuntimeID)

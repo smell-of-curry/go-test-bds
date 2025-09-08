@@ -7,17 +7,17 @@ import (
 	"github.com/smell-of-curry/go-test-bds/gotestbds/bot"
 )
 
-// LookAtLocation ...
+// LookAtLocation turns the Actor to look at a world-space location.
 type LookAtLocation struct {
 	Location mgl64.Vec3 `json:"location"`
 }
 
-// Name ...
+// Name is the name of the instruction.
 func (*LookAtLocation) Name() string {
 	return "lookAtLocation"
 }
 
-// Run ...
+// Run is the function that runs the instruction.
 func (l *LookAtLocation) Run(ctx context.Context, b *bot.Bot) error {
 	return execute(b, func(a *actor.Actor) error {
 		a.LookAt(l.Location)

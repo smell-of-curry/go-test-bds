@@ -6,10 +6,10 @@ import (
 	"github.com/smell-of-curry/go-test-bds/gotestbds/bot"
 )
 
-// StopUsingItem ...
+// StopUsingItem releases the currently used item.
 type StopUsingItem struct{}
 
-// Name ...
+// Name is the name of the instruction.
 func (*StopUsingItem) Name() string {
 	return "stopUsingItem"
 }

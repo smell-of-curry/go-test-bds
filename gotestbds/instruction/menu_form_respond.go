@@ -8,18 +8,18 @@ import (
 	"github.com/smell-of-curry/go-test-bds/gotestbds/bot"
 )
 
-// MenuFormRespond ...
+// MenuFormRespond responds to a menu form with a selected button, or ignores it.
 type MenuFormRespond struct {
 	Response int  `json:"response"`
 	Ignore   bool `json:"ignore"`
 }
 
-// Name ...
+// Name is the name of the instruction.
 func (*MenuFormRespond) Name() string {
 	return "menuFormRespond"
 }
 
-// Run ...
+// Run is the function that runs the instruction.
 func (m *MenuFormRespond) Run(ctx context.Context, b *bot.Bot) error {
 	return execute(b, func(a *actor.Actor) error {
 		f, ok := a.LastForm()

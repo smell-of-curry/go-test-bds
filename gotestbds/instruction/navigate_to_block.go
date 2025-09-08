@@ -9,18 +9,18 @@ import (
 	"github.com/smell-of-curry/go-test-bds/gotestbds/bot"
 )
 
-// NavigateToBlock ...
+// NavigateToBlock navigates the Actor to a target block position.
 type NavigateToBlock struct {
 	Callbacker Callbacker `json:"_"`
 	Pos        Pos        `json:"pos"`
 }
 
-// Name ...
+// Name is the name of the instruction.
 func (*NavigateToBlock) Name() string {
 	return "navigateToBlock"
 }
 
-// Run ...
+// Run is the function that runs the instruction.
 func (n *NavigateToBlock) Run(ctx context.Context, b *bot.Bot) error {
 	navigateCh := make(chan bool)
 	_ = execute(b, func(a *actor.Actor) error {

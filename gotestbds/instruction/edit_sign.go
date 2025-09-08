@@ -8,17 +8,17 @@ import (
 	"github.com/smell-of-curry/go-test-bds/gotestbds/bot"
 )
 
-// EditSign dits last Sign sent to Actor.
+// EditSign edits the last Sign sent to the Actor.
 type EditSign struct {
 	Text string `json:"text"`
 }
 
-// Name ...
+// Name is the name of the instruction.
 func (*EditSign) Name() string {
 	return "editSign"
 }
 
-// Run ...
+// Run is the function that runs the instruction.
 func (e *EditSign) Run(ctx context.Context, b *bot.Bot) error {
 	return execute(b, func(a *actor.Actor) error {
 		sign, ok := a.LastSign()

@@ -6,15 +6,15 @@ import (
 	"github.com/smell-of-curry/go-test-bds/gotestbds/bot"
 )
 
-// StopNavigating ...
+// StopNavigating stops the current navigation.
 type StopNavigating struct{}
 
-// Name ...
+// Name is the name of the instruction.
 func (*StopNavigating) Name() string {
 	return "stopNavigating"
 }
 
-// Run ...
+// Run is the function that runs the instruction.
 func (*StopNavigating) Run(ctx context.Context, b *bot.Bot) error {
 	return execute(b, func(a *actor.Actor) error {
 		a.StopNavigating()

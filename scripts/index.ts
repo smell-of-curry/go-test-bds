@@ -5,6 +5,9 @@ import type {
 } from "./__generated__/types";
 import { TemporaryCallback } from "./utils/temporaryCallback";
 
+/**
+ * The status of an instruction. Returned by the bot.
+ */
 interface InstructionStatus {
   status: "success" | "error";
   message?: string;
@@ -15,6 +18,8 @@ interface InstructionStatus {
  * @param player - The player to send the instruction to.
  * @param action - The action to send.
  * @param parameters - The parameters to send.
+ * @param timeout - The timeout for the action.
+ * @returns A promise that resolves to the status of the instruction.
  */
 function sendInstructionToBot<T extends InstructionAction>(
   bot: Player,

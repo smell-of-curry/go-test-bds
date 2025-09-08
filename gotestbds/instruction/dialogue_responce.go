@@ -14,12 +14,12 @@ type DialogueResponse struct {
 	Ignore      bool `json:"ignore"`
 }
 
-// Name ...
+// Name is the name of the instruction.
 func (d *DialogueResponse) Name() string {
 	return "dialogueResponse"
 }
 
-// Run ...
+// Run is the function that runs the instruction.
 func (d *DialogueResponse) Run(ctx context.Context, b *bot.Bot) error {
 	return execute(b, func(a *actor.Actor) error {
 		dialogue, ok := a.LastDialogue()

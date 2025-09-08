@@ -8,17 +8,17 @@ import (
 	"github.com/smell-of-curry/go-test-bds/gotestbds/bot"
 )
 
-// LookAtBlock ...
+// LookAtBlock turns the Actor to look at a block position.
 type LookAtBlock struct {
 	Pos Pos `json:"pos"`
 }
 
-// Name ...
+// Name is the name of the instruction.
 func (*LookAtBlock) Name() string {
 	return "lookAtBlock"
 }
 
-// Run ...
+// Run is the function that runs the instruction.
 func (l *LookAtBlock) Run(ctx context.Context, b *bot.Bot) error {
 	return execute(b, func(a *actor.Actor) error {
 		a.LookAtBlock(cube.Pos(l.Pos))

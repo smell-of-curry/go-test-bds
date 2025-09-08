@@ -12,12 +12,12 @@ type Pull struct {
 	Callbacker
 }
 
-// NewPull ...
+// NewPull creates a new empty Pull with a no-op Callbacker.
 func NewPull() *Pull {
 	return &Pull{pull: make(map[string]func() Instruction), Callbacker: NopCallbacker{}}
 }
 
-// UnmarshalJSON ...
+// UnmarshalJSON decodes a message into a specific Instruction instance.
 func (pull *Pull) UnmarshalJSON(data []byte) error {
 	var definition struct {
 		Action     string          `json:"action"`
@@ -42,7 +42,7 @@ func (pull *Pull) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// Instruction ...
+// Instruction returns a new instance of an instruction by name.
 func (pull *Pull) Instruction(name string) (Instruction, bool) {
 	f, ok := pull.pull[name]
 	if !ok {
@@ -57,7 +57,7 @@ func (pull *Pull) Register(f func() Instruction) {
 	pull.pull[i.Name()] = f
 }
 
-// Decode ...
+// Decode parses a JSON message into an Instruction instance.
 func (pull *Pull) Decode(msg string) (Instruction, error) {
 	err := json.Unmarshal([]byte(msg), pull)
 	if err != nil {

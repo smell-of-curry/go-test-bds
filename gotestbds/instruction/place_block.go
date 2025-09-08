@@ -8,17 +8,17 @@ import (
 	"github.com/smell-of-curry/go-test-bds/gotestbds/bot"
 )
 
-// PlaceBlock ...
+// PlaceBlock places the held block at the given position.
 type PlaceBlock struct {
 	Pos Pos `json:"pos"`
 }
 
-// Name ...
+// Name is the name of the instruction.
 func (p *PlaceBlock) Name() string {
 	return "placeBlock"
 }
 
-// Run ...
+// Run is the function that runs the instruction.
 func (p *PlaceBlock) Run(_ context.Context, b *bot.Bot) error {
 	return execute(b, func(a *actor.Actor) error {
 		return a.PlaceBlock(cube.Pos(p.Pos))

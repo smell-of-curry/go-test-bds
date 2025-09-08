@@ -1,6 +1,7 @@
 // This will read the instructions from @gotestbds/instruction and generate TypeScript types.
 // Output is written to scripts/__generated__/types.ts
 
+import { execSync } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
 
@@ -8,11 +9,13 @@ type GoStructField = {
   name: string | null; // null => embedded field
   type: string;
   jsonTag?: string;
+  doc?: string;
 };
 
 type GoStruct = {
   name: string;
   fields: GoStructField[];
+  doc?: string;
 };
 
 type InstructionInfo = {
@@ -25,10 +28,11 @@ const INSTRUCTION_DIR = path.resolve(ROOT, "gotestbds", "instruction");
 const GENERATED_DIR = path.resolve(__dirname, "__generated__");
 const GENERATED_FILE = path.join(GENERATED_DIR, "types.ts");
 
-function readFile(filePath: string): string {
-  return fs.readFileSync(filePath, "utf8");
-}
-
+/**
+ * Lists all Go files in a directory.
+ * @param dir
+ * @returns
+ */
 function listGoFiles(dir: string): string[] {
   return fs
     .readdirSync(dir)
@@ -36,20 +40,63 @@ function listGoFiles(dir: string): string[] {
     .map((f) => path.join(dir, f));
 }
 
+/**
+ * Parses Go structs from a string.
+ * @param content
+ * @returns
+ */
 function parseGoStructs(content: string): GoStruct[] {
   const structs: GoStruct[] = [];
+  // Capture optional leading doc comments (//... or /* ... */) immediately before the type decl
   const structRegex =
-    /type\s+([A-Za-z_][A-Za-z0-9_]*)\s+struct\s*\{([\s\S]*?)\}/g;
+    /(?:\n|^)((?:\s*\/\/[^\n]*\n|\s*\/\*[\s\S]*?\*\/\s*\n)*)\s*type\s+([A-Za-z_][A-Za-z0-9_]*)\s+struct\s*\{([\s\S]*?)\}/g;
   let match: RegExpExecArray | null;
   while ((match = structRegex.exec(content))) {
-    const [, name, body] = match;
+    const [, leadingDocsRaw, name, body] = match;
     const fields: GoStructField[] = [];
     const lines = body.split(/\r?\n/);
+    let pendingDoc: string[] = [];
+    let inBlockDoc = false;
+    let blockDocBuf: string[] = [];
     for (const rawLine of lines) {
       const line = rawLine.trim();
-      if (!line || line.startsWith("//")) continue;
+      if (!line) continue;
+      // Handle block comments spanning lines within struct body
+      if (inBlockDoc) {
+        const endIdx = line.indexOf("*/");
+        if (endIdx !== -1) {
+          blockDocBuf.push(line.slice(0, endIdx));
+          pendingDoc.push(...blockDocBuf.map((s) => s.trim()));
+          inBlockDoc = false;
+          blockDocBuf = [];
+        } else {
+          blockDocBuf.push(line);
+        }
+        continue;
+      }
+      if (line.startsWith("/*")) {
+        inBlockDoc = true;
+        const afterStart = line.slice(2);
+        const endIdx = afterStart.indexOf("*/");
+        if (endIdx !== -1) {
+          const inner = afterStart.slice(0, endIdx);
+          pendingDoc.push(inner.trim());
+          inBlockDoc = false;
+        } else {
+          blockDocBuf = [afterStart];
+        }
+        continue;
+      }
+      if (line.startsWith("//")) {
+        pendingDoc.push(line.replace(/^\/\//, "").trim());
+        continue;
+      }
+      // Capture trailing inline comment as doc, before we strip it
+      const inlineDocMatch = /^(.*?)(?:\s*\/\/\s*(.*))?$/.exec(line);
+      const before = inlineDocMatch?.[1] ?? line;
+      const trailingDoc = inlineDocMatch?.[2]?.trim();
       // Handle trailing comments and struct closing
-      const cleaned = line.replace(/\s*\/\/.*$/, "").replace(/,$/, "");
+      const cleaned = before.replace(/\s*\/\/.*$/, "").replace(/,$/, "");
       if (!cleaned) continue;
 
       // Match with explicit name:  FieldName Type `json:"..."`
@@ -59,7 +106,16 @@ function parseGoStructs(content: string): GoStruct[] {
         );
       if (m) {
         const [, fieldName, fieldType, jsonTag] = m;
-        fields.push({ name: fieldName, type: fieldType, jsonTag });
+        const doc = [...pendingDoc, ...(trailingDoc ? [trailingDoc] : [])]
+          .join(" ")
+          .trim();
+        fields.push({
+          name: fieldName,
+          type: fieldType,
+          jsonTag,
+          doc: doc || undefined,
+        });
+        pendingDoc = [];
         continue;
       }
 
@@ -70,15 +126,35 @@ function parseGoStructs(content: string): GoStruct[] {
         );
       if (m) {
         const [, fieldType, jsonTag] = m;
-        fields.push({ name: null, type: fieldType, jsonTag });
+        const doc = [...pendingDoc, ...(trailingDoc ? [trailingDoc] : [])]
+          .join(" ")
+          .trim();
+        fields.push({
+          name: null,
+          type: fieldType,
+          jsonTag,
+          doc: doc || undefined,
+        });
+        pendingDoc = [];
         continue;
       }
     }
-    structs.push({ name, fields });
+    const structDoc = (leadingDocsRaw || "")
+      .split(/\r?\n/)
+      .map((l) => l.replace(/^\s*\/\//, "").trim())
+      .filter((l) => l.length > 0)
+      .join(" ")
+      .trim();
+    structs.push({ name, fields, doc: structDoc || undefined });
   }
   return structs;
 }
 
+/**
+ * Parses instruction actions from a string.
+ * @param content
+ * @returns
+ */
 function parseInstructionActions(content: string): InstructionInfo[] {
   const infos: InstructionInfo[] = [];
   // Matches: func (*TypeName) Name() string { return "action" }
@@ -92,6 +168,11 @@ function parseInstructionActions(content: string): InstructionInfo[] {
   return infos;
 }
 
+/**
+ * Converts a Go primitive type to a TypeScript type.
+ * @param goType
+ * @returns
+ */
 function goPrimitiveToTs(goType: string): string | null {
   const t = goType.replace(/^\*+/, "");
   switch (t) {
@@ -118,6 +199,11 @@ function goPrimitiveToTs(goType: string): string | null {
   return null;
 }
 
+/**
+ * Maps an external Go type to a TypeScript type.
+ * @param goType
+ * @returns
+ */
 function mapExternalGoTypeToTs(goType: string): string | null {
   const t = goType.replace(/^\*+/, "");
   if (t === "cube.Pos") return "Pos";
@@ -128,6 +214,11 @@ function mapExternalGoTypeToTs(goType: string): string | null {
   return null;
 }
 
+/**
+ * Converts a Go type to a TypeScript type.
+ * @param goType
+ * @returns
+ */
 function tsForGoType(goType: string): string {
   // Arrays: []T
   const arrayMatch = /^\[\](.+)$/.exec(goType);
@@ -154,6 +245,13 @@ function tsForGoType(goType: string): string {
   return base;
 }
 
+/**
+ * Generates a TypeScript interface for a Go struct.
+ * @param s
+ * @param allStructs
+ * @param visited
+ * @returns
+ */
 function generateTsForStruct(
   s: GoStruct,
   allStructs: Map<string, GoStruct>,
@@ -204,16 +302,41 @@ function generateTsForStruct(
     if (!prop || prop === "-") continue;
 
     const tsType = tsForGoType(f.type);
+    if (f.doc) {
+      fieldLines.push(formatJsDoc(f.doc, "  "));
+    }
     fieldLines.push(`  ${prop}: ${tsType};`);
   }
 
+  if (s.doc) {
+    out += formatJsDoc(s.doc, "") + "\n";
+  }
   out += `export interface ${s.name} {\n${fieldLines.join("\n")}\n}\n\n`;
   return out;
 }
 
+/**
+ * Formats text into a JSDoc block with the given indentation.
+ */
+function formatJsDoc(text: string, indent: string): string {
+  const lines = text
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0);
+  if (lines.length === 0) return "";
+  if (lines.length === 1) {
+    return `${indent}/** ${lines[0]} */`;
+  }
+  const body = lines.map((l) => `${indent} * ${l}`).join("\n");
+  return `${indent}/**\n${body}\n${indent} */`;
+}
+
+/**
+ * Main function to generate TypeScript types.
+ */
 function main() {
   const files = listGoFiles(INSTRUCTION_DIR);
-  const contents = files.map(readFile);
+  const contents = files.map((filePath) => fs.readFileSync(filePath, "utf8"));
 
   // Aggregate all structs and instruction actions
   const allStructsArr = contents.flatMap(parseGoStructs);
@@ -234,11 +357,7 @@ function main() {
   ts += `// AUTO-GENERATED by scripts/generateTypes.ts. Do not edit manually.\n`;
   ts += `// Generated at ${new Date().toISOString()}\n\n`;
   ts += `// Shared external types mapped from Go:\n`;
-  ts += `export type Vec3 = [number, number, number];\n`;
-  ts += `export type Pos = { x: number; y: number; z: number };\n`;
-  ts += `export type Rotation = { yaw: number; pitch: number };\n`;
-  ts += `export type Face = 0 | 1 | 2 | 3 | 4 | 5;\n`;
-  ts += `export type MovementInput = { forward: boolean; back: boolean; left: boolean; right: boolean; jump: boolean; sneak: boolean };\n\n`;
+  ts += `import { Face, Pos, Rotation, Vec3 } from "../types";\n\n`;
 
   // Generate auxiliary known local structs first if present
   const auxNames = ["Option", "Slot"];
@@ -277,7 +396,11 @@ function main() {
     .join("\n");
   ts += `\n`;
 
+  // Write and prettify the file
   fs.writeFileSync(GENERATED_FILE, ts, "utf8");
+  execSync(`npx prettier --write ${GENERATED_FILE}`);
+
+  console.log(`Generated types to ${GENERATED_FILE}`);
 }
 
 main();
