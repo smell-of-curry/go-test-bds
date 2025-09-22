@@ -47,7 +47,7 @@
     "eslint-plugin-import": "^2.31.0",
     "eslint-plugin-minecraft-linting": "^2.0.9",
     "husky": "^9.1.7",
-    "lint-staged": "^16.1.6",
+    "lint-staged": "^16.2.0",
     "prettier": "^3.6.2",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.2"
