@@ -41,7 +41,7 @@
     "@minecraft/server": "^2.2.0-beta.1.21.100-stable"
   },
   "devDependencies": {
-    "@typescript-eslint/eslint-plugin": "^8.44.0",
+    "@typescript-eslint/eslint-plugin": "^8.44.1",
     "@typescript-eslint/parser": "^8.44.0",
     "eslint": "^9.35.0",
     "eslint-plugin-import": "^2.31.0",
