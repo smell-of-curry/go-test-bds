@@ -8,7 +8,7 @@ require (
 	github.com/df-mc/dragonfly v0.10.6-0.20250817203556-60bcf6b7432b
 	github.com/go-gl/mathgl v1.2.0
 	github.com/google/uuid v1.6.0
-	github.com/restartfu/gophig v0.0.2
+	github.com/restartfu/gophig v0.1.0
 	github.com/sandertv/gophertunnel v1.49.0
 )
 
@@ -19,6 +19,7 @@ require (
 	github.com/go-jose/go-jose/v4 v4.1.0 // indirect
 	github.com/goccy/go-json v0.10.2 // indirect
 	github.com/golang/snappy v0.0.4 // indirect
+	github.com/joho/godotenv v1.5.1 // indirect
 	github.com/klauspost/compress v1.17.11 // indirect
 	github.com/kr/pretty v0.3.1 // indirect
 	github.com/muhammadmuzzammil1998/jsonc v1.0.0 // indirect
