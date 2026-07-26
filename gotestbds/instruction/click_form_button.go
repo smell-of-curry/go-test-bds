@@ -36,16 +36,16 @@ func (c *ClickFormButton) Run(ctx context.Context, b *bot.Bot) error {
 			for i, btn := range buttons {
 				labels[i] = btn.Text()
 			}
+			if len(buttons) == 0 {
+				return fmt.Errorf("form %q has no buttons to press; server sent: %s", f.Title(), f.Raw())
+			}
 			idx := c.Index
 			if c.Text != "" {
 				resolved, err := resolveButtonIndex(labels, c.Text)
 				if err != nil {
-					return err
+					return fmt.Errorf("%w; server sent: %s", err, f.Raw())
 				}
 				idx = resolved
-			}
-			if len(buttons) == 0 {
-				return fmt.Errorf("form %q has no buttons to press; server sent: %s", f.Title(), f.Raw())
 			}
 			if idx < 0 || idx >= len(buttons) {
 				return fmt.Errorf("invalid button index %d: valid range is 0..%d (%d buttons: %v)", idx, len(buttons)-1, len(buttons), labels)
