@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "A library for using go-test-bds in script API",
   "main": "scripts/index.ts",
+  "types": "scripts/index.ts",
   "scripts": {
     "prepare": "husky",
     "test": "echo \"Error: no test specified\" && exit 1",
