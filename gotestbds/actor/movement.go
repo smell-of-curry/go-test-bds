@@ -9,6 +9,7 @@ import (
 	"github.com/df-mc/dragonfly/server/entity/effect"
 	"github.com/df-mc/dragonfly/server/event"
 	"github.com/df-mc/dragonfly/server/item"
+	w "github.com/df-mc/dragonfly/server/world"
 	"github.com/go-gl/mathgl/mgl32"
 	"github.com/go-gl/mathgl/mgl64"
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
@@ -16,6 +17,7 @@ import (
 	"github.com/smell-of-curry/go-test-bds/gotestbds/mcmath"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/mcmath/physics"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/mcmath/physics/movement"
+	"github.com/smell-of-curry/go-test-bds/gotestbds/world"
 )
 
 // movementData ...
@@ -232,6 +234,16 @@ func (a *Actor) tickMovement() {
 
 	a.SendMovement()
 
+	// Simulating against a chunk that has not arrived reads the world as air, so
+	// gravity walks the bot straight down out of the world in the second or so
+	// between spawning and the first chunk. It never comes back: everything
+	// below is air too, and from then on the bot reports a position in the void.
+	if !a.chunkLoaded() {
+		a.SetVelocity(mgl64.Vec3{})
+		a.tick++
+		return
+	}
+
 	physicsTick := a.tickPhysics()
 	a.Move(physicsTick.Position(), a.Rotation())
 
@@ -240,6 +252,24 @@ func (a *Actor) tickMovement() {
 	a.onGround = physicsTick.OnGround()
 
 	a.tick++
+}
+
+// chunkLoaded reports whether the chunk the Actor stands in is known.
+//
+// @returns true when the bot's own column has been received.
+func (a *Actor) chunkLoaded() bool {
+	return chunkLoadedAt(a.world, a.Position())
+}
+
+// chunkLoadedAt reports whether the column containing a position is known.
+//
+// @param wr The world to look in.
+// @param pos The position whose column matters.
+// @returns true when that column has been received.
+func chunkLoadedAt(wr *world.World, pos mgl64.Vec3) bool {
+	block := cube.PosFromVec3(pos)
+	_, ok := wr.Chunk(w.ChunkPos{int32(block[0] >> 4), int32(block[2] >> 4)})
+	return ok
 }
 
 // blockActions ...

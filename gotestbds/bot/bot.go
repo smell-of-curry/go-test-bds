@@ -147,6 +147,7 @@ func (b *Bot) registerHandlers() {
 		packet.IDSetActorData:                &SetActorDataHandler{},
 		packet.IDSetActorMotion:              &SetActorMotionHandler{},
 		packet.IDMoveActorAbsolute:           &MoveActorAbsoluteHandler{},
+		packet.IDMovePlayer:                  &MovePlayerHandler{},
 		packet.IDInventoryContent:            &InventoryContentHandler{},
 		packet.IDInventorySlot:               &InventorySlotHandler{},
 		packet.IDItemStackResponse:           &ItemStackResponseHandler{},
