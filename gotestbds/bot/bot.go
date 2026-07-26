@@ -3,6 +3,7 @@ package bot
 import (
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
@@ -13,9 +14,10 @@ import (
 
 // Bot handles server packets and Actor's actions.
 type Bot struct {
-	a      *actor.Actor
-	closed chan struct{}
-	conn   Conn
+	a         *actor.Actor
+	closed    chan struct{}
+	closeOnce sync.Once
+	conn      Conn
 
 	handlers                  map[uint32]packetHandler
 	tasks                     chan task
@@ -53,9 +55,14 @@ func NewBot(conn Conn, logger *slog.Logger) *Bot {
 	return bot
 }
 
-// Close ...
+// Close stops the tick loop, which disconnects the bot.
+//
+// Safe to call more than once and from any goroutine: shutdown races with the
+// loop ending on its own, and a second close of the channel would panic.
+//
+// @returns nil, always.
 func (b *Bot) Close() error {
-	close(b.closed)
+	b.closeOnce.Do(func() { close(b.closed) })
 	return nil
 }
 

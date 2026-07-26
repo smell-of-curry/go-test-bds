@@ -66,7 +66,22 @@ func (t *Test) RunCtx(ctx context.Context) error {
 
 	// without this delay BDS won't let Actor move.
 	time.Sleep(time.Second * 2)
+
+	// The tick loop only stops when the bot is closed, so cancellation has to
+	// close it: without this the bot ignored SIGTERM, outlived whatever spawned
+	// it, and left the server holding a session that refused the next run's
+	// login as a duplicate identity.
+	stopped := make(chan struct{})
+	go func() {
+		select {
+		case <-ctx.Done():
+			_ = b.Close()
+		case <-stopped:
+		}
+	}()
+
 	b.StartTickLoop()
+	close(stopped)
 
 	if t.rejoin {
 		// rejoining...
