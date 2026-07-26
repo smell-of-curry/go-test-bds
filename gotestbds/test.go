@@ -19,7 +19,9 @@ type Test struct {
 	Logger            *slog.Logger
 	Instructions      *instruction.Pull
 	InstructionPrefix string
-	rejoin            bool
+	// DefaultInstructionTimeout overrides DefaultInstructionTimeout when non-zero.
+	DefaultInstructionTimeout time.Duration
+	rejoin                    bool
 }
 
 // Run runs test.

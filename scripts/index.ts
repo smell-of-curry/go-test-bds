@@ -1,94 +1,95 @@
-import { type Player, TicksPerSecond } from "@minecraft/server";
-import type {
+/**
+ * GoTestBDS — Script API side of the end-to-end testing SDK.
+ *
+ * The addon is both the test runner and the oracle: it drives headless bot
+ * clients over chat (this module) and asserts against the world using the
+ * Script API directly. See README.md for the wire protocol.
+ */
+
+export { Bot } from "./bot";
+export {
+  cancelAllInstructions,
+  DEFAULT_ACTION_TIMEOUT_MS,
+  InstructionError,
+  runAction,
+  runActionForData,
+  type RunActionOptions,
+} from "./client";
+export {
+  ConsoleReporter,
+  MultiReporter,
+  type Reporter,
+  type RunResult,
+  type RunTotals,
+  STRUCTURED_LOG_PREFIX,
+  type StructuredEvent,
+  type StructuredEventKind,
+  StructuredReporter,
+  type SuiteResult,
+  type TestResult,
+  type TestStatus,
+} from "./reporter";
+export {
+  decodeStatus,
+  encodeInstruction,
+  INSTRUCTION_PREFIX,
+  type InstructionEnvelope,
+  type InstructionStatusKind,
+  msToTicks,
+  STATUS_PREFIX,
+  type StatusEnvelope,
+} from "./protocol";
+export {
+  defineSuite,
+  type RunOptions,
+  runSuites,
+  type TestCase,
+  type TestContext,
+  type TestFilter,
+  type TestSuite,
+} from "./runner";
+export {
+  assert,
+  AssertionError,
+  assertBlockAt,
+  assertContains,
+  assertDefined,
+  assertEquals,
+  assertEventually,
+  assertInRange,
+  assertNearPosition,
+  assertThrows,
+} from "./assert";
+export {
+  retry,
+  seconds,
+  sleep,
+  ticks,
+  TimeoutError,
+  waitFor,
+  waitForValue,
+  type WaitOptions,
+} from "./wait";
+export type {
+  BlockAtPosition,
+  BotInventory,
+  BotItemStack,
+  BotState,
+  ClickedFormButton,
+  Face,
+  FormButtonContent,
+  FormElementContent,
+  MovementInput,
+  NearbyEntities,
+  NearbyEntity,
+  OpenForm,
+  Pos,
+  ReceivedMessage,
+  ReceivedMessages,
+  Rotation,
+  Vec3,
+} from "./types";
+export type {
   InstructionAction,
   InstructionParametersByAction,
 } from "./__generated__/types";
-import { TemporaryCallback } from "./utils/temporaryCallback";
-
-/**
- * The status of an instruction. Returned by the bot.
- */
-interface InstructionStatus {
-  status: "success" | "error";
-  message?: string;
-}
-
-/**
- * Sends an instruction to a player.
- * @param player - The player to send the instruction to.
- * @param action - The action to send.
- * @param parameters - The parameters to send.
- * @param timeout - The timeout for the action.
- * @returns A promise that resolves to the status of the instruction.
- */
-function sendInstructionToBot<T extends InstructionAction>(
-  bot: Player,
-  action: T,
-  parameters: InstructionParametersByAction[T],
-  timeout: number = TicksPerSecond * 20,
-): Promise<InstructionStatus> {
-  const promise = new Promise<InstructionStatus>((resolve, reject) => {
-    TemporaryCallback.subscribe(
-      "beforeEvents",
-      "chatSend",
-      (remove, data) => {
-        if (!data.message.startsWith("[STATUS]")) return;
-        if (data.sender.id != bot.id) return;
-        remove();
-
-        // Cancel the message so it doesn't get sent to the server
-        data.cancel = true;
-
-        try {
-          // Parse the status message
-          const ctx: InstructionStatus = JSON.parse(
-            data.message.replace(/^\[STATUS\]/, ""),
-          );
-          if (ctx.status === "success") resolve(ctx);
-          else reject(ctx);
-        } catch (error) {
-          console.error("Error parsing status message", error);
-          reject(error);
-        }
-      },
-      undefined,
-      timeout,
-      (expired) => {
-        if (!expired) return;
-        reject(new Error("Action timed out"));
-      },
-    );
-  });
-
-  bot.sendMessage(
-    `[RUN_ACTION]${JSON.stringify({
-      action,
-      parameters,
-    })}`,
-  );
-
-  return promise;
-}
-
-/**
- * Runs an action on a bot.
- * @param bot - The bot to run the action on.
- * @param action - The action to run.
- * @param parameters - The parameters to run the action with.
- * @param timeout - The timeout for the action.
- * @returns True if the action was successful, false otherwise.
- * @throws An error if the action fails.
- */
-export async function runAction<T extends InstructionAction>(
-  bot: Player,
-  action: T,
-  parameters: InstructionParametersByAction[T],
-  timeout: number = TicksPerSecond * 20,
-): Promise<boolean> {
-  const res = await sendInstructionToBot(bot, action, parameters, timeout);
-  if (res.status == "success") return true;
-
-  throw new Error(
-    `Failed to run action: ${action}, status: ${res.status}, message: ${res.message}`,
-  );
-}

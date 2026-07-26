@@ -11,6 +11,7 @@ type Values struct {
 	exhaustion float64
 
 	health     float64
+	maxHealth  float64
 	absorption float64
 
 	level      float64
@@ -40,6 +41,11 @@ func (c *Values) Exhaustion() float64 {
 // Health ...
 func (c *Values) Health() float64 {
 	return c.health
+}
+
+// MaxHealth returns the maximum health from the last attribute update.
+func (c *Values) MaxHealth() float64 {
+	return c.maxHealth
 }
 
 // Absorption ...
@@ -72,6 +78,7 @@ func (c *Values) Decode(attributes []protocol.Attribute) {
 			c.exhaustion = val
 		case "minecraft:health":
 			c.health = val
+			c.maxHealth = float64(attr.Max)
 		case "minecraft:absorption":
 			c.absorption = val
 		case "minecraft:player.level":

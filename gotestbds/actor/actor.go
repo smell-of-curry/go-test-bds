@@ -655,6 +655,21 @@ func (a *Actor) Health() float64 {
 	return a.Attributes().Health()
 }
 
+// MaxHealth returns Actor's maximum health from the last attribute update.
+func (a *Actor) MaxHealth() float64 {
+	return a.Attributes().MaxHealth()
+}
+
+// XUID returns the Actor's Xbox Live user ID from the connection identity.
+func (a *Actor) XUID() string {
+	return a.conn.IdentityData().XUID
+}
+
+// Dimension returns the dimension ID from GameData (spawn dimension unless updated elsewhere).
+func (a *Actor) Dimension() int32 {
+	return a.conn.GameData().Dimension
+}
+
 // CanSprint returns whether the Actor is able to sprint.
 func (a *Actor) CanSprint() bool {
 	return a.Attributes().Food() > 6

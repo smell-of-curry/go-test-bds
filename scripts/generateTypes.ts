@@ -158,8 +158,11 @@ function parseGoStructs(content: string): GoStruct[] {
 function parseInstructionActions(content: string): InstructionInfo[] {
   const infos: InstructionInfo[] = [];
   // Matches: func (*TypeName) Name() string { return "action" }
+  // The receiver variable is optional: both `func (*T)` and `func (t *T)` occur
+  // in this codebase, and only matching the former silently drops instructions
+  // from the generated union.
   const nameMethodRegex =
-    /func\s*\(\s*\*?([A-Za-z_][A-Za-z0-9_]*)\s*\)\s*Name\s*\(\s*\)\s*string\s*\{[\s\S]*?return\s+"([^"]+)"[\s\S]*?\}/g;
+    /func\s*\(\s*(?:[A-Za-z_][A-Za-z0-9_]*\s+)?\*?([A-Za-z_][A-Za-z0-9_]*)\s*\)\s*Name\s*\(\s*\)\s*string\s*\{\s*return\s+"([^"]+)"/g;
   let match: RegExpExecArray | null;
   while ((match = nameMethodRegex.exec(content))) {
     const [, typeName, action] = match;
@@ -295,6 +298,10 @@ function generateTsForStruct(
       // For unknown embedding, ignore to avoid wrong typings.
       continue;
     }
+
+    // Unexported Go fields are never marshalled, so they are not part of the
+    // wire contract. Instructions use them to hold their result payload.
+    if (/^[a-z_]/.test(f.name)) continue;
 
     // Determine property name
     const prop =
