@@ -12,6 +12,12 @@ func TestMenuFormParsesButtons(t *testing.T) {
 			`"buttons":[{"text":{"rawtext":[{"text":"Confirm"}]}},{"text":{"rawtext":[{"text":"Cancel"}]}}]}`,
 		"buttonImage": `{"type":"form","title":"GoTestBDS E2E","content":"body",` +
 			`"buttons":[{"text":"Confirm","image":{"type":"path","data":"textures/ui/confirm"}},{"text":"Cancel"}]}`,
+		// What current Bedrock builds actually send, captured from a live BDS.
+		"elements": `{"content":"body","elements":[{"image":null,"text":"Confirm","type":"button"},` +
+			`{"image":null,"text":"Cancel","type":"button"}],"title":"GoTestBDS E2E","type":"form"}`,
+		"elementsRawtext": `{"content":"body","elements":[` +
+			`{"image":null,"text":{"rawtext":[{"text":"Confirm"}]},"type":"button"},` +
+			`{"image":null,"text":"Cancel","type":"button"}],"title":"GoTestBDS E2E","type":"form"}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			f, err := NewForm([]byte(data), 1, nil)
