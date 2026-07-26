@@ -5,3 +5,4 @@ node_modules/
 testdata/e2e-pack/scripts/main.js
 bds/
 *.log
+/bin/

@@ -64,7 +64,9 @@ jobs:
           echo "bundle ok ($(wc -c < testdata/e2e-pack/scripts/main.js) bytes)"
 
       - name: Build bot binary
-        run: go build -o gotestbds ./
+        # Not `-o gotestbds`: that name is already a package directory, so Go
+        # writes the binary inside it and invoking it fails "Is a directory".
+        run: go build -o bin/gotestbds ./
 
       - name: Download Linux BDS
         id: bds
@@ -215,7 +217,7 @@ jobs:
           fi
 
           RUN_ID="ci-${GITHUB_RUN_ID:-local}-${GITHUB_RUN_ATTEMPT:-1}"
-          ./gotestbds --address 127.0.0.1:19132 --name TestBot --bots 1 --log-level info \
+          ./bin/gotestbds --address 127.0.0.1:19132 --name TestBot --bots 1 --log-level info \
             > bot.log 2>&1 &
           echo $! > bot.pid
 
