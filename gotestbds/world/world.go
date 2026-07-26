@@ -90,11 +90,19 @@ func (w *World) Chunk(pos world.ChunkPos) (*Column, bool) {
 // AddChunk ...
 func (w *World) AddChunk(pos world.ChunkPos, c *Column) {
 	w.chunks[pos] = c
+	// The one-entry lookup cache starts out holding chunk 0, 0 with no column, so
+	// a world whose first read is in that chunk reads it as empty forever.
+	if w.currentChunkPos == pos {
+		w.currentChunk = c
+	}
 }
 
 // RemoveChunk is called when chunk is too far away and don't fit in chunk radius.
 func (w *World) RemoveChunk(pos world.ChunkPos) {
 	delete(w.chunks, pos)
+	if w.currentChunkPos == pos {
+		w.currentChunk = nil
+	}
 }
 
 // Block reads a block from the position passed. If the chunk is not yet loaded
@@ -129,7 +137,10 @@ func (w *World) block(pos cube.Pos, layer uint8) world.Block {
 		}
 	}
 
-	bl, _ := world.BlockByRuntimeID(rid)
+	bl, ok := world.BlockByRuntimeID(rid)
+	if !ok {
+		return UnknownBlock{}
+	}
 	return bl
 }
 
@@ -163,6 +174,31 @@ func (w *World) SetBlockOnTheLayer(pos cube.Pos, b world.Block, layer uint32) {
 	}
 
 	c.SetBlock(x, y, z, uint8(layer), rid)
+}
+
+// SetBlockRuntimeID writes a block by its network runtime ID, without decoding
+// it first.
+//
+// A server running an addon sends runtime IDs for blocks this bot's registry has
+// never heard of. Decoding those first loses them — they come back as air, and a
+// floor of them is one a bot falls through — so a block update the bot cannot
+// name is still worth storing exactly as it arrived.
+//
+// @param pos The block position.
+// @param rid The block's network runtime ID.
+// @param layer The chunk layer to write to.
+func (w *World) SetBlockRuntimeID(pos cube.Pos, rid uint32, layer uint32) {
+	c := w.chunk(chunkPosFromBlockPos(pos))
+	if c == nil || pos.OutOfBounds(c.Range()) {
+		return
+	}
+
+	if layer == 0 && isNbtBlock(rid) {
+		if b, ok := world.BlockByRuntimeID(rid); ok {
+			c.BlockEntities[pos] = b
+		}
+	}
+	c.SetBlock(uint8(pos[0]), int16(pos[1]), uint8(pos[2]), uint8(layer), rid)
 }
 
 // chunkPosFromBlockPos ...
