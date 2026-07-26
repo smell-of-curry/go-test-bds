@@ -6,9 +6,10 @@
   "types": "scripts/index.ts",
   "scripts": {
     "prepare": "husky",
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "node --require ts-node/register --require ./scripts/tests/registerMinecraftMock.cjs --test ./scripts/tests/unit/**/*.test.ts",
     "lint": "eslint --config eslint.config.mjs . --fix",
-    "generate:types": "ts-node --project tsconfig.json scripts/generateTypes.ts"
+    "generate:types": "ts-node --project tsconfig.json scripts/generateTypes.ts",
+    "build:e2e-pack": "esbuild scripts/e2e/main.ts --bundle --format=esm --platform=neutral --outfile=testdata/e2e-pack/scripts/main.js --external:@minecraft/server --external:@minecraft/server-ui --target=es2021"
   },
   "lint-staged": {
     "*.ts": [
@@ -39,11 +40,13 @@
   },
   "homepage": "https://github.com/smell-of-curry/go-test-bds#readme",
   "dependencies": {
-    "@minecraft/server": "^2.9.0-beta.1.26.33-stable"
+    "@minecraft/server": "^2.9.0-beta.1.26.33-stable",
+    "@minecraft/server-ui": "2.2.0-beta.1.26.33-stable"
   },
   "devDependencies": {
     "@typescript-eslint/eslint-plugin": "^8.65.0",
     "@typescript-eslint/parser": "^8.65.0",
+    "esbuild": "^0.25.9",
     "eslint": "^9.39.5",
     "eslint-plugin-import": "^2.31.0",
     "eslint-plugin-minecraft-linting": "^2.0.9",

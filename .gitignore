@@ -2,3 +2,6 @@
 config.toml
 node_modules/
 .tsbuildinfo
+testdata/e2e-pack/scripts/main.js
+bds/
+*.log

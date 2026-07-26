@@ -1,0 +1,276 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  go:
+    name: Go
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build
+        run: go build ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test ./...
+
+  e2e:
+    name: E2E (BDS)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Bundle e2e fixture pack
+        run: npm run build:e2e-pack
+
+      - name: Verify bundle keeps @minecraft modules external
+        run: |
+          test -f testdata/e2e-pack/scripts/main.js
+          if grep -q 'node_modules/@minecraft' testdata/e2e-pack/scripts/main.js; then
+            echo "bundle must not inline @minecraft/* modules" >&2
+            exit 1
+          fi
+          grep -q '@minecraft/server' testdata/e2e-pack/scripts/main.js
+          echo "bundle ok ($(wc -c < testdata/e2e-pack/scripts/main.js) bytes)"
+
+      - name: Build bot binary
+        run: go build -o gotestbds ./
+
+      - name: Download Linux BDS
+        id: bds
+        env:
+          BDS_LINKS_API: https://net-secondary.web.minecraft-services.net/api/v1.0/download/links
+          BDS_FALLBACK_URL: https://www.minecraft.net/bedrockdedicatedserver/bin-linux/bedrock-server-1.26.34.3.zip
+          BDS_UA: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36
+        run: |
+          set -euo pipefail
+          mkdir -p bds
+          DOWNLOAD_URL=""
+          if curl -fsSL -A "$BDS_UA" "$BDS_LINKS_API" -o /tmp/bds-links.json; then
+            DOWNLOAD_URL=$(jq -r '.result.links[] | select(.downloadType == "serverBedrockLinux") | .downloadUrl' /tmp/bds-links.json)
+          fi
+          if [ -z "$DOWNLOAD_URL" ] || [ "$DOWNLOAD_URL" = "null" ]; then
+            echo "API lookup failed; using pinned fallback URL"
+            DOWNLOAD_URL="$BDS_FALLBACK_URL"
+          fi
+          VERSION=$(basename "$DOWNLOAD_URL" .zip | sed -E 's/^bedrock-server-//')
+          echo "BDS download URL: $DOWNLOAD_URL"
+          echo "BDS version: $VERSION"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "url=$DOWNLOAD_URL" >> "$GITHUB_OUTPUT"
+          curl -fL -A "$BDS_UA" "$DOWNLOAD_URL" -o /tmp/bds.zip
+          unzip -q /tmp/bds.zip -d bds
+          chmod +x bds/bedrock_server
+
+      - name: Configure server.properties
+        run: |
+          set -euo pipefail
+          PROP=bds/server.properties
+          set_prop() {
+            local key="$1" value="$2"
+            if grep -qE "^${key}=" "$PROP"; then
+              sed -i "s|^${key}=.*|${key}=${value}|" "$PROP"
+            else
+              echo "${key}=${value}" >> "$PROP"
+            fi
+          }
+          set_prop online-mode false
+          set_prop allow-list false
+          set_prop server-port 19132
+          set_prop server-portv6 19133
+          set_prop view-distance 4
+          set_prop tick-distance 4
+          set_prop max-threads 2
+          set_prop level-name e2e
+          set_prop gamemode creative
+          set_prop difficulty peaceful
+          set_prop default-player-permission-level member
+          set_prop content-log-file-enabled true
+          set_prop content-log-console-output-enabled true
+          set_prop script-debugger-enabled false
+          grep -E '^(online-mode|allow-list|server-port|level-name|view-distance)=' "$PROP"
+
+      - name: Run e2e against live BDS
+        run: |
+          set -euo pipefail
+
+          wait_for_log() {
+            local file="$1" pattern="$2" seconds="$3" label="$4"
+            for i in $(seq 1 "$seconds"); do
+              if grep -qE "$pattern" "$file" 2>/dev/null; then
+                echo "${label} after ${i}s"
+                return 0
+              fi
+              sleep 1
+            done
+            echo "Timed out waiting for ${label} (${pattern})" >&2
+            tail -n 200 "$file" || true
+            return 1
+          }
+
+          start_bds() {
+            local logfile="$1"
+            rm -f bds/bds.in
+            mkfifo bds/bds.in
+            # Keep a write end open across echo redirects so BDS never sees EOF.
+            sleep infinity > bds/bds.in &
+            echo $! > fifo-keeper.pid
+            (
+              cd bds
+              LD_LIBRARY_PATH=. ./bedrock_server < bds.in > "../${logfile}" 2>&1
+            ) &
+            echo $! > bds.pid
+          }
+
+          stop_bds() {
+            if [ -f bds.pid ] && kill -0 "$(cat bds.pid)" 2>/dev/null; then
+              echo stop > bds/bds.in || true
+              for i in $(seq 1 30); do
+                kill -0 "$(cat bds.pid)" 2>/dev/null || break
+                sleep 1
+              done
+              kill "$(cat bds.pid)" 2>/dev/null || true
+              sleep 1
+              kill -9 "$(cat bds.pid)" 2>/dev/null || true
+            fi
+            if [ -f fifo-keeper.pid ]; then
+              kill "$(cat fifo-keeper.pid)" 2>/dev/null || true
+            fi
+            rm -f bds/bds.in fifo-keeper.pid bds.pid
+          }
+
+          cleanup() {
+            set +e
+            if [ -f bot.pid ]; then
+              kill "$(cat bot.pid)" 2>/dev/null || true
+              kill -9 "$(cat bot.pid)" 2>/dev/null || true
+            fi
+            stop_bds
+          }
+          trap cleanup EXIT
+
+          # --- first boot: create world ---
+          start_bds bds-boot.log
+          wait_for_log bds-boot.log 'Server started' 120 'first Server started'
+          stop_bds
+          test -f bds/worlds/e2e/level.dat
+
+          # --- patch experiments ---
+          go run ./cmd/enable-experiments bds/worlds/e2e/level.dat
+
+          # --- install fixture pack ---
+          WORLD=bds/worlds/e2e
+          mkdir -p "$WORLD/behavior_packs/gotestbds_e2e/scripts"
+          cp testdata/e2e-pack/manifest.json "$WORLD/behavior_packs/gotestbds_e2e/"
+          cp testdata/e2e-pack/scripts/main.js "$WORLD/behavior_packs/gotestbds_e2e/scripts/"
+          cp testdata/e2e-pack/world_behavior_packs.json "$WORLD/"
+          mkdir -p bds/behavior_packs/gotestbds_e2e/scripts
+          cp testdata/e2e-pack/manifest.json bds/behavior_packs/gotestbds_e2e/
+          cp testdata/e2e-pack/scripts/main.js bds/behavior_packs/gotestbds_e2e/scripts/
+
+          # --- second boot: real e2e ---
+          start_bds bds.log
+          wait_for_log bds.log 'Server started' 120 'e2e Server started'
+          # Soft-wait for script arming line (content log timing varies).
+          for i in $(seq 1 30); do
+            if grep -q 'go-test-bds e2e fixture armed' bds.log; then
+              echo "fixture pack scripts loaded after ${i}s"
+              break
+            fi
+            sleep 1
+          done
+          if ! grep -q 'go-test-bds e2e fixture armed' bds.log; then
+            echo "WARNING: fixture arming line not seen; dumping recent log" >&2
+            tail -n 100 bds.log || true
+          fi
+
+          RUN_ID="ci-${GITHUB_RUN_ID:-local}-${GITHUB_RUN_ATTEMPT:-1}"
+          ./gotestbds --address 127.0.0.1:19132 --name TestBot --bots 1 --log-level info \
+            > bot.log 2>&1 &
+          echo $! > bot.pid
+
+          for i in $(seq 1 45); do
+            if ! kill -0 "$(cat bot.pid)" 2>/dev/null; then
+              echo "bot process exited before run trigger" >&2
+              cat bot.log || true
+              exit 1
+            fi
+            if grep -qiE 'Player connected|joined the game|Spawned' bds.log 2>/dev/null; then
+              echo "bot join observed after ${i}s"
+              break
+            fi
+            sleep 1
+          done
+          sleep 2
+
+          echo "scriptevent gotestbds:run {\"runId\":\"${RUN_ID}\",\"bots\":1}" > bds/bds.in
+
+          RESULT=""
+          for i in $(seq 1 180); do
+            if grep -q 'GOTESTBDS_E2E_RESULT:' bds.log 2>/dev/null; then
+              RESULT=$(grep 'GOTESTBDS_E2E_RESULT:' bds.log | tail -n 1)
+              break
+            fi
+            if ! kill -0 "$(cat bot.pid)" 2>/dev/null; then
+              echo "bot process exited before result line" >&2
+              cat bot.log || true
+              exit 1
+            fi
+            sleep 1
+          done
+
+          echo "result line: ${RESULT:-<missing>}"
+          if [ -z "$RESULT" ]; then
+            echo "GOTESTBDS_E2E_RESULT never appeared" >&2
+            exit 1
+          fi
+          if echo "$RESULT" | grep -q 'FAIL'; then
+            echo "e2e reported FAIL" >&2
+            exit 1
+          fi
+          if ! echo "$RESULT" | grep -q 'PASS'; then
+            echo "e2e result line was not PASS" >&2
+            exit 1
+          fi
+
+      - name: Upload BDS and bot logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-logs-bds-${{ steps.bds.outputs.version || 'unknown' }}
+          path: |
+            bds.log
+            bds-boot.log
+            bot.log
+          if-no-files-found: warn
+          retention-days: 14
