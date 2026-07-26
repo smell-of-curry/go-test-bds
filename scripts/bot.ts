@@ -1,9 +1,5 @@
 import { type Player, type Vector3, world } from "@minecraft/server";
-import {
-  runAction,
-  runActionForData,
-  type RunActionOptions,
-} from "./client";
+import { runAction, runActionForData, type RunActionOptions } from "./client";
 import type {
   BlockAtPosition,
   BotInventory,
@@ -17,7 +13,33 @@ import type {
   ReceivedMessages,
   Vec3,
 } from "./types";
-import { waitForValue, type WaitOptions } from "./wait";
+import { TimeoutError, waitForValue, type WaitOptions } from "./wait";
+
+/** Options for {@link Bot.clickThrough}. */
+export interface ClickThroughOptions {
+  /**
+   * Checked before each form and after each click; the walk stops when it
+   * returns true.
+   */
+  until: () => boolean | Promise<boolean>;
+  /**
+   * Which button to press on each form: a zero-based index, or a label matched
+   * as in {@link Bot.clickButton}. Defaults to the first button, which is the
+   * "continue" button in most dialogue chains.
+   */
+  button?: number | string;
+  /**
+   * Safety valve for a chain that loops forever, e.g. a form that re-shows
+   * itself because the addon rejected the answer. Defaults to 20.
+   */
+  maxForms?: number;
+  /** How long to wait for each form to open. Defaults to 15 000. */
+  formTimeoutMs?: number;
+  /** Called with each form before it is answered. Useful for logging. */
+  onForm?: (form: OpenForm) => void;
+  /** What the walk is waiting for, quoted in timeout messages. */
+  description?: string;
+}
 
 /**
  * A headless test client, wrapped around the {@link Player} the server sees.
@@ -117,16 +139,8 @@ export class Bot {
    * @param options Timeout overrides.
    * @returns A promise resolving once the bot confirms the action.
    */
-  async runCommand(
-    command: string,
-    options?: RunActionOptions,
-  ): Promise<void> {
-    await runAction(
-      this.player,
-      "runCommand",
-      { command },
-      this.opts(options),
-    );
+  async runCommand(command: string, options?: RunActionOptions): Promise<void> {
+    await runAction(this.player, "runCommand", { command }, this.opts(options));
   }
 
   /**
@@ -228,16 +242,8 @@ export class Bot {
    * @param options Timeout overrides.
    * @returns A promise resolving once the bot confirms the action.
    */
-  async setHeldSlot(
-    slot: number,
-    options?: RunActionOptions,
-  ): Promise<void> {
-    await runAction(
-      this.player,
-      "setHeldSlot",
-      { slot },
-      this.opts(options),
-    );
+  async setHeldSlot(slot: number, options?: RunActionOptions): Promise<void> {
+    await runAction(this.player, "setHeldSlot", { slot }, this.opts(options));
   }
 
   /**
@@ -389,10 +395,7 @@ export class Bot {
    * @returns The matching message.
    * @throws {InstructionError} if no matching message arrived in time.
    */
-  async waitForMessage(
-    contains: string,
-    timeoutMs = 15_000,
-  ): Promise<string> {
+  async waitForMessage(contains: string, timeoutMs = 15_000): Promise<string> {
     const data = await runActionForData<
       "waitForMessage",
       { message: string; receivedAtMs: number }
@@ -460,13 +463,68 @@ export class Bot {
    * @returns The form that was answered.
    * @throws {InstructionError} if no form opened or no button matched.
    */
-  async awaitFormAndClick(
-    text: string,
-    timeoutMs = 15_000,
-  ): Promise<OpenForm> {
+  async awaitFormAndClick(text: string, timeoutMs = 15_000): Promise<OpenForm> {
     const form = await this.waitForForm(timeoutMs);
     await this.clickButton(text);
     return form;
+  }
+
+  /**
+   * Clicks through a chain of forms until a condition holds.
+   *
+   * Dialogue chains are the normal way an addon talks to a player, and testing
+   * one by naming every button in order is both tedious and locale-dependent —
+   * the labels are usually translated. This walks the chain positionally
+   * instead, and stops on a condition you can observe from the server (a
+   * progress flag, a database record), so the test asserts on the outcome
+   * rather than on dialogue wording that designers are free to change.
+   *
+   * @param options How to walk the chain. See {@link ClickThroughOptions}.
+   * @returns The forms that were answered, in order.
+   * @throws {InstructionError} if a form opens but has no clickable button.
+   * @throws {TimeoutError} if the chain ends, or stalls for longer than
+   * `formTimeoutMs`, while `until` is still false.
+   */
+  async clickThrough(options: ClickThroughOptions): Promise<OpenForm[]> {
+    const {
+      until,
+      button = 0,
+      maxForms = 20,
+      formTimeoutMs = 15_000,
+      onForm,
+    } = options;
+    const goal = options.description ?? "the expected state";
+    const answered: OpenForm[] = [];
+
+    while (!(await until())) {
+      if (answered.length >= maxForms) {
+        throw new Error(
+          `clicked through ${maxForms} forms without reaching ${goal}; ` +
+            `last form was "${answered[answered.length - 1]?.title ?? "unknown"}"`,
+        );
+      }
+
+      let form: OpenForm;
+      try {
+        form = await this.waitForForm(formTimeoutMs);
+      } catch (error) {
+        // The chain may finish on the click we already sent, with the condition
+        // becoming true a tick later. Re-check before blaming the timeout.
+        if (await until()) break;
+        throw new TimeoutError(
+          `${goal} — no further form opened after answering ${answered.length} ` +
+            `(${String(error)})`,
+          formTimeoutMs,
+        );
+      }
+
+      onForm?.(form);
+      answered.push(form);
+      if (typeof button === "number") await this.clickButtonAt(button);
+      else await this.clickButton(button);
+    }
+
+    return answered;
   }
 
   /**

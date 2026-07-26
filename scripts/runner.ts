@@ -30,6 +30,20 @@ export interface TestContext {
    * @param message The line to record.
    */
   log(message: string): void;
+  /**
+   * Registers a cleanup to run when the test finishes, in reverse registration
+   * order, whether it passed, failed or timed out.
+   *
+   * Register a cleanup the moment you create the thing it undoes. A test that
+   * tidies up on its last line leaves entities, blocks or database rows behind
+   * the first time it fails — and those leftovers then fail the tests after it,
+   * which is how one real bug turns into a report nobody trusts.
+   *
+   * Cleanups registered from `setup` run after `teardown` instead.
+   *
+   * @param cleanup Undoes something the test created.
+   */
+  track(cleanup: () => void | Promise<void>): void;
 }
 
 /** A single test case. */
@@ -225,7 +239,7 @@ async function runSuite(
   const startedAt = Date.now();
   const results: TestResult[] = [];
 
-  const { ctx } = createContext(env.runId, env.bots);
+  const { ctx, cleanups } = createContext(env.runId, env.bots);
 
   let setupError: string | undefined;
   if (suite.setup) {
@@ -267,12 +281,13 @@ async function runSuite(
       teardownError = describeError(error);
     }
   }
+  const cleanupError = await runCleanups(cleanups);
 
   const suiteResult: SuiteResult = {
     name: suite.name,
     durationMs: Date.now() - startedAt,
     tests: results,
-    error: setupError ?? teardownError,
+    error: setupError ?? teardownError ?? cleanupError,
   };
   env.reporter.onSuiteEnd?.(suiteResult);
   return suiteResult;
@@ -291,7 +306,7 @@ async function runTest(
   test: TestCase,
   env: { runId: string; bots: Bot[]; defaultTimeoutMs: number },
 ): Promise<TestResult> {
-  const { ctx, logs } = createContext(env.runId, env.bots);
+  const { ctx, logs, cleanups } = createContext(env.runId, env.bots);
   const base = {
     suite: suite.name,
     name: test.name,
@@ -318,14 +333,18 @@ async function runTest(
     error = describeError(thrown);
   }
 
-  // afterEach runs even after a failure, and its own failure is reported
-  // rather than swallowed — a leaking fixture breaks every later test.
+  // afterEach and tracked cleanups run even after a failure, and their own
+  // failures are reported rather than swallowed — a leaking fixture breaks every
+  // later test, and that is far harder to diagnose than the original failure.
   try {
     if (suite.afterEach) await suite.afterEach(ctx);
   } catch (thrown) {
     const detail = `afterEach failed: ${describeError(thrown)}`;
     error = error ? `${error}; ${detail}` : detail;
   }
+
+  const cleanupError = await runCleanups(cleanups);
+  if (cleanupError) error = error ? `${error}; ${cleanupError}` : cleanupError;
 
   return {
     ...base,
@@ -378,8 +397,13 @@ async function withTimeout(
 function createContext(
   runId: string,
   bots: Bot[],
-): { ctx: TestContext; logs: string[] } {
+): {
+  ctx: TestContext;
+  logs: string[];
+  cleanups: (() => void | Promise<void>)[];
+} {
   const logs: string[] = [];
+  const cleanups: (() => void | Promise<void>)[] = [];
   const ctx: TestContext = {
     bot: bots[0],
     bots,
@@ -387,8 +411,38 @@ function createContext(
     log(message: string) {
       logs.push(message);
     },
+    track(cleanup: () => void | Promise<void>) {
+      cleanups.push(cleanup);
+    },
   };
-  return { ctx, logs };
+  return { ctx, logs, cleanups };
+}
+
+/**
+ * Runs tracked cleanups newest-first.
+ *
+ * Every cleanup runs even when an earlier one throws, because a cleanup that
+ * gives up halfway leaves exactly the mess it was registered to prevent.
+ *
+ * @param cleanups The registered cleanups. Emptied as they run.
+ * @returns A description of the failures, or `undefined` when all succeeded.
+ */
+async function runCleanups(
+  cleanups: (() => void | Promise<void>)[],
+): Promise<string | undefined> {
+  const failures: string[] = [];
+  while (cleanups.length > 0) {
+    const cleanup = cleanups.pop();
+    if (!cleanup) break;
+    try {
+      await cleanup();
+    } catch (error) {
+      failures.push(describeError(error));
+    }
+  }
+  return failures.length > 0
+    ? `cleanup failed: ${failures.join("; ")}`
+    : undefined;
 }
 
 /**
