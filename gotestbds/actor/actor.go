@@ -210,27 +210,23 @@ func (a *Actor) StartBreakingBlock(pos cube.Pos) (time.Duration, error) {
 
 // BreakTime returns break time of the block at position passed.
 func (a *Actor) BreakTime(pos cube.Pos) time.Duration {
-	held := a.HeldItem()
-	breakTime := block.BreakDuration(a.world.Block(pos), held)
-	if !a.OnGround() {
-		breakTime *= 5
-	}
-
-	if _, ok := a.Armour().Helmet().Enchantment(enchantment.AquaAffinity); a.InsideOfWater() && !ok {
-		breakTime *= 5
+	_, aquaAffinity := a.Armour().Helmet().Enchantment(enchantment.AquaAffinity)
+	ctx := block.BreakContext{
+		Airborne:     !a.OnGround(),
+		Underwater:   a.InsideOfWater(),
+		AquaAffinity: aquaAffinity,
 	}
 	for e := range a.Effects() {
-		lvl := e.Level()
 		switch e.Type() {
 		case effect.Haste:
-			breakTime = time.Duration(float64(breakTime) * effect.Haste.Multiplier(lvl))
+			ctx.HasteLevel = e.Level()
 		case effect.MiningFatigue:
-			breakTime = time.Duration(float64(breakTime) * effect.MiningFatigue.Multiplier(lvl))
+			ctx.MiningFatigueLevel = e.Level()
 		case effect.ConduitPower:
-			breakTime = time.Duration(float64(breakTime) * effect.ConduitPower.Multiplier(lvl))
+			ctx.ConduitPowerLevel = e.Level()
 		}
 	}
-	return breakTime
+	return block.BreakDuration(a.world.Block(pos), a.HeldItem(), ctx)
 }
 
 // InsideOfWater returns whether the Actor is inside the water.
@@ -592,7 +588,7 @@ func (a *Actor) ReleaseItem() error {
 	}
 	heldItem, _ := a.Inventory().ItemInstance(a.heldSlot)
 	action := &protocol.ReleaseItemTransactionData{
-		ActionType:   uint32(actionType),
+		ActionType:   int32(actionType),
 		HotBarSlot:   int32(a.heldSlot),
 		HeldItem:     heldItem,
 		HeadPosition: mcmath.Vec64To32(a.EyePos()),
@@ -851,7 +847,7 @@ func (a *Actor) EditBook(action BookAction, slot int) error {
 	if err != nil {
 		return err
 	}
-	pk.InventorySlot = byte(slot)
+	pk.InventorySlot = int32(slot)
 	return a.conn.WritePacket(pk)
 }
 

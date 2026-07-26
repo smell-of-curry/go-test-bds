@@ -6,6 +6,7 @@ import (
 	_ "unsafe"
 
 	"github.com/df-mc/dragonfly/server/block/cube"
+	"github.com/df-mc/dragonfly/server/world"
 	"github.com/df-mc/dragonfly/server/world/chunk"
 	"github.com/sandertv/gophertunnel/minecraft/nbt"
 )
@@ -13,15 +14,10 @@ import (
 //go:linkname decodeSubChunk github.com/df-mc/dragonfly/server/world/chunk.decodeSubChunk
 func decodeSubChunk(buf *bytes.Buffer, c *chunk.Chunk, index *byte, e chunk.Encoding) (*chunk.SubChunk, error)
 
-func init() {
-	rid, ok := chunk.StateToRuntimeID("minecraft:air", nil)
-	if !ok {
-		panic("cannot find air runtime ID")
-	}
-	airRid = rid
-}
-
-var airRid uint32
+// blockRegistry is the registry chunks are decoded against. Dragonfly's chunk
+// package takes the whole registry rather than a bare air runtime ID, so the
+// vanilla default registry is used for both.
+var blockRegistry chunk.BlockRegistry = world.DefaultBlockRegistry
 
 // decodeBlockEntities decodes blockEntities from buf.
 func decodeBlockEntities(buf *bytes.Buffer) ([]chunk.BlockEntity, error) {

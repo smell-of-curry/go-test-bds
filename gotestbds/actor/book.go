@@ -42,7 +42,7 @@ func (b BookActionAddPage) Perform(book item.BookAndQuill, actor *Actor) (*packe
 	}
 	return &packet.BookEdit{
 		ActionType: packet.BookActionAddPage,
-		PageNumber: byte(b.Page),
+		PageNumber: int32(b.Page),
 		Text:       b.Text,
 	}, nil
 }
@@ -59,7 +59,7 @@ func (b BookActionDeletePage) Perform(book item.BookAndQuill, actor *Actor) (*pa
 	}
 	return &packet.BookEdit{
 		ActionType: packet.BookActionDeletePage,
-		PageNumber: byte(b.Page),
+		PageNumber: int32(b.Page),
 	}, nil
 }
 
@@ -79,8 +79,8 @@ func (b BookActionSwapPages) Perform(book item.BookAndQuill, actor *Actor) (*pac
 	}
 	return &packet.BookEdit{
 		ActionType:          packet.BookActionSign,
-		PageNumber:          byte(b.Page),
-		SecondaryPageNumber: byte(b.SecondaryPage),
+		PageNumber:          int32(b.Page),
+		SecondaryPageNumber: int32(b.SecondaryPage),
 	}, nil
 }
 

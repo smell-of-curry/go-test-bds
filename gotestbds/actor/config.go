@@ -1,8 +1,7 @@
 package actor
 
 import (
-	_ "unsafe"
-
+	dfworld "github.com/df-mc/dragonfly/server/world"
 	"github.com/google/uuid"
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
@@ -55,7 +54,9 @@ func (c Config) New() (actor *Actor) {
 		DragBeforeGravity: true,
 	}
 
-	finaliseBlockRegistry()
+	// The bot never constructs a dragonfly server/world, so nothing else
+	// finalizes the block registry for us. Chunk decoding needs it finalized.
+	dfworld.DefaultBlockRegistry.Finalize()
 
 	actor = &Actor{
 		conn:      c.Conn,
@@ -68,6 +69,3 @@ func (c Config) New() (actor *Actor) {
 
 	return actor
 }
-
-//go:linkname finaliseBlockRegistry github.com/df-mc/dragonfly/server/world.finaliseBlockRegistry
-func finaliseBlockRegistry()
