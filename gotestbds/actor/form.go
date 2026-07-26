@@ -29,7 +29,7 @@ type Form struct {
 // UnmarshalJSON ...
 func (f *Form) UnmarshalJSON(data []byte) error {
 	header := struct {
-		Title string `json:"title"`
+		Title Text   `json:"title"`
 		Type  string `json:"type"`
 	}{}
 	err := json.Unmarshal(data, &header)
@@ -37,7 +37,7 @@ func (f *Form) UnmarshalJSON(data []byte) error {
 		return err
 	}
 
-	f.title = header.Title
+	f.title = header.Title.String()
 	f.formType = FormType(header.Type)
 
 	switch f.Type() {

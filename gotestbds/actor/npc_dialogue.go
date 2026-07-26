@@ -74,10 +74,10 @@ type DialogueButton struct {
 // UnmarshalJSON ...
 func (d *DialogueButton) UnmarshalJSON(data []byte) error {
 	var internals struct {
-		Text string `json:"button_name"`
+		Text Text `json:"button_name"`
 	}
 	err := json.Unmarshal(data, &internals)
-	d.text = internals.Text
+	d.text = internals.Text.String()
 	return err
 }
 

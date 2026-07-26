@@ -48,7 +48,7 @@ func (b *FormButton) Press() error {
 
 // Text ...
 func (b *FormButton) Text() string {
-	return b.b.Text
+	return b.b.Text.String()
 }
 
 // Image ...
@@ -66,7 +66,7 @@ func (b *FormButton) ResponseValue() any {
 
 // buttonInternals ...
 type buttonInternals struct {
-	Text  string `json:"text"`
+	Text  Text `json:"text"`
 	Image struct {
 		Type string `json:"type"`
 		Data string `json:"data"`
@@ -86,10 +86,10 @@ func (l *FormLabel) ResponseValue() any {
 // UnmarshalJSON ...
 func (l *FormLabel) UnmarshalJSON(data []byte) error {
 	var text = struct {
-		Text string `json:"text"`
+		Text Text `json:"text"`
 	}{}
 	err := json.Unmarshal(data, &text)
-	l.text = text.Text
+	l.text = text.Text.String()
 	return err
 }
 
@@ -106,7 +106,7 @@ type FormInput struct {
 
 // Text ...
 func (i *FormInput) Text() string {
-	return i.i.Text
+	return i.i.Text.String()
 }
 
 // Default ...
@@ -138,7 +138,7 @@ func (i *FormInput) UnmarshalJSON(data []byte) error {
 
 // inputInternals ...
 type inputInternals struct {
-	Text        string `json:"text"`
+	Text        Text   `json:"text"`
 	Default     string `json:"default"`
 	Placeholder string `json:"placeholder"`
 }
@@ -151,7 +151,7 @@ type FormToggle struct {
 
 // Text ...
 func (t *FormToggle) Text() string {
-	return t.t.Text
+	return t.t.Text.String()
 }
 
 // Default ...
@@ -178,8 +178,8 @@ func (t *FormToggle) UnmarshalJSON(data []byte) error {
 
 // toggleInternals ...
 type toggleInternals struct {
-	Text    string `json:"text"`
-	Default bool   `json:"default"`
+	Text    Text `json:"text"`
+	Default bool `json:"default"`
 }
 
 // FormSlider ...
@@ -190,7 +190,7 @@ type FormSlider struct {
 
 // Text ...
 func (s *FormSlider) Text() string {
-	return s.s.Text
+	return s.s.Text.String()
 }
 
 // Default ...
@@ -232,7 +232,7 @@ func (s *FormSlider) UnmarshalJSON(data []byte) error {
 
 // sliderInternals ...
 type sliderInternals struct {
-	Text     string  `json:"text"`
+	Text     Text    `json:"text"`
 	Min      float64 `json:"min"`
 	Max      float64 `json:"max"`
 	StepSize float64 `json:"step"`
@@ -247,7 +247,7 @@ type FormDropDown struct {
 
 // Text ...
 func (d *FormDropDown) Text() string {
-	return d.d.Text
+	return d.d.Text.String()
 }
 
 // Default ...
@@ -279,7 +279,7 @@ func (d *FormDropDown) UnmarshalJSON(data []byte) error {
 
 // dropdownInternals ...
 type dropdownInternals struct {
-	Text         string   `json:"text"`
+	Text         Text     `json:"text"`
 	Options      []string `json:"options"`
 	DefaultIndex int      `json:"default"`
 }
@@ -299,7 +299,7 @@ func (s *FormStepSlider) UnmarshalJSON(data []byte) error {
 
 // stepSliderInternals ...
 type stepSliderInternals struct {
-	Text         string   `json:"text"`
+	Text         Text     `json:"text"`
 	Options      []string `json:"steps"`
 	DefaultIndex int      `json:"default"`
 }
