@@ -11,6 +11,27 @@
 
 ## Learned Workspace Facts
 
+- The bot's copy of the world and of its own inventory is **not** trustworthy
+  against current BDS. Chunk decoding logs `unknown sub chunk version 89`, and a
+  player the server has just given items to reads back as an empty inventory —
+  so `getBlock` / `getInventory` can disagree with the server for reasons that
+  have nothing to do with the addon under test. Assert server-side state for
+  those; the two smoke tests covering the client mirror in `pokebedrock-beh` are
+  skipped with this reason until the decoding catches up. Undecodable blocks are
+  deliberately **solid** (`world.UnknownBlock`): read as air, a floor of custom
+  blocks is one the bot falls through, and it never lands because everything
+  below is air too.
+- A `MovePlayer` handler is what applies server-side teleports (`Player.teleport`,
+  `/tp`, portals). Physics is also frozen while the bot's own chunk is missing —
+  simulating against an absent world reads it as air and walks the bot out
+  through the bottom in the second before its first chunk arrives.
+- Custom `UnmarshalJSON` must never unmarshal into its own receiver: `Pos` did,
+  which recursed until the stack overflowed and killed the bot on the first
+  instruction carrying a position (`getBlock`). Decode through a plain
+  array/struct instead.
+- Reporter output goes out at `console.warn`. Deployed servers run
+  `content-log-level=warning`, which drops info-level script output, so results
+  emitted with `console.log` never leave the game.
 - Two halves ship together: the Go binary (`main.go` + `gotestbds/`) that runs
   headless clients, and the TypeScript SDK (`scripts/`) that addons import. The
   npm package name is `go-test-bds`; `main`/`types` both point at
