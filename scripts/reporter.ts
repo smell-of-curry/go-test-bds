@@ -74,11 +74,7 @@ export const STRUCTURED_LOG_PREFIX = "[GOTESTBDS]";
 
 /** Kinds of structured line, in the order they are emitted. */
 export type StructuredEventKind =
-  | "runStart"
-  | "suiteStart"
-  | "testEnd"
-  | "suiteEnd"
-  | "runEnd";
+  "runStart" | "suiteStart" | "testEnd" | "suiteEnd" | "runEnd";
 
 /** Envelope of a single structured line. */
 export interface StructuredEvent {
@@ -96,10 +92,13 @@ export class StructuredReporter implements Reporter {
   private runId = "";
 
   /**
-   * @param write Sink for each line. Defaults to `console.log`, which lands in
-   * the dedicated server's stdout.
+   * @param write Sink for each line. Defaults to `console.warn`, which lands in
+   * the dedicated server's stdout. Not `console.log`: a server running
+   * `content-log-level=warning` (what a production-shaped config looks like)
+   * drops info-level script output entirely, so results silently never left the
+   * game and every run looked like it produced nothing.
    */
-  constructor(write: (line: string) => void = (line) => console.log(line)) {
+  constructor(write: (line: string) => void = (line) => console.warn(line)) {
     this.write = write;
   }
 
@@ -155,9 +154,12 @@ export class ConsoleReporter implements Reporter {
   private readonly write: (line: string) => void;
 
   /**
-   * @param write Sink for each line. Defaults to `console.log`.
+   * @param write Sink for each line. Defaults to `console.warn` for the same
+   * reason as {@link StructuredReporter}: info-level script output is dropped
+   * by a server configured with `content-log-level=warning`, and a test log
+   * nobody can read is worse than useless when a run stalls.
    */
-  constructor(write: (line: string) => void = (line) => console.log(line)) {
+  constructor(write: (line: string) => void = (line) => console.warn(line)) {
     this.write = write;
   }
 
