@@ -132,7 +132,7 @@ only as good as what BDS pushes, and BDS does not push everything:
 | Module | Purpose |
 |-----|-----|
 | `bot.ts` | `Bot` — actions (chat, navigate, interact, break, forms) and observations (state, inventory, blocks, nearby entities, messages) |
-| `runner.ts` | `defineSuite`, `runSuites` — suites, per-test timeouts, tag filtering, hooks, and `ctx.track` cleanups that run even when a test fails |
+| `runner.ts` | `defineSuite`, `runSuites` — suites, per-test timeouts, tag filtering, hooks, `ctx.track` cleanups that run even when a test fails, and `ctx.screenshot` |
 | `assert.ts` | Minecraft-shaped assertions: `assertNearPosition`, `assertBlockAt`, `assertEventually`, … |
 | `wait.ts` | `waitFor`, `waitForValue`, `retry`, `sleep` — polling with timeouts that name what they were waiting for |
 | `reporter.ts` | `ConsoleReporter` for humans, `StructuredReporter` for CI (`[GOTESTBDS]`-prefixed JSON lines on stdout) |
@@ -151,6 +151,19 @@ await ctx.bot.clickThrough({
   onForm: (form) => ctx.log(`answered "${form.title}"`),
 });
 ```
+
+### Seeing what the bot saw
+
+With a viewer attached (see `viewer/`), a test can capture a still of the bot's
+view. It returns null instead of throwing when nobody is rendering, so the same
+test runs unchanged in a normal headless CI run:
+
+```typescript
+await ctx.screenshot("after-the-shrine-lights-up");
+```
+
+Screenshots and per-test video are reported as artefacts on the `testEnd` and
+`runEnd` events.
 
 ### Reporting to CI
 

@@ -13,7 +13,7 @@ import {
   type TestStatus,
 } from "./reporter";
 import { msToTicks } from "./protocol";
-import type { TestArtifact, ViewerMarkParams } from "./types";
+import type { ScreenshotResult, TestArtifact, ViewerMarkParams } from "./types";
 
 /** Handed to every test, hook and suite callback. */
 export interface TestContext {
@@ -45,6 +45,17 @@ export interface TestContext {
    * @param cleanup Undoes something the test created.
    */
   track(cleanup: () => void | Promise<void>): void;
+  /**
+   * Captures a still of what the bot can see, labelled for the report.
+   *
+   * Never throws and never fails a test. Most runs have no viewer attached —
+   * capture is a debugging aid, so a test that asks for a screenshot has to
+   * behave identically whether or not anyone is rendering it.
+   *
+   * @param label Short name for the shot, slugged into the filename.
+   * @returns Where the still landed, or null when nothing is watching.
+   */
+  screenshot(label: string): Promise<ScreenshotResult | null>;
 }
 
 /** A single test case. */
@@ -451,6 +462,16 @@ function createContext(
     },
     track(cleanup: () => void | Promise<void>) {
       cleanups.push(cleanup);
+    },
+    async screenshot(label: string): Promise<ScreenshotResult | null> {
+      try {
+        return await bots[0].screenshot(label);
+      } catch (error) {
+        // Worth a breadcrumb but not a failure: the usual cause is simply that
+        // no viewer is attached, which is the normal way this suite runs.
+        logs.push(`screenshot "${label}" unavailable: ${describeError(error)}`);
+        return null;
+      }
     },
   };
   return { ctx, logs, cleanups };
