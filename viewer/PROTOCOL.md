@@ -215,13 +215,18 @@ burnt-in caption.
 A request for a still. Emitted when the `screenshot` instruction runs.
 
 ```json
-{"v":1,"type":"capture","bot":"TestBot","id":"cap-3","minTick":1024,"ext":"png","label":"after-interact"}
+{"v":1,"type":"capture","bot":"TestBot","id":"cap-3","minTick":1024,"timeoutMs":5000,"ext":"png","label":"after-interact"}
 ```
 
 The harness must not answer until it has rendered a frame from a snapshot whose
 `tick` is `>= minTick`, then `POST /artifact` with `X-Capture-Id: cap-3`. If it
 cannot, `POST /capture/cap-3/error`. Answering early is worse than failing: a
 stale screenshot is a lie about when the test was.
+
+`timeoutMs` is the `screenshot` instruction's own deadline, carried on the frame
+so both sides give up at the same moment. A harness that used its own shorter
+constant would fail captures the waiting instruction was still willing to wait
+for, and silently cap every caller's `timeoutMs`.
 
 ---
 
@@ -425,7 +430,7 @@ dependency, and a run must survive its absence.
 node viewer/dist-capture/cli.cjs \
   --stream http://127.0.0.1:24680 \
   --bot TestBot \
-  [--width 1280] [--height 720] [--fps 15] \
+  [--width 1280] [--height 720] \
   [--max-segment-seconds 120] \
   [--browser /path/to/chromium] \
   [--log-level info]

@@ -35,10 +35,34 @@ Keys: **C** toggles first-person (locked to actor `eyePos`/`rot`) ↔ orbit (dra
 | --- | --- |
 | `npm run dev` | Vite dev server |
 | `npm run build` | `tsc --noEmit` + Vite production build → `dist/` |
+| `npm run build:capture` | Bundle the headless capture CLI → `dist-capture/cli.cjs` |
 | `npm run preview` | Serve `dist/` |
 | `npm run typecheck` | `tsc --noEmit` |
-| `npm test` | Playwright Chromium smoke test against the recorded fixture |
+| `npm test` | Playwright smoke + capture-harness tests against local fixtures |
 | `npm run generate:fixture` | Rebuild `testdata/basic.jsonl` + `expected.json` |
+
+## Capture harness
+
+Headless Chromium process that turns the SSE stream into per-test webm + stills
+and `POST`s them to the bot's `/artifact` endpoint. See [`PROTOCOL.md`](./PROTOCOL.md)
+§ "The capture harness".
+
+```bash
+npm run build:capture
+node dist-capture/cli.cjs --stream http://127.0.0.1:24680 --bot TestBot
+```
+
+| Flag | Default | Notes |
+| --- | --- | --- |
+| `--stream` | required | Bot viewer base URL; opens `<stream>/?bot=<bot>` |
+| `--bot` | required | Bot name |
+| `--width` / `--height` | `1280` / `720` | Viewport + `recordVideo` size |
+| `--max-segment-seconds` | `120` | Stops and uploads a segment that never gets `testEnd` |
+| `--browser` | Playwright Chromium | Then `PLAYWRIGHT_CHROMIUM`, then `CHROME_PATH` |
+| `--log-level` | `info` | `debug` \| `info` \| `warn` \| `error` |
+
+Video uses Playwright `recordVideo` (whole page, including the DOM diagnostic
+overlay). Stills use the long-lived page that keeps `attached >= 1`.
 
 ## Frame budget and chunk update strategy
 
@@ -84,6 +108,7 @@ src/camera.ts     first-person + orbit
 src/overlay.ts    diagnostic HUD
 src/debug.ts      window.__viewer
 src/main.ts       wiring
+capture/          headless capture CLI (bundled to dist-capture/cli.cjs)
 testdata/         recorded JSONL + expected counts + smoke.png
-tests/            Playwright smoke + fixture SSE server
+tests/            Playwright smoke + capture harness + fixture SSE server
 ```

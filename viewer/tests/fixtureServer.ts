@@ -1,4 +1,9 @@
-import { createServer, type Server, type ServerResponse } from "node:http";
+import {
+  createServer,
+  type IncomingMessage,
+  type Server,
+  type ServerResponse,
+} from "node:http";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -11,6 +16,120 @@ export interface FixtureServer {
   close: () => Promise<void>;
 }
 
+export type JsonlFrame = { type: string; [key: string]: unknown };
+
+/**
+ * Load a JSONL fixture (one frame object per non-empty line).
+ *
+ * @param jsonlPath - Absolute path to the fixture file.
+ * @returns parsed frame objects in file order.
+ */
+export function loadJsonlFrames(
+  jsonlPath = join(here, "..", "testdata", "basic.jsonl"),
+): JsonlFrame[] {
+  return readFileSync(jsonlPath, "utf8")
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0)
+    .map((l) => JSON.parse(l) as JsonlFrame);
+}
+
+/**
+ * Write one SSE event for a frame.
+ *
+ * @param res - Open SSE response.
+ * @param frame - Frame object (its `type` becomes the event name).
+ */
+export function writeSseFrame(res: ServerResponse, frame: JsonlFrame): void {
+  const type = typeof frame.type === "string" ? frame.type : "message";
+  res.write(`event: ${type}\n`);
+  res.write(`data: ${JSON.stringify(frame)}\n\n`);
+}
+
+export interface PushableStream {
+  /** Live SSE subscriber count (browser + harness Node clients). */
+  readonly attached: number;
+  /**
+   * Replace the bootstrap frames sent to every new subscriber (hello + keyframe).
+   *
+   * @param frames - Frames replayed at the start of each connection.
+   */
+  setBootstrap: (frames: JsonlFrame[]) => void;
+  /**
+   * Attach an HTTP request as an SSE subscriber.
+   *
+   * @param req - Incoming request (for close cleanup).
+   * @param res - Response upgraded to `text/event-stream`.
+   */
+  handle: (req: IncomingMessage, res: ServerResponse) => void;
+  /**
+   * Broadcast a frame to every live subscriber.
+   *
+   * @param frame - Frame to emit.
+   */
+  broadcast: (frame: JsonlFrame) => void;
+  /** End every live subscriber (clean stream close). */
+  closeAll: () => void;
+}
+
+/**
+ * Controllable SSE hub: each subscriber gets bootstrap, then live broadcasts.
+ *
+ * @param bootstrap - Initial hello + keyframe (updated via `setBootstrap`).
+ * @returns pushable stream handle.
+ */
+export function createPushableStream(
+  bootstrap: JsonlFrame[] = [],
+): PushableStream {
+  let boot = bootstrap.slice();
+  const live = new Set<ServerResponse>();
+
+  return {
+    get attached() {
+      return live.size;
+    },
+    setBootstrap(frames) {
+      boot = frames.slice();
+    },
+    handle(req, res) {
+      res.writeHead(200, {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+        "Access-Control-Allow-Origin": "*",
+      });
+      for (const frame of boot) writeSseFrame(res, frame);
+      live.add(res);
+      const keepalive = setInterval(() => {
+        res.write(": keepalive\n\n");
+      }, 15_000);
+      const cleanup = () => {
+        clearInterval(keepalive);
+        live.delete(res);
+      };
+      req.on("close", cleanup);
+      res.on("close", cleanup);
+    },
+    broadcast(frame) {
+      if (frame.type === "keyframe") {
+        const hello = boot.find((f) => f.type === "hello");
+        boot = hello ? [hello, frame] : [frame];
+      }
+      for (const res of live) writeSseFrame(res, frame);
+    },
+    closeAll() {
+      for (const res of live) {
+        try {
+          res.end();
+        } catch {
+          /* already closed */
+        }
+      }
+      live.clear();
+    },
+  };
+}
+
 /**
  * Tiny SSE server that replays `testdata/basic.jsonl` once per connection.
  * Used only by the Playwright smoke test so the app hits a real EventSource.
@@ -21,12 +140,12 @@ export interface FixtureServer {
 export async function startFixtureServer(
   jsonlPath = join(here, "..", "testdata", "basic.jsonl"),
 ): Promise<FixtureServer> {
-  const lines = readFileSync(jsonlPath, "utf8")
-    .split(/\r?\n/)
-    .map((l) => l.trim())
-    .filter((l) => l.length > 0);
+  const frames = loadJsonlFrames(jsonlPath);
+  const stream = createPushableStream(frames);
 
-  const live = new Set<ServerResponse>();
+  // Smoke test wants the full fixture once, then an idle keepalive — not a
+  // live broadcast hub. Replay the whole file as bootstrap and never broadcast.
+  stream.setBootstrap(frames);
 
   const server: Server = createServer((req, res) => {
     const url = new URL(req.url ?? "/", "http://127.0.0.1");
@@ -40,37 +159,7 @@ export async function startFixtureServer(
       res.end("not found");
       return;
     }
-
-    res.writeHead(200, {
-      "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache",
-      Connection: "keep-alive",
-      "Access-Control-Allow-Origin": "*",
-    });
-
-    for (const line of lines) {
-      let type = "message";
-      try {
-        type = (JSON.parse(line) as { type: string }).type;
-      } catch {
-        /* keep default */
-      }
-      res.write(`event: ${type}\n`);
-      res.write(`data: ${line}\n\n`);
-    }
-
-    // Keep the SSE socket open for the life of the test. Ending it makes
-    // EventSource reconnect and paints a spurious "stream error" on the HUD.
-    live.add(res);
-    const keepalive = setInterval(() => {
-      res.write(": keepalive\n\n");
-    }, 15_000);
-    const cleanup = () => {
-      clearInterval(keepalive);
-      live.delete(res);
-    };
-    req.on("close", cleanup);
-    res.on("close", cleanup);
+    stream.handle(req, res);
   });
 
   await new Promise<void>((resolve) =>
@@ -85,14 +174,7 @@ export async function startFixtureServer(
     streamUrl: `${base}/stream?bot=TestBot`,
     close: () =>
       new Promise((resolve, reject) => {
-        for (const res of live) {
-          try {
-            res.end();
-          } catch {
-            /* already closed */
-          }
-        }
-        live.clear();
+        stream.closeAll();
         server.close((err) => (err ? reject(err) : resolve()));
       }),
   };
