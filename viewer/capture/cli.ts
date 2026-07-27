@@ -13,6 +13,7 @@ Options:
   --height <n>                   Viewport height (default 720)
   --max-segment-seconds <n>      Cap run recording length (default 120)
   --browser <path>               Chromium executable path
+  --video-out <file>             Write the run video here instead of POSTing it
   --log-level <level>            debug | info | warn | error (default info)
   --help                         Show this help
 `;
@@ -26,6 +27,7 @@ interface ParsedArgs {
     height?: number;
     maxSegmentSeconds?: number;
     browser?: string;
+    videoOut?: string;
     logLevel?: LogLevel;
   };
 }
@@ -78,6 +80,10 @@ export function parseArgs(argv: string[]): ParsedArgs {
     }
     if (a === "--browser") {
       options.browser = next();
+      continue;
+    }
+    if (a === "--video-out") {
+      options.videoOut = next();
       continue;
     }
     if (a === "--log-level") {
@@ -161,6 +167,7 @@ async function main(): Promise<void> {
     maxSegmentSeconds: parsed.options.maxSegmentSeconds ?? 120,
     browserPath,
     logLevel: parsed.options.logLevel ?? "info",
+    ...(parsed.options.videoOut ? { videoOut: parsed.options.videoOut } : {}),
   };
 
   try {

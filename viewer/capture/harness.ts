@@ -1,8 +1,15 @@
-import { mkdtempSync, readFileSync, rmSync, unlinkSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import http from "node:http";
 import https from "node:https";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type { BrowserContext, Page } from "playwright";
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
@@ -15,6 +22,11 @@ export interface HarnessOptions {
   maxSegmentSeconds: number;
   browserPath: string;
   logLevel: LogLevel;
+  /**
+   * File to write the run video to. When unset the video is POSTed to the bot
+   * instead, which only works while the bot is still running.
+   */
+  videoOut?: string;
 }
 
 interface MarkState {
@@ -121,6 +133,25 @@ export async function runHarness(opts: HarnessOptions): Promise<void> {
       const path = await video.path();
       const body = readFileSync(path);
       const durationMs = Date.now() - videoStartedAt;
+
+      // Writing the file beats posting it when we have somewhere to put it: the
+      // bot hosts the upload endpoint and exits as soon as the run finishes, so
+      // a recording finalised at shutdown has nothing left to POST to. The
+      // runner reconciles the artefact directory once everything is down.
+      if (opts.videoOut) {
+        mkdirSync(dirname(opts.videoOut), { recursive: true });
+        writeFileSync(opts.videoOut, body);
+        log.info(
+          `capture: wrote video ${opts.videoOut} bytes=${body.length} ms=${durationMs}`,
+        );
+        try {
+          unlinkSync(path);
+        } catch {
+          /* ignore */
+        }
+        return;
+      }
+
       await postArtifact(opts.stream, {
         kind: "video",
         ext: "webm",
