@@ -9,6 +9,8 @@ export default [
       // Generated Files
       "**/__generated__/**",
       "node_modules/**",
+      // Viewer is a self-contained app with its own lint/deps.
+      "viewer/**",
     ],
   },
   {

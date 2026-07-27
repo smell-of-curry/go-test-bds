@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>go-test-bds viewer</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        background: #0b0e14;
+        color: #e6edf3;
+        font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      }
+      #c {
+        display: block;
+        width: 100%;
+        height: 100%;
+      }
+      #overlay {
+        position: fixed;
+        top: 8px;
+        left: 8px;
+        padding: 8px 10px;
+        background: rgba(0, 0, 0, 0.55);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        pointer-events: none;
+        white-space: pre;
+        z-index: 2;
+      }
+      #schema-error {
+        display: none;
+        position: fixed;
+        inset: 0;
+        align-items: center;
+        justify-content: center;
+        background: rgba(10, 12, 18, 0.92);
+        color: #ff6b6b;
+        font-size: 16px;
+        z-index: 10;
+        padding: 24px;
+        text-align: center;
+      }
+      #schema-error.visible {
+        display: flex;
+      }
+      #crosshair {
+        position: fixed;
+        left: 50%;
+        top: 50%;
+        width: 12px;
+        height: 12px;
+        margin: -6px 0 0 -6px;
+        border: 1px solid rgba(255, 255, 255, 0.7);
+        border-radius: 50%;
+        pointer-events: none;
+        z-index: 2;
+      }
+      #labels {
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        z-index: 1;
+        overflow: hidden;
+      }
+      .entity-label {
+        position: absolute;
+        transform: translate(-50%, -100%);
+        padding: 1px 4px;
+        background: rgba(0, 0, 0, 0.55);
+        color: #fff;
+        font-size: 11px;
+        white-space: nowrap;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="c"></canvas>
+    <div id="crosshair"></div>
+    <div id="labels"></div>
+    <div id="overlay">connecting…</div>
+    <div id="schema-error"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
