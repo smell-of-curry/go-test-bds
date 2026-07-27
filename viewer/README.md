@@ -59,6 +59,7 @@ node dist-capture/cli.cjs --stream http://127.0.0.1:24680 --bot TestBot
 | `--width` / `--height` | `1280` / `720` | Viewport + `recordVideo` size |
 | `--max-segment-seconds` | `120` | Caps the whole-run recording; closes the stream and uploads |
 | `--browser` | Playwright Chromium | Then `PLAYWRIGHT_CHROMIUM`, then `CHROME_PATH` |
+| `--video-out` | unset | Write the run video here instead of POSTing it; the bot exits with the run, so anything finalised at shutdown needs this |
 | `--log-level` | `info` | `debug` \| `info` \| `warn` \| `error` |
 
 Video uses Playwright `recordVideo` on the **same** long-lived context as stills

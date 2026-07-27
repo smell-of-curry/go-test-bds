@@ -7,3 +7,4 @@ bds/
 *.log
 /bin/
 .local/
+viewer/artifacts-prod/

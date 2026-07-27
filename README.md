@@ -154,16 +154,25 @@ await ctx.bot.clickThrough({
 
 ### Seeing what the bot saw
 
-With a viewer attached (see `viewer/`), a test can capture a still of the bot's
-view. It returns null instead of throwing when nobody is rendering, so the same
-test runs unchanged in a normal headless CI run:
+The optional **viewer** is an HTTP hub on the bot (`gotestbds/viewer/`) that
+streams world snapshots and serves a three.js web app. Turn it on with
+`-viewer` (plus `-viewer-address`, `-viewer-artifacts`, `-viewer-app` as needed),
+the matching `GOTESTBDS_VIEWER*` env vars, or a `[Viewer]` section in
+`config.toml`. Details and the capture harness live in
+[`viewer/README.md`](viewer/README.md); the wire contract is
+[`viewer/PROTOCOL.md`](viewer/PROTOCOL.md).
+
+With a viewer attached, a test can capture a still of the bot's view. It
+returns null instead of throwing when nobody is rendering, so the same test
+runs unchanged without a viewer:
 
 ```typescript
 await ctx.screenshot("after-the-shrine-lights-up");
 ```
 
-Screenshots and per-test video are reported as artefacts on the `testEnd` and
-`runEnd` events.
+Stills and one whole-run video (`run.webm`) are reported as artefacts on the
+`testEnd` and `runEnd` events. Capture is best effort — unregistered
+`screenshot` / missing harness never fails a test.
 
 ### Reporting to CI
 
