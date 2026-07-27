@@ -24,38 +24,64 @@ import (
 // touches it: Tick encodes once, fans out the resulting bytes, and shares them
 // with every subscriber.
 type encoder struct {
-	botName string
-	radius  int
+	botName       string
+	radius        int
+	sectionRadius int
 
 	blockCache map[uint32]Block
-	prev       *viewState
-	forceKey   bool
+	// colCache reuses wire columns whose world Revision has not moved. Cleared
+	// on dimension change and whenever the actor's section Y leaves the window
+	// the cached encodings were built for.
+	colCache     map[[2]int32]colCacheEntry
+	cacheCenterY int
+	cacheValid   bool
+
+	// skipColCache forces a full re-encode every tick. Benchmarks use it to
+	// measure the pre-cache cost without checking out old code.
+	skipColCache bool
+
+	prev     *viewState
+	forceKey bool
+}
+
+type colCacheEntry struct {
+	rev uint64
+	col Column
 }
 
 // viewState is the last fully projected snapshot, used to build deltas.
 type viewState struct {
 	world    World
 	columns  map[[2]int32]Column
+	revs     map[[2]int32]uint64
+	centerY  int
 	entities map[uint64]Entity
 	actor    Actor
 	uiBytes  []byte
 	tick     uint64
 }
 
-func newEncoder(botName string, radius int) *encoder {
+func newEncoder(botName string, radius, sectionRadius int) *encoder {
 	if radius < 0 {
 		radius = 0
 	}
+	if sectionRadius < 0 {
+		sectionRadius = 0
+	}
 	return &encoder{
-		botName:    botName,
-		radius:     radius,
-		blockCache: make(map[uint32]Block),
+		botName:       botName,
+		radius:        radius,
+		sectionRadius: sectionRadius,
+		blockCache:    make(map[uint32]Block),
+		colCache:      make(map[[2]int32]colCacheEntry),
 	}
 }
 
 // DimensionChanged forces the next Tick to emit a keyframe.
 func (e *encoder) DimensionChanged() {
 	e.forceKey = true
+	clear(e.colCache)
+	e.cacheValid = false
 }
 
 // frame encodes one tick. Returns the SSE event name and JSON payload bytes.
@@ -93,6 +119,15 @@ func (e *encoder) project(a *actor.Actor) (*viewState, error) {
 	w := a.World()
 	pos := a.Position()
 	cx, cz := int32(math.Floor(pos.X()))>>4, int32(math.Floor(pos.Z()))>>4
+	centerY := int(math.Floor(pos.Y())) >> 4
+
+	// Cached encodings are window-specific; a vertical section change would
+	// otherwise leave sections the actor walked away from stuck on the client.
+	if !e.cacheValid || centerY != e.cacheCenterY {
+		clear(e.colCache)
+		e.cacheCenterY = centerY
+		e.cacheValid = true
+	}
 
 	worldMeta := World{
 		Dimension:     a.Dimension(),
@@ -102,15 +137,38 @@ func (e *encoder) project(a *actor.Actor) (*viewState, error) {
 	// min/max Y come from any column in radius; fall back to overworld range.
 	worldMeta.MinY, worldMeta.MaxY = -64, 319
 	columns := make(map[[2]int32]Column)
+	revs := make(map[[2]int32]uint64)
+	seen := make(map[[2]int32]struct{})
 	for cpos, col := range r {
 		// Chebyshev radius matches chunk-radius style caps used by the bot.
 		if chebyshev(cpos[0]-cx, cpos[1]-cz) > e.radius {
 			continue
 		}
-		enc := e.encodeColumn(w, cpos, col)
-		columns[[2]int32{cpos[0], cpos[1]}] = enc
+		key := [2]int32{cpos[0], cpos[1]}
+		seen[key] = struct{}{}
+		rev := col.Revision
+		if !e.skipColCache {
+			if ent, ok := e.colCache[key]; ok && ent.rev == rev {
+				columns[key] = ent.col
+				revs[key] = rev
+				worldMeta.MinY = ent.col.MinY
+				worldMeta.MaxY = ent.col.MaxY
+				continue
+			}
+		}
+		enc := e.encodeColumn(w, cpos, col, centerY)
+		if !e.skipColCache {
+			e.colCache[key] = colCacheEntry{rev: rev, col: enc}
+		}
+		columns[key] = enc
+		revs[key] = rev
 		worldMeta.MinY = enc.MinY
 		worldMeta.MaxY = enc.MaxY
+	}
+	for key := range e.colCache {
+		if _, ok := seen[key]; !ok {
+			delete(e.colCache, key)
+		}
 	}
 
 	entities := make(map[uint64]Entity)
@@ -128,6 +186,8 @@ func (e *encoder) project(a *actor.Actor) (*viewState, error) {
 	return &viewState{
 		world:    worldMeta,
 		columns:  columns,
+		revs:     revs,
+		centerY:  centerY,
 		entities: entities,
 		actor:    act,
 		uiBytes:  uiBytes,
@@ -170,11 +230,18 @@ func (e *encoder) delta(cur *viewState) Delta {
 		return d
 	}
 
-	// Columns.
+	// Columns. Same world revision + same vertical window ⇒ identical wire
+	// column (cache hit); skip the section walk. A window move keeps the
+	// world revision but must still diff so sections leaving the window
+	// become air on the client.
+	sameWindow := cur.centerY == e.prev.centerY
 	for key, col := range cur.columns {
 		prev, ok := e.prev.columns[key]
 		if !ok {
 			d.ColumnsAdded = append(d.ColumnsAdded, col)
+			continue
+		}
+		if sameWindow && e.prev.revs[key] == cur.revs[key] {
 			continue
 		}
 		if prev.State != col.State {
@@ -218,12 +285,64 @@ func (e *encoder) delta(cur *viewState) Delta {
 // diffBlocks compares two encodings of the same column and returns per-block
 // changes. Section omission means air, so a section that appears or disappears
 // is expanded into individual air/non-air updates.
+//
+// Sections whose wire payload is byte-identical are skipped — a column revision
+// bump from one block change must not re-expand every other section.
 func diffBlocks(pos [2]int32, prev, cur Column) []BlockChange {
+	prevByY := sectionsByY(prev)
+	curByY := sectionsByY(cur)
+	var out []BlockChange
+	for y, sec := range curByY {
+		ps, ok := prevByY[y]
+		if ok && sectionWireEqual(ps, sec) {
+			continue
+		}
+		out = append(out, diffSectionBlocks(pos, ps, sec, ok)...)
+	}
+	for y, ps := range prevByY {
+		if _, ok := curByY[y]; ok {
+			continue
+		}
+		out = append(out, diffSectionBlocks(pos, ps, Section{}, true)...)
+	}
+	return out
+}
+
+func sectionsByY(col Column) map[int]Section {
+	out := make(map[int]Section, len(col.Sections))
+	for _, sec := range col.Sections {
+		out[sec.Y] = sec
+	}
+	return out
+}
+
+func sectionWireEqual(a, b Section) bool {
+	if a.Y != b.Y || a.Blocks != b.Blocks || a.Blocks1 != b.Blocks1 || len(a.Palette) != len(b.Palette) {
+		return false
+	}
+	for i := range a.Palette {
+		if !blockEqual(a.Palette[i], b.Palette[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+// diffSectionBlocks expands one section pair into BlockChanges. missingPrev
+// means the section is new; an empty cur means it vanished into air.
+func diffSectionBlocks(pos [2]int32, prev, cur Section, hasPrev bool) []BlockChange {
 	type key struct {
 		sx, sy, sz, layer int
 	}
-	prevBlocks := sectionBlockMap(pos, prev)
-	curBlocks := sectionBlockMap(pos, cur)
+	var prevCol, curCol Column
+	if hasPrev {
+		prevCol.Sections = []Section{prev}
+	}
+	if cur.Blocks != "" || cur.Blocks1 != "" || len(cur.Palette) > 0 {
+		curCol.Sections = []Section{cur}
+	}
+	prevBlocks := sectionBlockMap(pos, prevCol)
+	curBlocks := sectionBlockMap(pos, curCol)
 	var out []BlockChange
 	seen := make(map[key]struct{})
 	for k, b := range curBlocks {
@@ -237,12 +356,10 @@ func diffBlocks(pos [2]int32, prev, cur Column) []BlockChange {
 			Block: b,
 		})
 	}
-	for k, b := range prevBlocks {
+	for k := range prevBlocks {
 		if _, ok := seen[k]; ok {
 			continue
 		}
-		// Block vanished into an omitted (air) section.
-		_ = b
 		out = append(out, BlockChange{
 			Pos:   [3]int{int(pos[0])*16 + k.sx, k.sy, int(pos[1])*16 + k.sz},
 			Layer: k.layer,
@@ -282,7 +399,7 @@ func sectionBlockMap(colPos [2]int32, col Column) map[struct{ sx, sy, sz, layer 
 	return out
 }
 
-func (e *encoder) encodeColumn(w *gw.World, pos dfworld.ChunkPos, col *gw.Column) Column {
+func (e *encoder) encodeColumn(w *gw.World, pos dfworld.ChunkPos, col *gw.Column, centerY int) Column {
 	r := col.Range()
 	out := Column{
 		X:     pos[0],
@@ -298,12 +415,22 @@ func (e *encoder) encodeColumn(w *gw.World, pos dfworld.ChunkPos, col *gw.Column
 		}
 		// PROTOCOL section y is the section index (covers y*16 .. y*16+15).
 		secY := int(col.SubY(int16(i))) >> 4
+		if absInt(secY-centerY) > e.sectionRadius {
+			continue
+		}
 		sec, ok := e.encodeSection(w, sub, secY)
 		if ok {
 			out.Sections = append(out.Sections, sec)
 		}
 	}
 	return out
+}
+
+func absInt(v int) int {
+	if v < 0 {
+		return -v
+	}
+	return v
 }
 
 // encodeSection builds one wire Section. Returns ok=false for air-only.
@@ -755,6 +882,6 @@ func entityEqual(a, b Entity) bool {
 
 // encodeSectionForTest exposes section encoding for the palette-order test.
 func encodeSectionForTest(w *gw.World, sub *chunk.SubChunk, secY int) (Section, bool) {
-	e := newEncoder("test", 4)
+	e := newEncoder("test", 4, 4)
 	return e.encodeSection(w, sub, secY)
 }

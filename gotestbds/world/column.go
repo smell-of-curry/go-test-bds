@@ -42,10 +42,27 @@ type Column struct {
 	BlockEntities map[cube.Pos]world.Block
 	State         ColumnState
 
+	// Revision increments on every mutation of this column's blocks or load
+	// state. The world is single-goroutine, so a plain counter is enough —
+	// the viewer encoder keys its column cache on this to skip re-encoding.
+	Revision uint64
+
 	// pendingSubChunks is how many SubChunk entries this column still expects
 	// after a request-mode LevelChunk. Zero once complete or when the payload
 	// arrived inline.
 	pendingSubChunks int
+}
+
+// SetBlock writes a block and bumps Revision so cache consumers notice.
+//
+// @param x Local X within the column (0–15).
+// @param y World Y.
+// @param z Local Z within the column (0–15).
+// @param layer Chunk layer.
+// @param block Network (or local) runtime ID to store.
+func (c *Column) SetBlock(x uint8, y int16, z uint8, layer uint8, block uint32) {
+	c.Chunk.SetBlock(x, y, z, layer, block)
+	c.Revision++
 }
 
 // NewColumn ...
@@ -74,6 +91,7 @@ func NewColumn(c *chunk.Chunk, nbters []chunk.BlockEntity) *Column {
 //
 // @param n How many sub-chunks were requested, counted up from the bottom.
 func (c *Column) ExpectSubChunks(n int) {
+	c.Revision++
 	if n <= 0 {
 		c.pendingSubChunks = 0
 		c.State = ColumnComplete
@@ -85,7 +103,11 @@ func (c *Column) ExpectSubChunks(n int) {
 
 // ReceiveSubChunk records one requested sub-chunk arriving and promotes the
 // column toward complete.
+//
+// Callers write the decoded sub-chunk into c.Sub() before this; the revision
+// bump covers that mutation even when the column was already complete.
 func (c *Column) ReceiveSubChunk() {
+	c.Revision++
 	if c.pendingSubChunks > 0 {
 		c.pendingSubChunks--
 	}

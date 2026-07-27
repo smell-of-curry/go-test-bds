@@ -13,11 +13,12 @@ import (
 
 // Options configures the viewer Hub.
 type Options struct {
-	Address     string // bind address
-	Radius      int    // column radius carried by the stream
-	ArtifactDir string // where artefacts are written
-	AppDir      string // built viewer app to serve at "/", optional
-	Logger      *slog.Logger
+	Address       string // bind address
+	Radius        int    // column radius carried by the stream
+	SectionRadius int    // vertical section window around the actor (§Y ± N)
+	ArtifactDir   string // where artefacts are written
+	AppDir        string // built viewer app to serve at "/", optional
+	Logger        *slog.Logger
 }
 
 // Hub is the process-wide viewer server. All bots share one Hub; streams are
@@ -54,6 +55,9 @@ func New(opts Options) (*Hub, error) {
 	}
 	if opts.Radius <= 0 {
 		opts.Radius = 4
+	}
+	if opts.SectionRadius <= 0 {
+		opts.SectionRadius = 4
 	}
 	if opts.Logger == nil {
 		opts.Logger = slog.Default()
@@ -106,7 +110,7 @@ func (h *Hub) Register(botName string) *Stream {
 	if s, ok := h.streams[botName]; ok {
 		return s
 	}
-	s := newStream(h, botName, h.opts.Radius)
+	s := newStream(h, botName, h.opts.Radius, h.opts.SectionRadius)
 	h.streams[botName] = s
 	h.meta[botName] = botMeta{}
 	return s

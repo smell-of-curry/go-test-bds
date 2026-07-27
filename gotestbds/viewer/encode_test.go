@@ -10,6 +10,7 @@ import (
 	"github.com/df-mc/dragonfly/server/block/cube"
 	dfworld "github.com/df-mc/dragonfly/server/world"
 	"github.com/df-mc/dragonfly/server/world/chunk"
+	"github.com/go-gl/mathgl/mgl64"
 	"github.com/sandertv/gophertunnel/minecraft"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/login"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
@@ -33,7 +34,7 @@ func (c stubConn) IdentityData() login.IdentityData {
 func (stubConn) WritePacket(packet.Packet) error { return nil }
 func (c stubConn) GameData() minecraft.GameData  { return c.game }
 
-func testActor(t *testing.T, name string) *actor.Actor {
+func testActor(t testing.TB, name string) *actor.Actor {
 	t.Helper()
 	dfworld.DefaultBlockRegistry.Finalize()
 	a := actor.Config{
@@ -212,7 +213,7 @@ func TestDeltaSequenceReconstructsState(t *testing.T) {
 	pig.Move(cube.Pos{2, 70, 2}.Vec3Centre(), cube.Rotation{})
 	w.AddEntity(pig)
 
-	enc := newEncoder("TestBot", 4)
+	enc := newEncoder("TestBot", 4, 4)
 	kf0 := encodeKeyframe(t, enc, a)
 	model := modelFromKeyframe(kf0)
 
@@ -308,6 +309,53 @@ func TestDeltaSequenceReconstructsState(t *testing.T) {
 		if !ok || got.Name != wantB.Name {
 			t.Fatalf("block %v = %+v want %+v", pos, got, wantB)
 		}
+	}
+}
+
+// TestSectionWindowDropsDistantSections ensures a vertical move emits air for
+// sections that leave the actor's sectionRadius window.
+func TestSectionWindowDropsDistantSections(t *testing.T) {
+	a := testActor(t, "TestBot")
+	w := a.World()
+	addColumn(w, dfworld.ChunkPos{0, 0})
+	w.SetBlock(cube.Pos{1, 70, 1}, block.Gold{})
+	w.SetBlock(cube.Pos{1, 200, 1}, block.Dirt{})
+
+	// Actor at y=70 → center section 4; sectionRadius 4 keeps y=70 (sec 4)
+	// and drops y=200 (sec 12).
+	a.Move(mgl64.Vec3{1, 70, 1}, cube.Rotation{})
+	enc := newEncoder("TestBot", 4, 4)
+	kf := encodeKeyframe(t, enc, a)
+	if len(kf.Columns) != 1 {
+		t.Fatalf("columns=%d want 1", len(kf.Columns))
+	}
+	var sawLow, sawHigh bool
+	for _, sec := range kf.Columns[0].Sections {
+		if sec.Y == 4 {
+			sawLow = true
+		}
+		if sec.Y == 12 {
+			sawHigh = true
+		}
+	}
+	if !sawLow || sawHigh {
+		t.Fatalf("sections at y=70 window: low=%v high=%v (want low only)", sawLow, sawHigh)
+	}
+
+	// Walk up so the high section enters and the low one leaves.
+	a.Move(mgl64.Vec3{1, 200, 1}, cube.Rotation{})
+	d := encodeDelta(t, enc, a)
+	var lowCleared, highAdded bool
+	for _, ch := range d.Blocks {
+		if ch.Pos == [3]int{1, 70, 1} && ch.Block.Name == "minecraft:air" {
+			lowCleared = true
+		}
+		if ch.Pos == [3]int{1, 200, 1} && ch.Block.Name != "" && ch.Block.Name != "minecraft:air" {
+			highAdded = true
+		}
+	}
+	if !lowCleared || !highAdded {
+		t.Fatalf("window move delta: lowCleared=%v highAdded=%v blocks=%d", lowCleared, highAdded, len(d.Blocks))
 	}
 }
 

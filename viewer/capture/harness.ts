@@ -153,18 +153,47 @@ export async function runHarness(opts: HarnessOptions): Promise<void> {
 
   try {
     await stillsPage.goto(appUrl, { waitUntil: "domcontentloaded" });
-    await stillsPage.waitForFunction(
-      () => {
-        const v = (
-          window as unknown as {
-            __viewer?: { schemaOk: boolean; tick: number };
-          }
-        ).__viewer;
-        return !!v && v.schemaOk && v.tick > 0;
-      },
-      undefined,
-      { timeout: 30_000 },
-    );
+    try {
+      await stillsPage.waitForFunction(
+        () => {
+          const v = (
+            window as unknown as {
+              __viewer?: { schemaOk: boolean; tick: number };
+            }
+          ).__viewer;
+          return !!v && v.schemaOk && v.tick > 0;
+        },
+        undefined,
+        { timeout: 30_000 },
+      );
+    } catch (err) {
+      const diag = await stillsPage
+        .evaluate(() => {
+          const v = (
+            window as unknown as {
+              __viewer?: {
+                schemaOk: boolean;
+                tick: number;
+                framesReceived: number;
+                lastError: string | null;
+              };
+            }
+          ).__viewer;
+          if (!v) return { missing: true as const };
+          return {
+            missing: false as const,
+            schemaOk: v.schemaOk,
+            tick: v.tick,
+            framesReceived: v.framesReceived,
+            lastError: v.lastError,
+          };
+        })
+        .catch(() => ({ missing: true as const }));
+      log.error(
+        `capture: stills readiness timeout diag=${JSON.stringify(diag)}`,
+      );
+      throw err;
+    }
     log.info(`capture: stills attached at ${appUrl}`);
     stillsReady = true;
     for (const p of pending) enqueue(p.type, p.data);

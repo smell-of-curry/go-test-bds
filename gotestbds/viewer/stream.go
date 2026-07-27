@@ -51,11 +51,11 @@ type encodedFrame struct {
 	data  []byte
 }
 
-func newStream(h *Hub, name string, radius int) *Stream {
+func newStream(h *Hub, name string, radius, sectionRadius int) *Stream {
 	return &Stream{
 		hub:  h,
 		name: name,
-		enc:  newEncoder(name, radius),
+		enc:  newEncoder(name, radius, sectionRadius),
 		subs: make(map[*subscriber]struct{}),
 	}
 }

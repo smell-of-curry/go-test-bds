@@ -27,8 +27,10 @@ export class Overlay {
       streamError?: string;
     },
   ): void {
-    if (!state.schemaOk) {
-      this.errorEl.textContent = state.schemaError ?? "unsupported schema";
+    // Only banner a real schema refusal — initial schemaOk:false (awaiting
+    // hello/keyframe) is not an error state.
+    if (state.schemaError) {
+      this.errorEl.textContent = state.schemaError;
       this.errorEl.classList.add("visible");
     } else {
       this.errorEl.classList.remove("visible");

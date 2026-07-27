@@ -33,6 +33,10 @@ export interface StoredColumn {
 }
 
 export interface WorldState {
+  /**
+   * False until a hello/keyframe with a supported schema arrives.
+   * Starts false so a stuck stream is distinguishable from a missing app.
+   */
   schemaOk: boolean;
   schemaError: string | null;
   hello: HelloFrame | null;
@@ -47,6 +51,8 @@ export interface WorldState {
   /** Increments on every keyframe after the first successful one (server resync). */
   resyncCount: number;
   droppedCount: number;
+  /** Frames that reached `apply` (parse already succeeded in the stream layer). */
+  framesReceived: number;
   /** Monotonic revision bumped on every applied frame; scene dirty-checks against it. */
   revision: number;
   /** Section keys `"cx,cz,sy"` dirtied since last drain. */
@@ -64,7 +70,7 @@ export type StoreListener = (state: WorldState) => void;
 
 function emptyState(): WorldState {
   return {
-    schemaOk: true,
+    schemaOk: false,
     schemaError: null,
     hello: null,
     tick: 0,
@@ -77,6 +83,7 @@ function emptyState(): WorldState {
     pendingCapture: null,
     resyncCount: 0,
     droppedCount: 0,
+    framesReceived: 0,
     revision: 0,
     dirtySections: new Set(),
     dirtyColumns: new Set(),
@@ -135,6 +142,7 @@ export class Store {
   }
 
   apply(frame: Frame): void {
+    this.state.framesReceived++;
     switch (frame.type) {
       case "hello":
         this.applyHello(frame);
@@ -185,12 +193,15 @@ export class Store {
   }
 
   private applyKeyframe(frame: KeyframeFrame): void {
-    if (!this.state.schemaOk) return;
+    // Keyframe carries `v` too — accept it without a prior hello so encoder-only
+    // fixtures (and a hello that the client somehow missed) still become ready.
     if (frame.v !== SCHEMA_VERSION) {
       this.state.schemaOk = false;
       this.state.schemaError = `unsupported frame v=${frame.v}`;
       return;
     }
+    this.state.schemaOk = true;
+    this.state.schemaError = null;
     if (this.sawKeyframe) this.state.resyncCount++;
     this.sawKeyframe = true;
 

@@ -2,7 +2,7 @@ import type { CameraController } from "./camera";
 import type { ViewerScene } from "./scene";
 import type { Store } from "./store";
 
-/** Exact shape exposed on `window.__viewer` for the Playwright smoke test. */
+/** Exact shape exposed on `window.__viewer` for Playwright / the capture harness. */
 export interface ViewerHandle {
   readonly blockInstanceCount: number;
   readonly sectionMeshCount: number;
@@ -12,6 +12,10 @@ export interface ViewerHandle {
   readonly dimension: number;
   readonly schemaOk: boolean;
   readonly resyncCount: number;
+  /** Frames that reached the store (0 until the first SSE payload is applied). */
+  readonly framesReceived: number;
+  /** Schema mismatch or latest stream/parse error; null when healthy. */
+  readonly lastError: string | null;
   /** True once the remesh queue is empty after the latest frames. */
   settled: boolean;
   /** Force-drain the remesh queue (test helper). */
@@ -35,15 +39,22 @@ declare global {
 /**
  * Install the test handle from the live store + scene.
  *
+ * Assigned at startup (before any frame) so a harness timeout can tell
+ * "app never loaded" (`__viewer` missing) from "stream stuck"
+ * (`schemaOk: false`, `framesReceived: 0`, `lastError` set).
+ *
  * @param store - World model.
  * @param scene - Rendered scene.
  * @param getSettled - Returns whether the remesh queue is empty.
+ * @param camera - Live camera (for `diag`).
+ * @param getStreamError - Latest EventSource/parse error from the stream layer.
  */
 export function installViewerHandle(
   store: Store,
   scene: ViewerScene,
   getSettled: () => boolean,
   camera: CameraController,
+  getStreamError: () => string = () => "",
 ): void {
   window.__viewer = {
     get blockInstanceCount() {
@@ -69,6 +80,15 @@ export function installViewerHandle(
     },
     get resyncCount() {
       return store.getState().resyncCount;
+    },
+    get framesReceived() {
+      return store.getState().framesReceived;
+    },
+    get lastError() {
+      const schema = store.getState().schemaError;
+      if (schema) return schema;
+      const stream = getStreamError();
+      return stream.length > 0 ? stream : null;
     },
     get settled() {
       return getSettled();

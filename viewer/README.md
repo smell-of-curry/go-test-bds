@@ -89,6 +89,10 @@ Air is skipped. A cell whose six **in-section** neighbours are all opaque is ski
 
 `npm test` boots a tiny local SSE server that replays `testdata/basic.jsonl`, serves the app via Vite, and asserts exact `window.__viewer` counts from `testdata/expected.json`. It also writes `testdata/smoke.png` and samples canvas pixels so a blank clear-colour frame fails.
 
+A second Playwright test replays the Go encoder golden at `../gotestbds/viewer/testdata/go-stream.jsonl` over the same SSE stub and asserts `schemaOk` plus the fixture's last tick — proving the app parses the real wire format offline.
+
+`window.__viewer` is assigned at startup with `schemaOk: false`. After frames arrive it also exposes `framesReceived` and `lastError` so a capture-harness timeout can say why readiness never came.
+
 Headless Chromium needs a software GL backend on GPU-less runners. The Playwright config passes:
 
 ```
@@ -110,5 +114,6 @@ src/debug.ts      window.__viewer
 src/main.ts       wiring
 capture/          headless capture CLI (bundled to dist-capture/cli.cjs)
 testdata/         recorded JSONL + expected counts + smoke.png
-tests/            Playwright smoke + capture harness + fixture SSE server
+tests/            Playwright smoke + Go golden stream + capture harness + fixture SSE server
 ```
+

@@ -11,5 +11,6 @@ Count = 1
 Enabled = false
 Address = "127.0.0.1:24680"
 Radius = 4
+SectionRadius = 4
 ArtifactDir = "artifacts"
 AppDir = ""

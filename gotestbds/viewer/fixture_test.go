@@ -34,7 +34,7 @@ func TestGoStreamGolden(t *testing.T) {
 	pig.Move(cube.Pos{2, 70, 2}.Vec3Centre(), cube.Rotation{})
 	w.AddEntity(pig)
 
-	enc := newEncoder("TestBot", 4)
+	enc := newEncoder("TestBot", 4, 4)
 	var lines []string
 
 	appendFrame := func(data []byte) {

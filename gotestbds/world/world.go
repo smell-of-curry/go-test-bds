@@ -208,6 +208,9 @@ func (w *World) Chunk(pos world.ChunkPos) (*Column, bool) {
 
 // AddChunk ...
 func (w *World) AddChunk(pos world.ChunkPos, c *Column) {
+	// Column creation / replacement is a content change for anything caching
+	// by Revision — bump even when the pointer is new (starts at 0).
+	c.Revision++
 	w.columns()[pos] = c
 	// The one-entry lookup cache starts out holding chunk 0, 0 with no column, so
 	// a world whose first read is in that chunk reads it as empty forever.

@@ -21,7 +21,13 @@ const overlay = new Overlay(overlayEl, errorEl);
 let streamError = "";
 let settled = true;
 
-installViewerHandle(store, scene, () => settled, camera);
+installViewerHandle(
+  store,
+  scene,
+  () => settled,
+  camera,
+  () => streamError,
+);
 
 camera.bindOrbitControls(canvas);
 

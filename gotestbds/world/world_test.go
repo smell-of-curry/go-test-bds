@@ -195,6 +195,41 @@ func TestBlockAtUnloadedVersusAir(t *testing.T) {
 	}
 }
 
+// TestColumnRevisionBumps covers every mutation path the viewer cache keys on.
+func TestColumnRevisionBumps(t *testing.T) {
+	world.DefaultBlockRegistry.Finalize()
+
+	w := NewWorld(false)
+	col := NewColumn(chunk.New(world.DefaultBlockRegistry, world.Overworld.Range()), nil)
+	if col.Revision != 0 {
+		t.Fatalf("new column Revision=%d want 0", col.Revision)
+	}
+	w.AddChunk(world.ChunkPos{0, 0}, col)
+	if col.Revision != 1 {
+		t.Fatalf("after AddChunk Revision=%d want 1", col.Revision)
+	}
+	before := col.Revision
+	w.SetBlock(cube.Pos{1, 70, 1}, block.Gold{})
+	if col.Revision != before+1 {
+		t.Fatalf("after SetBlock Revision=%d want %d", col.Revision, before+1)
+	}
+	before = col.Revision
+	w.SetBlockRuntimeID(cube.Pos{2, 70, 1}, world.BlockRuntimeID(block.Dirt{}), 0)
+	if col.Revision != before+1 {
+		t.Fatalf("after SetBlockRuntimeID Revision=%d want %d", col.Revision, before+1)
+	}
+	before = col.Revision
+	col.ExpectSubChunks(2)
+	if col.Revision != before+1 {
+		t.Fatalf("after ExpectSubChunks Revision=%d want %d", col.Revision, before+1)
+	}
+	before = col.Revision
+	col.ReceiveSubChunk()
+	if col.Revision != before+1 {
+		t.Fatalf("after ReceiveSubChunk Revision=%d want %d", col.Revision, before+1)
+	}
+}
+
 // TestColumnReceiptState covers requested -> partial -> complete as sub-chunks
 // arrive for a request-mode LevelChunk.
 func TestColumnReceiptState(t *testing.T) {

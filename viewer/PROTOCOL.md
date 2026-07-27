@@ -117,6 +117,23 @@ what makes the harness a single URL to open.
 
 ---
 
+## Client readiness (`window.__viewer`)
+
+The web app assigns `window.__viewer` at startup (before any SSE frame) so a
+capture harness can distinguish "app never loaded" from "stream stuck":
+
+| Field | Meaning |
+| --- | --- |
+| `schemaOk` | `false` until a `hello` or `keyframe` with supported `v` arrives; then `true` |
+| `tick` | Latest applied frame tick |
+| `framesReceived` | Count of frames that reached the store |
+| `lastError` | Schema refusal or latest stream/parse error; `null` when healthy |
+
+A harness that times out waiting for readiness should log these fields rather
+than only the Playwright timeout string.
+
+---
+
 ## Frames
 
 ### `hello`

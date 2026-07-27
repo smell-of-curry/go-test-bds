@@ -53,11 +53,12 @@ func main() {
 	if config.Viewer.Enabled {
 		var err error
 		hub, err = viewer.New(viewer.Options{
-			Address:     config.Viewer.Address,
-			Radius:      config.Viewer.Radius,
-			ArtifactDir: config.Viewer.ArtifactDir,
-			AppDir:      config.Viewer.AppDir,
-			Logger:      logger.With("src", "viewer"),
+			Address:       config.Viewer.Address,
+			Radius:        config.Viewer.Radius,
+			SectionRadius: config.Viewer.SectionRadius,
+			ArtifactDir:   config.Viewer.ArtifactDir,
+			AppDir:        config.Viewer.AppDir,
+			Logger:        logger.With("src", "viewer"),
 		})
 		if err != nil {
 			slog.Error("starting viewer", "error", err)
