@@ -169,6 +169,8 @@ export async function runHarness(opts: HarnessOptions): Promise<void> {
           log,
           stillsPage,
           mark,
+          // `sse` is declared below but only ever called once frames arrive.
+          endRun: () => sse.close(),
         }),
       );
       return;
@@ -208,6 +210,17 @@ export async function runHarness(opts: HarnessOptions): Promise<void> {
     sse.close();
   }, opts.maxSegmentSeconds * 1000);
   if (typeof capTimer.unref === "function") capTimer.unref();
+
+  // The runner kills this process once the bot exits, and a signal does not run
+  // the finally below — which is where the video is written. Close the stream
+  // instead and let the normal path finish, so a terminated run still produces
+  // its recording.
+  const stopOnSignal = (signal: NodeJS.Signals): void => {
+    log.info(`capture: ${signal} received; finishing the run video`);
+    sse.close();
+  };
+  process.once("SIGTERM", stopOnSignal);
+  process.once("SIGINT", stopOnSignal);
 
   try {
     await stillsPage.goto(appUrl, { waitUntil: "domcontentloaded" });
@@ -262,6 +275,8 @@ export async function runHarness(opts: HarnessOptions): Promise<void> {
     log.info("capture: stream closed");
   } finally {
     clearTimeout(capTimer);
+    process.removeListener("SIGTERM", stopOnSignal);
+    process.removeListener("SIGINT", stopOnSignal);
     await safe(log, async () => {
       await uploadRunVideo("run");
     });
@@ -276,6 +291,7 @@ async function handleMark(
     log: Logger;
     stillsPage: Page;
     mark: MarkState;
+    endRun: () => void;
   },
 ): Promise<void> {
   if (frame.runId !== undefined) ctx.mark.runId = frame.runId;
@@ -286,6 +302,14 @@ async function handleMark(
   // burnt-in overlay (via the app's SSE) and failure stills.
   if (frame.phase === "testEnd" && frame.status === "failed") {
     await uploadFailureStill(ctx.stillsPage, ctx.opts, ctx.mark, ctx.log);
+  }
+
+  // Finish on the run's own last word rather than waiting to be killed: the
+  // upload needs the bot still listening, and by the time the runner tears the
+  // harness down the bot is already going away.
+  if (frame.phase === "runEnd") {
+    ctx.log.info("capture: runEnd; finishing the run video");
+    ctx.endRun();
   }
 }
 
