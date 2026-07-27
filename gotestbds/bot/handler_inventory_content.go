@@ -20,16 +20,16 @@ func (*InventoryContentHandler) Handle(p packet.Packet, b *Bot, a *actor.Actor) 
 	if inv == nil {
 		return fmt.Errorf("unknown windowID: %d", inventoryContent.WindowID)
 	}
-
 	return fillInventory(inv, inventoryContent.Content)
 }
 
 // fillInventory ...
 func fillInventory(inv *inventory.Handle, content []protocol.ItemInstance) error {
-	for slot := range inv.Size() {
-		slotContent := content[slot]
-		err := inv.SetItem(slot, slotContent)
-		if err != nil {
+	// The server decides how many slots it sends: the armour window arrives with
+	// a slot the bot does not model, and a container may report fewer than it
+	// holds. Indexing past either side used to panic the bot outright.
+	for slot := range min(inv.Size(), len(content)) {
+		if err := inv.SetItem(slot, content[slot]); err != nil {
 			return err
 		}
 	}

@@ -6,3 +6,4 @@ testdata/e2e-pack/scripts/main.js
 bds/
 *.log
 /bin/
+.local/

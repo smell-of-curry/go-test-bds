@@ -15,6 +15,13 @@ type Handle struct {
 	inv *inventory.Inventory
 	// stackIds is used to map item.Stack to its network id.
 	stackIds []int32
+	// raw holds each slot exactly as the server sent it.
+	//
+	// The decoded item.Stack is only as good as the bot's local item table: an
+	// item the table does not know (a custom one, or any item at all when the
+	// server's item IDs are numbered differently) decodes to air and disappears.
+	// The wire form still names it, so keep it.
+	raw []protocol.ItemStack
 	// containerID is an id of the inventory.
 	containerID  uint32
 	actionWriter ActionWriter
@@ -28,6 +35,7 @@ func NewHandle(size int, containerID uint32, actionWriter ActionWriter) *Handle 
 	return &Handle{
 		inv:          inventory.New(size, nil),
 		stackIds:     make([]int32, size),
+		raw:          make([]protocol.ItemStack, size),
 		containerID:  containerID,
 		actionWriter: actionWriter,
 	}
@@ -43,7 +51,20 @@ func (source *Handle) SetItem(slot int, it protocol.ItemInstance) error {
 	}
 	// synchronizing network id's.
 	source.stackIds[slot] = it.StackNetworkID
+	source.raw[slot] = it.Stack
 	return nil
+}
+
+// RawStack returns a slot as the server sent it, before the bot's item table
+// had a say in what it is.
+//
+// @param slot The slot to read.
+// @returns the wire form of the slot, zeroed when the slot is out of range.
+func (source *Handle) RawStack(slot int) protocol.ItemStack {
+	if slot < 0 || slot >= len(source.raw) {
+		return protocol.ItemStack{}
+	}
+	return source.raw[slot]
 }
 
 // ID ...

@@ -34,7 +34,7 @@ func (c Config) New() (actor *Actor) {
 		GameType:        gameData.PlayerGameMode,
 	})
 
-	w := world.NewWorld()
+	w := world.NewWorld(gameData.UseBlockNetworkIDHashes)
 	w.AddEntity(pl)
 
 	data := actorData{

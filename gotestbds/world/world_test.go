@@ -3,6 +3,7 @@ package world
 import (
 	"testing"
 
+	"github.com/df-mc/dragonfly/server/block"
 	"github.com/df-mc/dragonfly/server/block/cube"
 	"github.com/df-mc/dragonfly/server/world"
 	"github.com/df-mc/dragonfly/server/world/chunk"
@@ -14,7 +15,7 @@ import (
 func TestUndecodableBlockIsSolid(t *testing.T) {
 	world.DefaultBlockRegistry.Finalize()
 
-	w := NewWorld()
+	w := NewWorld(false)
 	w.AddChunk(
 		world.ChunkPos{0, 0},
 		NewColumn(chunk.New(world.DefaultBlockRegistry, world.Overworld.Range()), nil),
@@ -36,5 +37,42 @@ func TestUndecodableBlockIsSolid(t *testing.T) {
 	name, _ := b.EncodeBlock()
 	if name != "gotestbds:unknown" {
 		t.Errorf("unknown block should name itself, got %q", name)
+	}
+}
+
+// TestHashedRuntimeIDsDecode covers a server running with
+// block-network-ids-are-hashes, which is the BDS default: a palette entry is a
+// hash of the block state rather than a runtime ID, and reading it as a runtime
+// ID names every block the bot sees "unknown".
+func TestHashedRuntimeIDsDecode(t *testing.T) {
+	world.DefaultBlockRegistry.Finalize()
+
+	gold := world.BlockRuntimeID(block.Gold{})
+	hash, ok := world.DefaultBlockRegistry.RuntimeIDToHash(gold)
+	if !ok {
+		t.Fatal("gold block should hash in the vanilla registry")
+	}
+
+	pos := cube.Pos{2, 70, 2}
+	for _, test := range []struct {
+		name    string
+		hashed  bool
+		written uint32
+	}{
+		{name: "hashed", hashed: true, written: hash},
+		{name: "unhashed", hashed: false, written: gold},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			w := NewWorld(test.hashed)
+			w.AddChunk(
+				world.ChunkPos{0, 0},
+				NewColumn(chunk.New(world.DefaultBlockRegistry, world.Overworld.Range()), nil),
+			)
+			w.SetBlockRuntimeID(pos, test.written, 0)
+
+			if _, ok := w.Block(pos).(block.Gold); !ok {
+				t.Fatalf("expected a gold block, got %T", w.Block(pos))
+			}
+		})
 	}
 }

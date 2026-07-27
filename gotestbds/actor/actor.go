@@ -866,9 +866,14 @@ func (a *Actor) EditBook(action BookAction, slot int) error {
 	return a.conn.WritePacket(pk)
 }
 
-// OpenContainer ...
+// OpenContainer records a container the server just opened, closing whichever
+// one was open before it.
+//
+// @param container The newly opened container.
 func (a *Actor) OpenContainer(container *Container) {
-	if a.container != nil || !a.container.closed {
+	// `||` here read as "no container, or one that is still open" and then
+	// dereferenced the nil: opening the first container of a session panicked.
+	if a.container != nil && !a.container.closed {
 		_ = a.container.Close()
 	}
 	a.container = container
@@ -876,7 +881,7 @@ func (a *Actor) OpenContainer(container *Container) {
 
 // CurrentContainer returns current opened container.
 func (a *Actor) CurrentContainer() (*Container, bool) {
-	if a.container != nil || !a.container.closed {
+	if a.container == nil || a.container.closed {
 		return nil, false
 	}
 	return a.container, true

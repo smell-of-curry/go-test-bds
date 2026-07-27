@@ -50,6 +50,9 @@ func (*SubChunkHandler) Handle(p packet.Packet, b *Bot, a *actor.Actor) error {
 			a.World().AddChunk(chunkPos, c)
 		}
 
+		// Whatever the previous entry left behind (its block entities, or the tail
+		// of a payload that failed to decode) would be read as this entry's header.
+		buf.Reset()
 		buf.Write(entry.RawPayload)
 
 		var index byte

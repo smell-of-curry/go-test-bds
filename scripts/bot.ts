@@ -278,10 +278,83 @@ export class Bot {
   /**
    * Reads the bot's inventory as the client sees it.
    *
-   * @param options Timeout overrides.
+   * BDS never pushes an inventory write made through the Script API
+   * (`Container.setItem`, `addItem`, `swapItems`, `setEquipment`) to the client
+   * — only a real inventory transaction resyncs the window. So unless
+   * `sync: false` is passed, this first forces that transaction from the server
+   * with a marker item that is added and cleared again, leaving the inventory
+   * exactly as it was but the client's copy up to date.
+   *
+   * @param options Timeout overrides, plus `sync: false` to read the client's
+   * copy as-is — use that to assert on what the bot has *not* been told.
    * @returns The bot's inventory.
+   * @throws if the inventory is full, leaving no slot to sync through.
    */
-  async getInventory(options?: RunActionOptions): Promise<BotInventory> {
+  async getInventory(
+    options?: RunActionOptions & { sync?: boolean },
+  ): Promise<BotInventory> {
+    if (options?.sync === false) return this.readInventory(options);
+
+    const container = this.player.getComponent(
+      "minecraft:inventory",
+    )?.container;
+    if (!container) throw new Error(`${this.name} has no inventory container`);
+
+    let slot = -1;
+    for (let i = 0; i < container.size && slot < 0; i++) {
+      if (!container.getItem(i)) slot = i;
+    }
+    if (slot < 0) {
+      throw new Error(
+        `cannot sync ${this.name}'s inventory: every slot is occupied`,
+      );
+    }
+
+    const marker = Bot.SYNC_MARKER;
+    const dimension = this.player.dimension;
+    const holdsMarker = (inventory: BotInventory) =>
+      inventory.items.some((item) => item.name === marker);
+
+    dimension.runCommand(
+      `replaceitem entity "${this.name}" slot.inventory ${slot} ${marker} 1`,
+    );
+    await waitForValue(
+      async () => {
+        const inventory = await this.readInventory(options);
+        return holdsMarker(inventory) ? inventory : undefined;
+      },
+      { description: `${this.name}'s client to accept an inventory sync` },
+    );
+
+    dimension.runCommand(`clear "${this.name}" ${marker} 1`);
+    return waitForValue(
+      async () => {
+        const inventory = await this.readInventory(options);
+        return holdsMarker(inventory) ? undefined : inventory;
+      },
+      { description: `${this.name}'s client to drop the sync marker` },
+    );
+  }
+
+  /**
+   * Item used to force an inventory resync: obtainable only by command, so a
+   * test's own items are never mistaken for it.
+   *
+   * ponytail: `clear` removes one marker by type, so a test that deliberately
+   * gives the bot a barrier block loses that one instead. Swap in a custom
+   * item with a name tag if that ever matters.
+   */
+  private static readonly SYNC_MARKER = "minecraft:barrier";
+
+  /**
+   * Reads the client's inventory copy without forcing a resync first.
+   *
+   * @param options Timeout overrides.
+   * @returns The bot's inventory as the client currently holds it.
+   */
+  private async readInventory(
+    options?: RunActionOptions,
+  ): Promise<BotInventory> {
     return runActionForData<"getInventory", BotInventory>(
       this.player,
       "getInventory",

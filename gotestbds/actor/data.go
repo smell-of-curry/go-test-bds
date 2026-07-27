@@ -16,6 +16,10 @@ type actorData struct {
 
 	effectManager *entity.EffectManager
 
+	// itemNames maps the server's item network IDs to their names, built on
+	// first use from the StartGame item registry.
+	itemNames map[int32]string
+
 	breakingBlock bool
 	breakingPos   cube.Pos
 	breakingTick  int

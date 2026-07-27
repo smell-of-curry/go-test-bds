@@ -144,6 +144,7 @@ func (b *Bot) registerHandlers() {
 		packet.IDLevelChunk:                  &LevelChunkHandler{},
 		packet.IDSubChunk:                    &SubChunkHandler{},
 		packet.IDUpdateBlock:                 &UpdateBlockHandler{},
+		packet.IDUpdateSubChunkBlocks:        &UpdateSubChunkBlocksHandler{},
 		packet.IDSetActorData:                &SetActorDataHandler{},
 		packet.IDSetActorMotion:              &SetActorMotionHandler{},
 		packet.IDMoveActorAbsolute:           &MoveActorAbsoluteHandler{},

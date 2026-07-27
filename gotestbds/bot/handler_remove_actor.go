@@ -1,8 +1,6 @@
 package bot
 
 import (
-	"fmt"
-
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/actor"
 )
@@ -16,7 +14,10 @@ func (r RemoveActorHandler) Handle(p packet.Packet, b *Bot, a *actor.Actor) erro
 	w := a.World()
 	ent, ok := w.Entity(uint64(removeActor.EntityUniqueID))
 	if !ok {
-		return fmt.Errorf("unable to find entity with Rid: %d", removeActor.EntityUniqueID)
+		// The server removes entities that were never added for this client,
+		// e.g. one that despawned outside the bot's chunk radius.
+		b.logger.Debug("removing untracked entity", "entity", removeActor.EntityUniqueID)
+		return nil
 	}
 	w.RemoveEntity(ent)
 	return nil

@@ -12,6 +12,10 @@ import (
 	"github.com/df-mc/dragonfly/server/world/chunk"
 )
 
+// blockRegistry is the registry block IDs are resolved against. It is the same
+// vanilla registry the bot decodes chunks with.
+var blockRegistry = world.DefaultBlockRegistry
+
 // World stores all entities & blocks.
 type World struct {
 	entities map[uint64]Entity
@@ -21,14 +25,27 @@ type World struct {
 	currentChunk    *Column
 
 	chunks map[world.ChunkPos]*Column
+
+	// hashedIDs mirrors the server's UseBlockNetworkIDHashes game data flag.
+	hashedIDs bool
 }
 
-// NewWorld ...
-func NewWorld() *World {
+// NewWorld creates a world holding the blocks and entities a bot knows about.
+//
+// @param hashedRuntimeIDs Whether the server identifies blocks on the wire by
+// their network hash rather than by their index in the block palette. BDS sets
+// this by default (`block-network-ids-are-hashes=true`).
+// @returns the empty world.
+func NewWorld(hashedRuntimeIDs bool) *World {
+	// Hash lookups panic on a registry that was never finalized. Finalize is
+	// idempotent, so claiming it here costs nothing and keeps a bare NewWorld
+	// (tests, tools) usable.
+	blockRegistry.Finalize()
 	return &World{
-		entities: make(map[uint64]Entity),
-		players:  make(map[string]Entity),
-		chunks:   make(map[world.ChunkPos]*Column),
+		entities:  make(map[uint64]Entity),
+		players:   make(map[string]Entity),
+		chunks:    make(map[world.ChunkPos]*Column),
+		hashedIDs: hashedRuntimeIDs,
 	}
 }
 
@@ -129,7 +146,7 @@ func (w *World) block(pos cube.Pos, layer uint8) world.Block {
 	if c == nil || pos.OutOfBounds(c.Range()) {
 		return block.Air{}
 	}
-	rid := c.Block(uint8(pos[0]), int16(pos[1]), uint8(pos[2]), layer)
+	rid := w.decodeRuntimeID(c.Block(uint8(pos[0]), int16(pos[1]), uint8(pos[2]), layer))
 	if layer == 0 && isNbtBlock(rid) {
 		bl, ok := c.BlockEntities[pos]
 		if ok {
@@ -142,6 +159,28 @@ func (w *World) block(pos cube.Pos, layer uint8) world.Block {
 		return UnknownBlock{}
 	}
 	return bl
+}
+
+// decodeRuntimeID turns an ID as it arrived over the network into one this
+// bot's block registry understands.
+//
+// With `block-network-ids-are-hashes` (the BDS default) a palette entry is an
+// FNV hash of the block state, not an index into the palette, so reading it as
+// a runtime ID names every block "unknown" — the bot then can't see the floor
+// it stands on or the block a test just placed.
+//
+// @param rid The ID read out of a chunk or block update.
+// @returns the local runtime ID, or the input unchanged when it is already one.
+func (w *World) decodeRuntimeID(rid uint32) uint32 {
+	if !w.hashedIDs {
+		return rid
+	}
+	if local, ok := blockRegistry.HashToRuntimeID(rid); ok {
+		return local
+	}
+	// Blocks the bot wrote itself (its own optimistic placements) are stored as
+	// plain runtime IDs, so fall through rather than losing them.
+	return rid
 }
 
 // chunk returns *chunk.Chunk or nil.
@@ -193,8 +232,8 @@ func (w *World) SetBlockRuntimeID(pos cube.Pos, rid uint32, layer uint32) {
 		return
 	}
 
-	if layer == 0 && isNbtBlock(rid) {
-		if b, ok := world.BlockByRuntimeID(rid); ok {
+	if local := w.decodeRuntimeID(rid); layer == 0 && isNbtBlock(local) {
+		if b, ok := world.BlockByRuntimeID(local); ok {
 			c.BlockEntities[pos] = b
 		}
 	}

@@ -25,27 +25,67 @@ func (*LevelChunkHandler) Handle(p packet.Packet, b *Bot, a *actor.Actor) error 
 	}
 
 	dimensionRange := dim.Range()
-	buf := bytes.NewBuffer(levelChunk.RawPayload)
-	var blockEntities []chunk.BlockEntity
+	subChunks, requestMode := subChunkCount(levelChunk, dimensionRange)
 
-	// in case of an error we are just ignoring it, cause blocks are sent via SubChunk.
-	ch, err := chunk.NetworkDecodeBuffer(blockRegistry, buf, int(levelChunk.SubChunkCount), dimensionRange)
-	if err == nil {
-		// reading one byte for the border block count.
-		_, _ = buf.ReadByte()
-		blockEntities, err = decodeBlockEntities(buf)
-	} else {
-		ch = chunk.New(blockRegistry, dim.Range())
+	ch := chunk.New(blockRegistry, dimensionRange)
+	var blockEntities []chunk.BlockEntity
+	if !requestMode {
+		buf := bytes.NewBuffer(levelChunk.RawPayload)
+		// in case of an error we are just ignoring it, cause blocks are sent via SubChunk.
+		decoded, err := chunk.NetworkDecodeBuffer(blockRegistry, buf, subChunks, dimensionRange)
+		if err == nil {
+			ch = decoded
+			// reading one byte for the border block count.
+			_, _ = buf.ReadByte()
+			blockEntities, _ = decodeBlockEntities(buf)
+		}
 	}
 
 	a.World().AddChunk(w.ChunkPos(levelChunk.Position), world.NewColumn(ch, blockEntities))
-	return b.requestSubchunks(dimensionRange, levelChunk.Dimension, levelChunk.Position)
+	if !requestMode {
+		return nil
+	}
+	return b.requestSubchunks(dimensionRange, levelChunk.Dimension, levelChunk.Position, subChunks)
+}
+
+// subChunkCount reads how many sub-chunks a LevelChunk carries.
+//
+// SubChunkCount doubles as a sentinel: the two request modes ask the client to
+// pull the blocks itself with SubChunkRequest, and the payload then holds only
+// biomes. Feeding those sentinels to a block decoder reads the biome bytes as
+// sub-chunk headers, which is where "unknown sub chunk version 89" comes from.
+//
+// @param levelChunk The packet to read.
+// @param r The vertical range of the chunk's dimension.
+// @returns the number of sub-chunks to expect, and whether the server expects a
+// SubChunkRequest instead of having sent the blocks inline.
+func subChunkCount(levelChunk *packet.LevelChunk, r cube.Range) (int, bool) {
+	max := (r.Max() - r.Min() + 1) >> 4
+	switch levelChunk.SubChunkCount {
+	case protocol.SubChunkRequestModeLimited:
+		// HighestSubChunk indexes from the bottom of the dimension, so everything
+		// above it is air and not worth asking for.
+		return min(int(levelChunk.HighestSubChunk)+1, max), true
+	case protocol.SubChunkRequestModeLimitless:
+		return max, true
+	}
+	return min(int(levelChunk.SubChunkCount), max), false
 }
 
 // requestSubchunks requests subchunks from the server.
-func (b *Bot) requestSubchunks(r cube.Range, dim int32, pos protocol.ChunkPos) error {
-	var offsets []protocol.SubChunkOffset
-	for y := 0; y < r.Max()-r.Min()+16; y += 16 {
+//
+// @param r The vertical range of the chunk's dimension.
+// @param dim The dimension ID the chunk belongs to.
+// @param pos The chunk being requested.
+// @param count How many sub-chunks to ask for, counted up from the bottom.
+// @returns any error writing the request.
+func (b *Bot) requestSubchunks(r cube.Range, dim int32, pos protocol.ChunkPos, count int) error {
+	// Offsets are in sub-chunks relative to Position, not in blocks: the old
+	// `y += 16` walk asked for sub-chunk 16, 32, … past the top of the world
+	// (and overflowed int8 doing it), so the server rejected nearly every entry
+	// and the bot's world stayed empty.
+	offsets := make([]protocol.SubChunkOffset, 0, count)
+	for y := range count {
 		offsets = append(offsets, protocol.SubChunkOffset{0, int8(y), 0})
 	}
 

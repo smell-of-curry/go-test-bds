@@ -11,16 +11,32 @@
 
 ## Learned Workspace Facts
 
-- The bot's copy of the world and of its own inventory is **not** trustworthy
-  against current BDS. Chunk decoding logs `unknown sub chunk version 89`, and a
-  player the server has just given items to reads back as an empty inventory —
-  so `getBlock` / `getInventory` can disagree with the server for reasons that
-  have nothing to do with the addon under test. Assert server-side state for
-  those; the two smoke tests covering the client mirror in `pokebedrock-beh` are
-  skipped with this reason until the decoding catches up. Undecodable blocks are
+- The bot's world copy took three fixes to become trustworthy against current
+  BDS, all of which showed up as `unknown sub chunk version 89` and a bot that
+  could not see a block the server had just placed: `LevelChunk.SubChunkCount`
+  is a **request-mode sentinel** (limited/limitless), not a count, so the raw
+  payload holds biomes rather than sub-chunks and the sub-chunks must be
+  requested (in sub-chunk units, `0..count-1`, capped at `HighestSubChunk+1`);
+  with `block-network-ids-are-hashes` (the BDS default, mirrored on `World` as
+  `hashedIDs`) palette entries are **FNV hashes**, decoded through
+  `blockRegistry.HashToRuntimeID`; and server-side edits arrive as
+  `UpdateSubChunkBlocks`, which used to be unhandled. Undecodable blocks are
   deliberately **solid** (`world.UnknownBlock`): read as air, a floor of custom
   blocks is one the bot falls through, and it never lands because everything
   below is air too.
+- **BDS never syncs a Script API inventory write to the client.**
+  `Container.setItem`/`addItem`/`swapItems` and
+  `EntityEquippable.setEquipment` all leave the client's copy stale, and no
+  client-side action shakes it loose — opening the inventory screen, switching
+  the held slot, jumping, breaking a block and `clear` all do nothing, and a
+  deliberately-rejected `ItemStackRequest` earns a `PacketViolationWarning` and
+  a kick. Only a real inventory transaction (`/give`, `/replaceitem`, a player
+  move) resyncs the window, and it resyncs the whole thing. So the resync is
+  forced **server-side**: `Bot.getInventory` `/replaceitem`s a marker into an
+  empty slot and `clear`s it again before reading, leaving the inventory
+  untouched. `{ sync: false }` reads the stale copy on purpose. This is the
+  long-standing Script API sync bug (MicrosoftDocs/minecraft-creator#594),
+  closed upstream but still live for these paths on 1.26.34.
 - A `MovePlayer` handler is what applies server-side teleports (`Player.teleport`,
   `/tp`, portals). Physics is also frozen while the bot's own chunk is missing —
   simulating against an absent world reads it as air and walks the bot out

@@ -1,8 +1,9 @@
-import { world } from "@minecraft/server";
+import { ItemStack, world } from "@minecraft/server";
 import { ActionFormData } from "@minecraft/server-ui";
 import {
   assert,
   assertContains,
+  assertDefined,
   assertEquals,
   assertEventually,
   assertNearPosition,
@@ -96,6 +97,61 @@ export const protocolSuite: TestSuite = defineSuite({
         const response = await shown;
         assert(!response.canceled, "form response should not be canceled");
         assertEquals(response.selection, 0, "Confirm is button index 0");
+      },
+    },
+    {
+      name: "a block the server places reaches the bot",
+      async run(ctx) {
+        const state = await ctx.bot.getState();
+        const pos = {
+          x: Math.floor(state.position.x),
+          y: Math.floor(state.position.y) - 1,
+          z: Math.floor(state.position.z),
+        };
+
+        const dimension = ctx.bot.player.dimension;
+        const before = dimension.getBlock(pos);
+        assertDefined(before, "server should see the block below the bot");
+        const restore = before.typeId;
+        ctx.track(() => dimension.getBlock(pos)?.setType(restore));
+
+        dimension.getBlock(pos)?.setType("minecraft:gold_block");
+        await assertEventually(
+          async () => (await ctx.bot.getBlock(pos)).name.includes("gold_block"),
+          {
+            timeoutMs: seconds(15),
+            description: "the placed gold block to reach the bot",
+          },
+        );
+      },
+    },
+    {
+      name: "an item the server gives reaches the bot inventory",
+      async run(ctx) {
+        const inventory = ctx.bot.player.getComponent("minecraft:inventory");
+        assertDefined(inventory, "player should have an inventory");
+        const container = inventory.container;
+        assertDefined(container, "inventory should have a container");
+        ctx.track(() => container.clearAll());
+
+        container.clearAll();
+        container.setItem(0, new ItemStack("minecraft:diamond", 5));
+
+        // The client is told nothing about a script write; getInventory forces
+        // the resync that a real inventory transaction would have caused.
+        const stale = await ctx.bot.getInventory({ sync: false });
+        assert(
+          stale.items.length === 0,
+          "BDS is not expected to push script inventory writes on its own",
+        );
+
+        const synced = await ctx.bot.getInventory();
+        assert(
+          synced.items.some(
+            (item) => item.name.includes("diamond") && item.count === 5,
+          ),
+          `bot should see 5 diamonds, saw ${JSON.stringify(synced.items)}`,
+        );
       },
     },
     {

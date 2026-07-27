@@ -13,7 +13,7 @@ import (
 // chunk that has not arrived. Without it a bot spawns, reads the missing world
 // as air, and falls out of it before its first chunk is received.
 func TestChunkLoadedAt(t *testing.T) {
-	w := botworld.NewWorld()
+	w := botworld.NewWorld(false)
 	pos := mgl64.Vec3{66.5, 78.8, 0.5}
 
 	if chunkLoadedAt(w, pos) {

@@ -108,6 +108,25 @@ believes.
 envelope by hand; use `Bot` or, for an instruction the wrapper does not cover
 yet, `runAction` / `runActionForData`.
 
+### What the client is and is not told
+
+An observation answers with the client's own copy, which is the point — it is
+how a test catches a desync a server-side assertion cannot see. That copy is
+only as good as what BDS pushes, and BDS does not push everything:
+
+- **Blocks** arrive normally. With `block-network-ids-are-hashes` (the BDS
+  default) a chunk's palette holds hashes rather than runtime IDs, and chunks
+  themselves arrive through sub-chunk requests; the bot handles both, plus the
+  `UpdateSubChunkBlocks` packets a server sends for its own edits.
+- **Inventory** does not. BDS never tells the client about an inventory write
+  made through the Script API — `Container.setItem`, `addItem`, `swapItems`,
+  `EntityEquippable.setEquipment` all leave the client's copy stale, and no
+  client-side action forces a refresh. Only a real inventory transaction, such
+  as `/give` or `/replaceitem`, resyncs the window, and it resyncs all of it.
+  `Bot.getInventory` therefore forces one server-side (a marker item added and
+  cleared again) before reading. Pass `{ sync: false }` to read the stale copy
+  deliberately — that is how you assert what the client has *not* been told.
+
 ## What the SDK gives you
 
 | Module | Purpose |
