@@ -61,3 +61,55 @@ func (s *Sign) Front() bool {
 func (s *Sign) Object() world.NBTer {
 	return s.bl
 }
+
+// Lines returns the front and back text lines stored on the sign block.
+//
+// Bedrock packs sign text into FrontText/BackText NBT; the viewer only needs
+// the rendered lines, so this unwraps that without exposing the raw map.
+//
+// @returns front and back lines (may be empty slices).
+func (s *Sign) Lines() (front, back []string) {
+	if s.bl == nil {
+		return nil, nil
+	}
+	nbt := s.bl.EncodeNBT()
+	return signSideLines(nbt, "FrontText"), signSideLines(nbt, "BackText")
+}
+
+// signSideLines extracts up to four lines from a sign-side NBT value.
+func signSideLines(nbt map[string]any, key string) []string {
+	if nbt == nil {
+		return nil
+	}
+	raw, ok := nbt[key]
+	if !ok {
+		return nil
+	}
+	text := ""
+	switch v := raw.(type) {
+	case string:
+		text = v
+	case map[string]any:
+		if t, ok := v["Text"].(string); ok {
+			text = t
+		}
+	}
+	if text == "" {
+		return nil
+	}
+	parts := splitSignLines(text)
+	return parts
+}
+
+// splitSignLines splits Bedrock sign text on newlines, capping at four lines.
+func splitSignLines(text string) []string {
+	var lines []string
+	start := 0
+	for i := 0; i <= len(text) && len(lines) < 4; i++ {
+		if i == len(text) || text[i] == '\n' {
+			lines = append(lines, text[start:i])
+			start = i + 1
+		}
+	}
+	return lines
+}

@@ -10,6 +10,15 @@ type State struct {
 	sneaking, sprinting, swimming, crawling, gliding, immobile, usingItem, hasCollision bool
 	nameTag                                                                             string
 	box                                                                                 cube.BBox
+
+	// Numeric metadata props decoded alongside the flags. The viewer streams
+	// every value that Decode understands — dropping one costs a later stage a
+	// Molang query — so they live here rather than only inside Box().
+	variant, markVariant int32
+	scale                float64
+	hasVariant           bool
+	hasMarkVariant       bool
+	hasScale             bool
 }
 
 // Sneaking ...
@@ -62,6 +71,46 @@ func (s *State) Box() cube.BBox {
 	return s.box
 }
 
+// Flags returns every boolean flag Decode understands, keyed by camelCase name.
+//
+// The viewer ships this map wholesale into entity snapshots. Omitting a flag
+// that later Molang stages read is a silent wrong answer, so the set is the
+// Decode set — nothing more is invented, nothing that lands is dropped.
+//
+// @returns flag name → current value.
+func (s *State) Flags() map[string]bool {
+	return map[string]bool{
+		"sneaking":     s.sneaking,
+		"sprinting":    s.sprinting,
+		"swimming":     s.swimming,
+		"crawling":     s.crawling,
+		"gliding":      s.gliding,
+		"immobile":     s.immobile,
+		"usingItem":    s.usingItem,
+		"hasCollision": s.hasCollision,
+	}
+}
+
+// Props returns every numeric metadata property Decode understands.
+//
+// Keys absent from the last Decode are omitted so a snapshot does not invent
+// zeros the server never sent.
+//
+// @returns property name → value.
+func (s *State) Props() map[string]any {
+	out := make(map[string]any)
+	if s.hasVariant {
+		out["variant"] = s.variant
+	}
+	if s.hasMarkVariant {
+		out["markVariant"] = s.markVariant
+	}
+	if s.hasScale {
+		out["scale"] = s.scale
+	}
+	return out
+}
+
 // Decode decodes metadata into State.
 func (s *State) Decode(meta protocol.EntityMetadata) {
 	if meta == nil {
@@ -84,4 +133,36 @@ func (s *State) Decode(meta protocol.EntityMetadata) {
 		s.nameTag = nameTag.(string)
 	}
 	s.box = box(meta)
+
+	s.hasVariant, s.hasMarkVariant, s.hasScale = false, false, false
+	if v, ok := meta[protocol.EntityDataKeyVariant]; ok {
+		s.variant = asInt32(v)
+		s.hasVariant = true
+	}
+	if v, ok := meta[protocol.EntityDataKeyMarkVariant]; ok {
+		s.markVariant = asInt32(v)
+		s.hasMarkVariant = true
+	}
+	if sc, ok := scale(meta); ok {
+		s.scale = sc
+		s.hasScale = true
+	}
+}
+
+// asInt32 coerces entity metadata numeric values to int32.
+func asInt32(v any) int32 {
+	switch n := v.(type) {
+	case int32:
+		return n
+	case int64:
+		return int32(n)
+	case int:
+		return int32(n)
+	case float32:
+		return int32(n)
+	case float64:
+		return int32(n)
+	default:
+		return 0
+	}
 }

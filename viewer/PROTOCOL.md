@@ -88,12 +88,15 @@ single blob:
 Response `200`:
 
 ```json
-{"v":1,"path":"artifacts/run-7/machines/places-a-crate/failure.png","bytes":48213}
+{"v":1,"path":"machines/places-a-crate/failure.png","bytes":48213}
 ```
 
-Go owns the artefact directory and therefore owns naming. The path is relative
-to the process working directory, so it means the same thing to the bot, to
-`bds-manager` and to a CI step that uploads it.
+Go owns the artefact directory and therefore owns naming. Every reported `path`
+is **relative to the run's artefact directory, with `/` separators** — never
+absolute, never relative to the process working directory. That is the one form
+`bds-manager` will resolve and serve: a consumer joins it onto the directory it
+already knows, and a path that escapes that directory is rejected rather than
+guessed at.
 
 ### `POST /capture/<id>/error`
 
@@ -453,12 +456,18 @@ node viewer/dist-capture/cli.cjs \
 
 ### Artefact naming
 
-Go builds the path as:
+Go writes to:
 
 ```
 <ArtifactDir>/<runId>/<suite-slug>/<test-slug>/<label-slug>.<ext>
 ```
 
-with `runId` defaulting to `no-run` outside a run, and each slug lowercased with
-non-alphanumerics collapsed to `-`. A name collision gets a `-2`, `-3` suffix
-rather than overwriting: two screenshots in one test are both worth keeping.
+and reports the part below `<runId>` — `<suite-slug>/<test-slug>/<label-slug>.<ext>`
+— as the artefact's `path`. `runId` defaults to `no-run` outside a run, and each
+slug is lowercased with non-alphanumerics collapsed to `-`. A name collision gets
+a `-2`, `-3` suffix rather than overwriting: two screenshots in one test are both
+worth keeping.
+
+`bds-manager` points `-viewer-artifacts` at a retained root and creates
+`<root>/<runId>` before the bot starts, so the run directory a reported path is
+relative to is the one it already serves downloads from.

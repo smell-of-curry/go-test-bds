@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/restartfu/gophig"
 )
@@ -30,6 +31,15 @@ type Config struct {
 		// battling or any other two-player feature need more than one.
 		Count int
 	}
+	// Viewer configures the optional state-export HTTP server. Disabled by
+	// default so a run behaves identically whether or not anyone is watching.
+	Viewer struct {
+		Enabled     bool
+		Address     string
+		Radius      int
+		ArtifactDir string
+		AppDir      string
+	}
 }
 
 // DefaultConfig returns the configuration used when no config file or flag is
@@ -40,6 +50,11 @@ func DefaultConfig() Config {
 	c.Network.ServerAddress = "127.0.0.1:19132"
 	c.Bots.Name = "TestBot"
 	c.Bots.Count = 1
+	c.Viewer.Enabled = false
+	c.Viewer.Address = "127.0.0.1:24680"
+	c.Viewer.Radius = 4
+	c.Viewer.ArtifactDir = "artifacts"
+	c.Viewer.AppDir = ""
 	return c
 }
 
@@ -65,11 +80,21 @@ func ReadConfig() (Config, error) {
 	}
 
 	// A config file written by an older version leaves these zeroed.
+	def := DefaultConfig()
 	if c.Bots.Name == "" {
-		c.Bots.Name = DefaultConfig().Bots.Name
+		c.Bots.Name = def.Bots.Name
 	}
 	if c.Bots.Count <= 0 {
 		c.Bots.Count = 1
+	}
+	if c.Viewer.Address == "" {
+		c.Viewer.Address = def.Viewer.Address
+	}
+	if c.Viewer.Radius <= 0 {
+		c.Viewer.Radius = def.Viewer.Radius
+	}
+	if c.Viewer.ArtifactDir == "" {
+		c.Viewer.ArtifactDir = def.Viewer.ArtifactDir
 	}
 
 	applyEnv(&c)
@@ -97,6 +122,32 @@ func applyEnv(c *Config) {
 			c.Bots.Count = n
 		}
 	}
+	if v := os.Getenv("GOTESTBDS_VIEWER"); v != "" {
+		// "1"/"true" enables on the default address; host:port enables and sets it.
+		switch strings.ToLower(v) {
+		case "1", "true", "yes", "on":
+			c.Viewer.Enabled = true
+		case "0", "false", "no", "off":
+			c.Viewer.Enabled = false
+		default:
+			c.Viewer.Enabled = true
+			c.Viewer.Address = v
+		}
+	}
+	if v := os.Getenv("GOTESTBDS_VIEWER_ADDRESS"); v != "" {
+		c.Viewer.Address = v
+	}
+	if v := os.Getenv("GOTESTBDS_VIEWER_RADIUS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			c.Viewer.Radius = n
+		}
+	}
+	if v := os.Getenv("GOTESTBDS_VIEWER_ARTIFACTS"); v != "" {
+		c.Viewer.ArtifactDir = v
+	}
+	if v := os.Getenv("GOTESTBDS_VIEWER_APP"); v != "" {
+		c.Viewer.AppDir = v
+	}
 }
 
 // applyFlags overlays command line flags onto a configuration.
@@ -110,6 +161,11 @@ func applyFlags(c *Config) error {
 	name := set.String("name", c.Bots.Name, "display name of the first bot")
 	count := set.Int("bots", c.Bots.Count, "number of bots to connect")
 	logLevel := set.String("log-level", c.LogLevel, "debug, info, warn or error")
+	viewer := set.Bool("viewer", c.Viewer.Enabled, "enable the viewer state-export HTTP server")
+	viewerAddress := set.String("viewer-address", c.Viewer.Address, "host:port for the viewer HTTP server")
+	viewerRadius := set.Int("viewer-radius", c.Viewer.Radius, "column radius carried by the viewer stream")
+	viewerArtifacts := set.String("viewer-artifacts", c.Viewer.ArtifactDir, "directory for viewer artefacts")
+	viewerApp := set.String("viewer-app", c.Viewer.AppDir, "optional built viewer app directory to serve at /")
 
 	if err := set.Parse(os.Args[1:]); err != nil {
 		return err
@@ -125,6 +181,11 @@ func applyFlags(c *Config) error {
 	c.Bots.Name = *name
 	c.Bots.Count = *count
 	c.LogLevel = *logLevel
+	c.Viewer.Enabled = *viewer
+	c.Viewer.Address = *viewerAddress
+	c.Viewer.Radius = *viewerRadius
+	c.Viewer.ArtifactDir = *viewerArtifacts
+	c.Viewer.AppDir = *viewerApp
 	return nil
 }
 

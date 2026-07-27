@@ -90,3 +90,31 @@ func (c *Container) Position() cube.Pos {
 	pos := c.pk.ContainerPosition
 	return cube.Pos{int(pos[0]), int(pos[1]), int(pos[2])}
 }
+
+// TypeName returns a stable string for the open container kind.
+//
+// @returns a lowercase name such as "chest", or "container" when unknown.
+func (c *Container) TypeName() string {
+	switch int(c.containerType) {
+	case protocol.ContainerTypeContainer:
+		return "chest"
+	case protocol.ContainerTypeHopper:
+		return "hopper"
+	case protocol.ContainerTypeFurnace:
+		return "furnace"
+	case protocol.ContainerTypeBlastFurnace:
+		return "blast_furnace"
+	case protocol.ContainerTypeSmoker:
+		return "smoker"
+	case protocol.ContainerTypeBrewingStand:
+		return "brewing_stand"
+	case protocol.ContainerTypeWorkbench:
+		return "workbench"
+	case protocol.ContainerTypeAnvil:
+		return "anvil"
+	case protocol.ContainerTypeEnchantment:
+		return "enchantment"
+	default:
+		return "container"
+	}
+}

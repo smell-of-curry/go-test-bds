@@ -312,6 +312,42 @@ func (w *World) decodeRuntimeID(rid uint32) uint32 {
 	return rid
 }
 
+// DecodeNetworkRuntimeID is the exported form of decodeRuntimeID for snapshot
+// encoding. The viewer must name blocks from the same local ID the bot uses
+// for physics, while still carrying the raw network rid as an opaque fallback.
+//
+// @param rid The ID as stored in a chunk or block update.
+// @returns the local runtime ID, or the input unchanged when it is already one.
+func (w *World) DecodeNetworkRuntimeID(rid uint32) uint32 {
+	return w.decodeRuntimeID(rid)
+}
+
+// Columns returns every column in the current dimension, including ones whose
+// blocks have not yet arrived (requested / partial). The viewer needs State,
+// which Chunks() alone does not expose.
+func (w *World) Columns() iter.Seq2[world.ChunkPos, *Column] {
+	return func(yield func(world.ChunkPos, *Column) bool) {
+		for pos, col := range w.chunks[w.dimension] {
+			if !yield(pos, col) {
+				return
+			}
+		}
+	}
+}
+
+// NetworkBlockRuntimeID returns the raw network runtime ID stored at pos.
+//
+// @param pos The block position.
+// @param layer The chunk layer.
+// @returns the stored ID and whether the column is loaded and in range.
+func (w *World) NetworkBlockRuntimeID(pos cube.Pos, layer uint8) (uint32, bool) {
+	c := w.chunk(chunkPosFromBlockPos(pos))
+	if c == nil || pos.OutOfBounds(c.Range()) {
+		return 0, false
+	}
+	return c.Block(uint8(pos[0]), int16(pos[1]), uint8(pos[2]), layer), true
+}
+
 // chunk returns *chunk.Chunk or nil.
 func (w *World) chunk(pos world.ChunkPos) *Column {
 	if w.currentChunkPos == pos {

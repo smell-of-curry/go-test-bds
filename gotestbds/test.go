@@ -9,6 +9,7 @@ import (
 	"github.com/smell-of-curry/go-test-bds/gotestbds/actor"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/bot"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/instruction"
+	"github.com/smell-of-curry/go-test-bds/gotestbds/viewer"
 )
 
 // Test allows specifying specific settings for testing on the Minecraft server.
@@ -21,7 +22,10 @@ type Test struct {
 	InstructionPrefix string
 	// DefaultInstructionTimeout overrides DefaultInstructionTimeout when non-zero.
 	DefaultInstructionTimeout time.Duration
-	rejoin                    bool
+	// Viewer is the optional process-wide state-export hub. Nil means the
+	// viewer is disabled — a run must behave identically either way.
+	Viewer *viewer.Hub
+	rejoin bool
 }
 
 // Run runs test.
@@ -59,6 +63,10 @@ func (t *Test) RunCtx(ctx context.Context) error {
 	t.Logger.Debug("spawned", "address", t.RemoteAddress)
 
 	b := bot.NewBot(conn, t.Logger.With("src", "bot"))
+	if t.Viewer != nil {
+		name := t.Dialer.IdentityData.DisplayName
+		defer t.Viewer.Unregister(name)
+	}
 	h := NewTestingHandler(b, t)
 	b.Execute(func(a *actor.Actor) {
 		a.Handle(h)

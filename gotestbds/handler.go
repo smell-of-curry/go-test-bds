@@ -12,6 +12,7 @@ import (
 	"github.com/smell-of-curry/go-test-bds/gotestbds/actor"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/bot"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/instruction"
+	"github.com/smell-of-curry/go-test-bds/gotestbds/viewer"
 )
 
 // DefaultInstructionPrefix prefixes inbound action chat messages.
@@ -25,12 +26,12 @@ type TestingHandler struct {
 	logger *slog.Logger
 	callbacks
 
-	cfg *Test
+	cfg    *Test
+	stream *viewer.Stream
 }
 
 // NewTestingHandler creates a TestingHandler bound to bot b and test config t.
 func NewTestingHandler(b *bot.Bot, t *Test) actor.Handler {
-
 	handler := &TestingHandler{
 		pull:   t.Instructions,
 		b:      b,
@@ -38,7 +39,9 @@ func NewTestingHandler(b *bot.Bot, t *Test) actor.Handler {
 		cfg:    t,
 	}
 	handler.pull.Callbacker = handler
-
+	if t.Viewer != nil {
+		handler.stream = t.Viewer.Register(t.Dialer.IdentityData.DisplayName)
+	}
 	return handler
 }
 
@@ -156,6 +159,26 @@ func (h *TestingHandler) HandleReceiveForm(ctx *actor.Context, form *actor.Form)
 // HandleReceiveDialogue keeps the dialogue open for later response instructions.
 func (h *TestingHandler) HandleReceiveDialogue(ctx *actor.Context, _ *actor.Dialogue) {
 	ctx.Cancel()
+}
+
+// HandleTick forwards the tick to the viewer stream when one is attached.
+//
+// Encoding and fan-out happen here because World is only safe to read from the
+// bot goroutine that calls Actor.Tick. A nil stream is a no-op so runs without
+// a viewer pay only this one nil check.
+func (h *TestingHandler) HandleTick(a *actor.Actor, _ uint64) {
+	if h.stream == nil {
+		return
+	}
+	h.stream.Tick(a)
+}
+
+// HandleChangeDimension asks the stream for a keyframe after a dimension switch.
+func (h *TestingHandler) HandleChangeDimension(_ *actor.Actor, from, to int32) {
+	if h.stream == nil {
+		return
+	}
+	h.stream.DimensionChanged(from, to)
 }
 
 // statusEnvelope is the outbound [STATUS] JSON body.

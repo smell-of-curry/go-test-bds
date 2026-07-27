@@ -80,6 +80,28 @@ func (f *Form) Title() string {
 	return f.title
 }
 
+// ContentText returns the menu/modal body text from the raw form JSON.
+//
+// Menu forms store content only in the payload (not on the typed struct), and
+// the viewer needs that string for the UI snapshot without changing how forms
+// are answered.
+//
+// @returns the flattened content text, or empty when absent.
+func (f *Form) ContentText() string {
+	if len(f.raw) == 0 {
+		return ""
+	}
+	var shape struct {
+		Content json.RawMessage `json:"content"`
+	}
+	if json.Unmarshal(f.raw, &shape) != nil || len(shape.Content) == 0 {
+		return ""
+	}
+	var t Text
+	_ = t.UnmarshalJSON(shape.Content)
+	return t.String()
+}
+
 // CustomFormContent ...
 func (f *Form) CustomFormContent() (*Content, bool) {
 	if f.Type() != FormTypeCustom {

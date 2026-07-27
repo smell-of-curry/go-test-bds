@@ -2,3 +2,14 @@ LogLevel = "warn" # debug, info, warn, error, fatal
 
 [Network]
 ServerAddress = "127.0.0.1:19132" # The address of the server to connect to
+
+[Bots]
+Name = "TestBot"
+Count = 1
+
+[Viewer]
+Enabled = false
+Address = "127.0.0.1:24680"
+Radius = 4
+ArtifactDir = "artifacts"
+AppDir = ""

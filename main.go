@@ -20,6 +20,7 @@ import (
 	"github.com/sandertv/gophertunnel/minecraft"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/login"
 	"github.com/smell-of-curry/go-test-bds/gotestbds"
+	"github.com/smell-of-curry/go-test-bds/gotestbds/viewer"
 )
 
 // botIdentityNamespace keeps a bot's UUID stable across runs so the server sees
@@ -48,6 +49,24 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	var hub *viewer.Hub
+	if config.Viewer.Enabled {
+		var err error
+		hub, err = viewer.New(viewer.Options{
+			Address:     config.Viewer.Address,
+			Radius:      config.Viewer.Radius,
+			ArtifactDir: config.Viewer.ArtifactDir,
+			AppDir:      config.Viewer.AppDir,
+			Logger:      logger.With("src", "viewer"),
+		})
+		if err != nil {
+			slog.Error("starting viewer", "error", err)
+			os.Exit(1)
+		}
+		defer hub.Close()
+		logger.Info("viewer listening", "address", hub.Addr())
+	}
+
 	logger.Info("starting bots",
 		"address", config.Network.ServerAddress,
 		"count", config.Bots.Count,
@@ -62,7 +81,7 @@ func main() {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if err := runBot(ctx, config, name, logger); err != nil {
+			if err := runBot(ctx, config, name, logger, hub); err != nil {
 				logger.Error("bot stopped", "bot", name, "error", err)
 				failures <- err
 			}
@@ -88,7 +107,7 @@ func main() {
 // @param name The bot's display name.
 // @param logger Logger, tagged with the bot's name for this bot's records.
 // @returns nil once the bot disconnects cleanly, or the error that stopped it.
-func runBot(ctx context.Context, config Config, name string, logger *slog.Logger) error {
+func runBot(ctx context.Context, config Config, name string, logger *slog.Logger, hub *viewer.Hub) error {
 	test := &gotestbds.Test{
 		Dialer: minecraft.Dialer{
 			// No TokenSource: these are offline identities. The server must
@@ -100,6 +119,7 @@ func runBot(ctx context.Context, config Config, name string, logger *slog.Logger
 		},
 		RemoteAddress: config.Network.ServerAddress,
 		Logger:        logger.With("bot", name),
+		Viewer:        hub,
 	}
 
 	err := test.RunCtx(ctx)

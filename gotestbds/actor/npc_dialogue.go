@@ -44,6 +44,11 @@ func (n *Dialogue) Title() string {
 	return n.title
 }
 
+// Text returns the dialogue body the NPC is showing.
+func (n *Dialogue) Text() string {
+	return n.dialogue
+}
+
 // use ...
 func (n *Dialogue) use() error {
 	if n.used {
@@ -79,6 +84,11 @@ func (d *DialogueButton) UnmarshalJSON(data []byte) error {
 	err := json.Unmarshal(data, &internals)
 	d.text = internals.Text.String()
 	return err
+}
+
+// Text returns the button label.
+func (d *DialogueButton) Text() string {
+	return d.text
 }
 
 // Press ...
