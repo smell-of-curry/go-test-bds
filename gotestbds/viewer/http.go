@@ -94,12 +94,16 @@ func (h *Hub) handleHealth(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (h *Hub) handleRoot(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path != "/" {
-		http.NotFound(w, r)
+	if h.opts.AppDir != "" {
+		// The whole build, not just index.html: the app is a bundle plus the
+		// assets it loads, and serving the page without its script produces a
+		// blank canvas that is indistinguishable from a viewer which connected
+		// and rendered nothing.
+		http.FileServer(http.Dir(h.opts.AppDir)).ServeHTTP(w, r)
 		return
 	}
-	if h.opts.AppDir != "" {
-		http.FileServer(http.Dir(h.opts.AppDir)).ServeHTTP(w, r)
+	if r.URL.Path != "/" {
+		http.NotFound(w, r)
 		return
 	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")

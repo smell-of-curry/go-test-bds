@@ -17,6 +17,58 @@ import (
 	dfworld "github.com/df-mc/dragonfly/server/world"
 )
 
+// TestHTTPServesAppAssets covers the app bundle, not just index.html.
+//
+// Serving only "/" cost a full round of debugging on a real server: the page
+// loaded, the stream had a subscriber, ticks advanced, and every capture still
+// timed out — because /assets/index-*.js 404'd and the script never ran.
+func TestHTTPServesAppAssets(t *testing.T) {
+	appDir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(appDir, "assets"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(appDir, "index.html"), []byte("<html></html>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(appDir, "assets", "app.js"), []byte("export default 1;"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	hub, err := New(Options{Address: "127.0.0.1:0", ArtifactDir: t.TempDir(), AppDir: appDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer hub.Close()
+
+	for _, path := range []string{"/", "/assets/app.js"} {
+		resp, err := http.Get("http://" + hub.Addr() + path)
+		if err != nil {
+			t.Fatalf("GET %s: %v", path, err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("GET %s: status %d, body %q", path, resp.StatusCode, body)
+		}
+		if len(body) == 0 {
+			t.Fatalf("GET %s: empty body", path)
+		}
+	}
+
+	// The API must still win over the file server.
+	resp, err := http.Get("http://" + hub.Addr() + "/health")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("/health status %d", resp.StatusCode)
+	}
+	if ct := resp.Header.Get("Content-Type"); !strings.Contains(ct, "json") {
+		t.Fatalf("/health content-type %q, want json", ct)
+	}
+}
+
 // TestHTTPStreamAndArtifact covers GET /stream hello+keyframe and POST /artifact.
 func TestHTTPStreamAndArtifact(t *testing.T) {
 	dir := t.TempDir()
