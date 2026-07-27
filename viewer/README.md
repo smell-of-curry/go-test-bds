@@ -67,6 +67,11 @@ Video uses Playwright `recordVideo` on the **same** long-lived context as stills
 when the stream closes — not per test. Mark phases stay burnt into the overlay
 so a viewer can tell which test is on screen.
 
+The recording is a time lapse: the app paints when a snapshot arrives, and the
+webm is written at 25 fps regardless, so a 50 s run plays back in a few seconds.
+Read the overlay's `tick` and `mark` for real timing. Painting on a fixed clock
+instead would cost CPU on the dev box for frames nothing changed in.
+
 ## Frame budget and chunk update strategy
 
 Decided for Stage 2 (placeholder cubes). Stage 6 replaces the mesher insides; the seam stays "dirty section key → meshes".
