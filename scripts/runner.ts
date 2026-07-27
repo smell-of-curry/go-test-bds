@@ -13,6 +13,7 @@ import {
   type TestStatus,
 } from "./reporter";
 import { msToTicks } from "./protocol";
+import type { TestArtifact, ViewerMarkParams } from "./types";
 
 /** Handed to every test, hook and suite callback. */
 export interface TestContext {
@@ -178,11 +179,13 @@ export async function runSuites(
         tests.length > 0 && matchesName(suite.name, options.filter?.suites),
     );
 
+  const bot = options.bots[0];
   const startedAtMs = Date.now();
   reporter.onRunStart?.(
     runId,
     selected.map(({ suite }) => suite.name),
   );
+  await emitViewerMark(bot, { phase: "runStart", runId });
 
   const suiteResults: SuiteResult[] = [];
   let stopped = false;
@@ -205,13 +208,22 @@ export async function runSuites(
     }
   }
 
+  const totals = tally(suiteResults);
   const runResult: RunResult = {
     runId,
     startedAtMs,
     durationMs: Date.now() - startedAtMs,
     suites: suiteResults,
-    totals: tally(suiteResults),
+    totals,
   };
+  await emitViewerMark(bot, {
+    phase: "runEnd",
+    runId,
+    status: totals.failed > 0 ? "failed" : "passed",
+    elapsedMs: runResult.durationMs,
+  });
+  // Late video uploads land after testEnd marks; drain whatever remains here.
+  runResult.artifacts = await pullArtifactsSafe(bot);
   reporter.onRunEnd?.(runResult);
   return runResult;
 }
@@ -235,7 +247,13 @@ async function runSuite(
     stopOnFirstFailure: boolean;
   },
 ): Promise<SuiteResult> {
+  const bot = env.bots[0];
   env.reporter.onSuiteStart?.(suite.name);
+  await emitViewerMark(bot, {
+    phase: "suiteStart",
+    runId: env.runId,
+    suite: suite.name,
+  });
   const startedAt = Date.now();
   const results: TestResult[] = [];
 
@@ -253,6 +271,12 @@ async function runSuite(
   if (setupError) {
     // The fixture never came up, so the tests were never really exercised.
     for (const test of tests) {
+      await emitViewerMark(bot, {
+        phase: "testStart",
+        runId: env.runId,
+        suite: suite.name,
+        test: test.name,
+      });
       const result: TestResult = {
         suite: suite.name,
         name: test.name,
@@ -261,12 +285,14 @@ async function runSuite(
         skipReason: `suite setup failed: ${setupError}`,
         logs: [],
       };
+      await finishTest(bot, env.runId, result);
       results.push(result);
       env.reporter.onTestEnd?.(result);
     }
   } else {
     for (const test of tests) {
       const result = await runTest(suite, test, env);
+      await finishTest(bot, env.runId, result);
       results.push(result);
       env.reporter.onTestEnd?.(result);
       if (env.stopOnFirstFailure && result.status === "failed") break;
@@ -289,6 +315,11 @@ async function runSuite(
     tests: results,
     error: setupError ?? teardownError ?? cleanupError,
   };
+  await emitViewerMark(bot, {
+    phase: "suiteEnd",
+    runId: env.runId,
+    suite: suite.name,
+  });
   env.reporter.onSuiteEnd?.(suiteResult);
   return suiteResult;
 }
@@ -312,6 +343,13 @@ async function runTest(
     name: test.name,
     logs,
   };
+
+  await emitViewerMark(env.bots[0], {
+    phase: "testStart",
+    runId: env.runId,
+    suite: suite.name,
+    test: test.name,
+  });
 
   if (test.skip) {
     return {
@@ -489,6 +527,62 @@ function describeError(error: unknown): string {
     return error.stack ? `${error.message}\n${error.stack}` : error.message;
   }
   return String(error);
+}
+
+/**
+ * Emits a viewerMark; failures are swallowed so marks never fail a test.
+ *
+ * @param bot Bot that owns the viewer stream.
+ * @param mark Mark fields to broadcast.
+ */
+async function emitViewerMark(bot: Bot, mark: ViewerMarkParams): Promise<void> {
+  try {
+    await bot.viewerMark(mark);
+  } catch {
+    // No viewer, unregistered instruction, or harness blip — ignore.
+  }
+}
+
+/**
+ * Drains artefacts without failing the run when the viewer is absent.
+ *
+ * @param bot Bot that owns the artefact store.
+ * @returns Artefacts since the last pull, or an empty list.
+ */
+async function pullArtifactsSafe(bot: Bot): Promise<TestArtifact[]> {
+  try {
+    return await bot.pullArtifacts();
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Emits testEnd mark then opportunistically pulls artefacts (no wait).
+ *
+ * The harness uploads video asynchronously after testEnd, so this pull usually
+ * returns only stills that already landed; late videos arrive at runEnd.
+ *
+ * @param bot Bot that owns the viewer stream.
+ * @param runId Current run id.
+ * @param result Settled test result to annotate.
+ */
+async function finishTest(
+  bot: Bot,
+  runId: string,
+  result: TestResult,
+): Promise<void> {
+  await emitViewerMark(bot, {
+    phase: "testEnd",
+    runId,
+    suite: result.suite,
+    test: result.name,
+    status: result.status,
+    message: result.error ?? result.skipReason,
+    elapsedMs: result.durationMs,
+  });
+  const artifacts = await pullArtifactsSafe(bot);
+  if (artifacts.length > 0) result.artifacts = artifacts;
 }
 
 /**

@@ -167,9 +167,17 @@ func (h *Hub) Capture(ctx context.Context, botName, label string, minTick uint64
 		return Artifact{}, fmt.Errorf("viewer: no subscriber attached")
 	}
 
+	// Hand the harness this call's own deadline rather than letting it invent
+	// one: a caller asking for 20 s would otherwise be failed at the harness's
+	// default while this side was still willing to wait.
+	var timeoutMs int64
+	if deadline, ok := ctx.Deadline(); ok {
+		timeoutMs = time.Until(deadline).Milliseconds()
+	}
+
 	id := h.arts.nextCaptureID()
 	ch := h.arts.beginCapture(id)
-	s.emitCapture(id, label, minTick)
+	s.emitCapture(id, label, minTick, timeoutMs)
 
 	select {
 	case <-ctx.Done():

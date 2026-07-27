@@ -3,6 +3,8 @@ package instruction
 import (
 	"encoding/json"
 	"fmt"
+
+	"github.com/smell-of-curry/go-test-bds/gotestbds/viewer"
 )
 
 // Pull stores all instructions.
@@ -137,6 +139,25 @@ func DefaultPull(callbacker Callbacker) *Pull {
 	pull.Register(create[WaitForMessage]())
 	pull.Register(create[ClickFormButton]())
 	return pull
+}
+
+// RegisterViewer registers the three viewer instructions against hub.
+//
+// Call from Test.RunCtx when a Hub is configured. DefaultPull's signature stays
+// unchanged for external consumers; these actions are optional extras.
+func RegisterViewer(pull *Pull, hub *viewer.Hub) {
+	if pull == nil || hub == nil {
+		return
+	}
+	pull.Register(func() Instruction {
+		return &Screenshot{hub: hub}
+	})
+	pull.Register(func() Instruction {
+		return &ViewerMark{hub: hub}
+	})
+	pull.Register(func() Instruction {
+		return &PullArtifacts{hub: hub}
+	})
 }
 
 // create creates new instance of the Instruction.

@@ -155,6 +155,9 @@ export interface PlaceBlock {
   pos: Pos;
 }
 
+/** PullArtifacts drains artefacts written since the last pull. */
+export interface PullArtifacts {}
+
 /** Rejoin triggers the handler's Rejoin() after a configurable delay. */
 export interface Rejoin {
   /** Delay is a delay in seconds before re-run. */
@@ -172,6 +175,12 @@ export interface Rotate {
 /** RunCommand runs a server command as the Actor. */
 export interface RunCommand {
   command: string;
+}
+
+/** Screenshot asks the attached capture harness for a still of the bot's view. */
+export interface Screenshot {
+  label: string;
+  timeoutMs: number;
 }
 
 /** SetHeldSlot sets the currently held hotbar slot. */
@@ -193,6 +202,17 @@ export interface ToggleCrafterSlot {
   slot: number;
   pos: Pos;
   disabled: boolean;
+}
+
+/** ViewerMark broadcasts a run-lifecycle mark to every bot stream. With no viewer configured this succeeds and does nothing — marks must never fail a test. */
+export interface ViewerMark {
+  phase: string;
+  runId: string;
+  suite: string;
+  test: string;
+  status: string;
+  message: string;
+  elapsedMs: number;
 }
 
 /** WaitForForm blocks until a form is open, then returns the same shape as getForm. */
@@ -236,15 +256,18 @@ export type InstructionAction =
   | "moveRawInput"
   | "navigateToBlock"
   | "placeBlock"
+  | "pullArtifacts"
   | "rejoin"
   | "respawn"
   | "rotate"
   | "runCommand"
+  | "screenshot"
   | "setHeldSlot"
   | "stopBreakingBlock"
   | "stopNavigating"
   | "stopUsingItem"
   | "toggleCrafterSlot"
+  | "viewerMark"
   | "waitForForm"
   | "waitForMessage";
 
@@ -277,15 +300,18 @@ export interface InstructionParametersByAction {
   moveRawInput: MoveRawInput;
   navigateToBlock: NavigateToBlock;
   placeBlock: PlaceBlock;
+  pullArtifacts: PullArtifacts;
   rejoin: Rejoin;
   respawn: Respawn;
   rotate: Rotate;
   runCommand: RunCommand;
+  screenshot: Screenshot;
   setHeldSlot: SetHeldSlot;
   stopBreakingBlock: StopBreakingBlock;
   stopNavigating: StopNavigating;
   stopUsingItem: StopUsingItem;
   toggleCrafterSlot: ToggleCrafterSlot;
+  viewerMark: ViewerMark;
   waitForForm: WaitForForm;
   waitForMessage: WaitForMessage;
 }
@@ -319,14 +345,17 @@ export type InstructionPayload =
   | { action: "moveRawInput"; parameters: MoveRawInput }
   | { action: "navigateToBlock"; parameters: NavigateToBlock }
   | { action: "placeBlock"; parameters: PlaceBlock }
+  | { action: "pullArtifacts"; parameters: PullArtifacts }
   | { action: "rejoin"; parameters: Rejoin }
   | { action: "respawn"; parameters: Respawn }
   | { action: "rotate"; parameters: Rotate }
   | { action: "runCommand"; parameters: RunCommand }
+  | { action: "screenshot"; parameters: Screenshot }
   | { action: "setHeldSlot"; parameters: SetHeldSlot }
   | { action: "stopBreakingBlock"; parameters: StopBreakingBlock }
   | { action: "stopNavigating"; parameters: StopNavigating }
   | { action: "stopUsingItem"; parameters: StopUsingItem }
   | { action: "toggleCrafterSlot"; parameters: ToggleCrafterSlot }
+  | { action: "viewerMark"; parameters: ViewerMark }
   | { action: "waitForForm"; parameters: WaitForForm }
   | { action: "waitForMessage"; parameters: WaitForMessage };

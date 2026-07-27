@@ -44,6 +44,9 @@ func (t *Test) RunCtx(ctx context.Context) error {
 	if t.Instructions == nil {
 		t.Instructions = instruction.DefaultPull(nil)
 	}
+	if t.Viewer != nil {
+		instruction.RegisterViewer(t.Instructions, t.Viewer)
+	}
 
 	if t.InstructionPrefix == "" {
 		t.InstructionPrefix = DefaultInstructionPrefix

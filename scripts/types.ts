@@ -124,3 +124,45 @@ export interface ClickedFormButton {
   index: number;
   text: string;
 }
+
+/** Result of the `screenshot` instruction. */
+export interface ScreenshotResult {
+  path: string;
+  width: number;
+  height: number;
+  bytes: number;
+  tick: number;
+}
+
+/** Parameters for the `viewerMark` instruction (on-wire `mark` fields). */
+export interface ViewerMarkParams {
+  phase: string;
+  runId?: string;
+  suite?: string;
+  test?: string;
+  status?: string;
+  message?: string;
+  elapsedMs?: number;
+}
+
+/**
+ * Artefact attached to `[GOTESTBDS]` `testEnd` / `runEnd` payloads.
+ * Shape matches what `bds-manager` parses.
+ */
+export interface TestArtifact {
+  kind: "screenshot" | "video";
+  path: string;
+  bytes: number;
+  width?: number;
+  height?: number;
+  tick?: number;
+  durationMs?: number;
+  label?: string;
+  suite?: string;
+  test?: string;
+}
+
+/** Result of the `pullArtifacts` instruction. */
+export interface PullArtifactsResult {
+  artifacts: TestArtifact[];
+}

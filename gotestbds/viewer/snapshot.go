@@ -77,13 +77,17 @@ type markFrame struct {
 
 // Capture is a request for a still from the harness.
 type CaptureFrame struct {
-	V       int    `json:"v"`
-	Type    string `json:"type"`
-	Bot     string `json:"bot"`
-	ID      string `json:"id"`
+	V    int    `json:"v"`
+	Type string `json:"type"`
+	Bot  string `json:"bot"`
+	ID   string `json:"id"`
+	// MinTick is the earliest tick a frame may be rendered from.
 	MinTick uint64 `json:"minTick"`
-	Ext     string `json:"ext"`
-	Label   string `json:"label,omitempty"`
+	// TimeoutMs is the caller's deadline, carried so the harness gives up at the
+	// same moment this side does instead of capping it with its own constant.
+	TimeoutMs int64  `json:"timeoutMs,omitempty"`
+	Ext       string `json:"ext"`
+	Label     string `json:"label,omitempty"`
 }
 
 // World is dimension metadata for a snapshot.

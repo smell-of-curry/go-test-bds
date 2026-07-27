@@ -10,8 +10,12 @@ import type {
   NearbyEntity,
   OpenForm,
   Pos,
+  PullArtifactsResult,
   ReceivedMessages,
+  ScreenshotResult,
+  TestArtifact,
   Vec3,
+  ViewerMarkParams,
 } from "./types";
 import { TimeoutError, waitForValue, type WaitOptions } from "./wait";
 
@@ -613,6 +617,72 @@ export class Bot {
       { response: 0, ignore: true },
       this.opts(options),
     );
+  }
+
+  // --- viewer ----------------------------------------------------------------
+
+  /**
+   * Asks the attached capture harness for a still of this bot's view.
+   *
+   * @param label Free-text label slugged into the artefact filename.
+   * @param options Timeout overrides. Defaults to 5 000 ms for the capture.
+   * @returns The written screenshot artefact.
+   * @throws {InstructionError} if no viewer is attached or the capture fails.
+   */
+  async screenshot(
+    label = "",
+    options?: RunActionOptions,
+  ): Promise<ScreenshotResult> {
+    const captureTimeoutMs = options?.timeoutMs ?? 5_000;
+    return runActionForData<"screenshot", ScreenshotResult>(
+      this.player,
+      "screenshot",
+      { label, timeoutMs: captureTimeoutMs },
+      { ...this.opts(options), timeoutMs: captureTimeoutMs + 5_000 },
+    );
+  }
+
+  /**
+   * Broadcasts a run-lifecycle mark to every bot's viewer stream.
+   *
+   * @param mark Mark fields matching the on-wire `mark` frame.
+   * @param options Timeout overrides.
+   * @returns A promise resolving once the bot confirms the action.
+   */
+  async viewerMark(
+    mark: ViewerMarkParams,
+    options?: RunActionOptions,
+  ): Promise<void> {
+    await runAction(
+      this.player,
+      "viewerMark",
+      {
+        phase: mark.phase,
+        runId: mark.runId ?? "",
+        suite: mark.suite ?? "",
+        test: mark.test ?? "",
+        status: mark.status ?? "",
+        message: mark.message ?? "",
+        elapsedMs: mark.elapsedMs ?? 0,
+      },
+      this.opts(options),
+    );
+  }
+
+  /**
+   * Drains artefacts written since the last pull.
+   *
+   * @param options Timeout overrides.
+   * @returns Artefacts accumulated since the previous pull.
+   */
+  async pullArtifacts(options?: RunActionOptions): Promise<TestArtifact[]> {
+    const data = await runActionForData<"pullArtifacts", PullArtifactsResult>(
+      this.player,
+      "pullArtifacts",
+      {},
+      this.opts(options),
+    );
+    return data.artifacts ?? [];
   }
 }
 

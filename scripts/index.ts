@@ -84,10 +84,14 @@ export type {
   NearbyEntity,
   OpenForm,
   Pos,
+  PullArtifactsResult,
   ReceivedMessage,
   ReceivedMessages,
   Rotation,
+  ScreenshotResult,
+  TestArtifact,
   Vec3,
+  ViewerMarkParams,
 } from "./types";
 export type {
   InstructionAction,

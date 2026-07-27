@@ -188,15 +188,16 @@ func (s *Stream) emitRaw(event string, data []byte) {
 }
 
 // emitCapture encodes and fans a capture request.
-func (s *Stream) emitCapture(id, label string, minTick uint64) {
+func (s *Stream) emitCapture(id, label string, minTick uint64, timeoutMs int64) {
 	cf := CaptureFrame{
-		V:       SchemaVersion,
-		Type:    "capture",
-		Bot:     s.name,
-		ID:      id,
-		MinTick: minTick,
-		Ext:     "png",
-		Label:   label,
+		V:         SchemaVersion,
+		Type:      "capture",
+		Bot:       s.name,
+		ID:        id,
+		MinTick:   minTick,
+		TimeoutMs: timeoutMs,
+		Ext:       "png",
+		Label:     label,
 	}
 	data, _ := json.Marshal(cf)
 	s.emitRaw("capture", data)

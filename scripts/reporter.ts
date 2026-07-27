@@ -1,3 +1,5 @@
+import type { TestArtifact } from "./types";
+
 /** Outcome of a single test case. */
 export type TestStatus = "passed" | "failed" | "skipped";
 
@@ -16,6 +18,11 @@ export interface TestResult {
   skipReason?: string;
   /** Lines the test emitted through `ctx.log`. */
   logs: string[];
+  /**
+   * Screenshots/videos drained at test end. Late uploads may arrive on
+   * {@link RunResult.artifacts} instead — each artefact carries suite/test.
+   */
+  artifacts?: TestArtifact[];
 }
 
 /** Result of one suite, including every test it ran. */
@@ -46,6 +53,11 @@ export interface RunResult {
   durationMs: number;
   suites: SuiteResult[];
   totals: RunTotals;
+  /**
+   * Artefacts pulled at run end (includes late video uploads that missed
+   * their testEnd pull).
+   */
+  artifacts?: TestArtifact[];
 }
 
 /**
@@ -145,6 +157,9 @@ export class StructuredReporter implements Reporter {
     this.emit("runEnd", {
       durationMs: result.durationMs,
       totals: result.totals,
+      ...(result.artifacts && result.artifacts.length > 0
+        ? { artifacts: result.artifacts }
+        : {}),
     });
   }
 }
