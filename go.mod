@@ -8,7 +8,7 @@ require (
 	github.com/df-mc/dragonfly v0.11.0
 	github.com/go-gl/mathgl v1.2.0
 	github.com/google/uuid v1.6.0
-	github.com/restartfu/gophig v0.1.0
+	github.com/restartfu/gophig v1.1.0
 	github.com/sandertv/gophertunnel v1.57.2-0.20260722164704-0a2ecd5633ea
 )
 
