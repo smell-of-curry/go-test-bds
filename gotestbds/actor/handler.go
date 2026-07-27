@@ -59,6 +59,9 @@ type Handler interface {
 	HandleStopNavigation(actor *Actor)
 	// HandleCommandOutput ...
 	HandleCommandOutput(actor *Actor, messages []protocol.CommandOutputMessage)
+	// HandleChangeDimension is called after the world has flushed the leaving
+	// dimension's columns and switched to the destination dimension.
+	HandleChangeDimension(a *Actor, from, to int32)
 }
 
 var _ Handler = NopHandler{}
@@ -86,3 +89,4 @@ func (NopHandler) HandleReceiveDialogue(ctx *Context, dialogue *Dialogue)       
 func (NopHandler) HandleReachTarget(actor *Actor)                                               {}
 func (NopHandler) HandleStopNavigation(actor *Actor)                                            {}
 func (h NopHandler) HandleCommandOutput(actor *Actor, messages []protocol.CommandOutputMessage) {}
+func (NopHandler) HandleChangeDimension(a *Actor, from, to int32)                               {}

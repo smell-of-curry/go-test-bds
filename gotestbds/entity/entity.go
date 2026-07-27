@@ -21,14 +21,26 @@ type Ent struct {
 	mainHand   item.Stack
 	offHand    item.Stack
 	rid        uint64
+	uid        int64
 	entityType string
 }
 
 // NewEnt ...
-func NewEnt(pos mgl64.Vec3, meta protocol.EntityMetadata, rid uint64, entityType string) *Ent {
+//
+// @param pos Spawn position.
+// @param meta Entity metadata from the spawn packet.
+// @param rid Runtime ID used by most entity packets.
+// @param uid Unique ID used by RemoveActor. Pass 0 to fall back to rid — spawn
+// packets that omit a unique ID (or send 0) must still be removable.
+// @param entityType Entity type identifier.
+// @returns the new entity.
+func NewEnt(pos mgl64.Vec3, meta protocol.EntityMetadata, rid uint64, uid int64, entityType string) *Ent {
+	if uid == 0 {
+		uid = int64(rid)
+	}
 	state := new(metadata.State)
 	state.Decode(meta)
-	return &Ent{pos: pos, state: state, rid: rid, entityType: entityType, attributes: new(attributes.Values), armour: inventory.NewArmour(nil)}
+	return &Ent{pos: pos, state: state, rid: rid, uid: uid, entityType: entityType, attributes: new(attributes.Values), armour: inventory.NewArmour(nil)}
 }
 
 // Position is a position of the entity.
@@ -64,6 +76,11 @@ func (e *Ent) Attributes() *attributes.Values {
 // RuntimeID is runtime identifier of the entity it identifies entity in the packets.
 func (e *Ent) RuntimeID() uint64 {
 	return e.rid
+}
+
+// UniqueID is the unique identifier RemoveActor and similar packets use.
+func (e *Ent) UniqueID() int64 {
+	return e.uid
 }
 
 // Move ...

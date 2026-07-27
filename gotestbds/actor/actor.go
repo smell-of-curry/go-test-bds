@@ -665,9 +665,13 @@ func (a *Actor) XUID() string {
 	return a.conn.IdentityData().XUID
 }
 
-// Dimension returns the dimension ID from GameData (spawn dimension unless updated elsewhere).
+// Dimension returns the dimension the actor's world is currently tracking.
+//
+// Seeded from GameData at construction; updated when ChangeDimension arrives.
+// Reading GameData forever would leave the actor in the spawn dimension after a
+// portal, and every column would share one coordinate space with the overworld.
 func (a *Actor) Dimension() int32 {
-	return a.conn.GameData().Dimension
+	return a.world.Dimension()
 }
 
 // CanSprint returns whether the Actor is able to sprint.

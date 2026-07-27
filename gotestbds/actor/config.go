@@ -32,9 +32,11 @@ func (c Config) New() (actor *Actor) {
 		EntityRuntimeID: gameData.EntityRuntimeID,
 		Position:        gameData.PlayerPosition,
 		GameType:        gameData.PlayerGameMode,
+		AbilityData:     protocol.AbilityData{EntityUniqueID: gameData.EntityUniqueID},
 	})
 
 	w := world.NewWorld(gameData.UseBlockNetworkIDHashes)
+	w.SetDimension(gameData.Dimension)
 	w.AddEntity(pl)
 
 	data := actorData{

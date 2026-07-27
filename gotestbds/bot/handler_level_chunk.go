@@ -41,7 +41,14 @@ func (*LevelChunkHandler) Handle(p packet.Packet, b *Bot, a *actor.Actor) error 
 		}
 	}
 
-	a.World().AddChunk(w.ChunkPos(levelChunk.Position), world.NewColumn(ch, blockEntities))
+	col := world.NewColumn(ch, blockEntities)
+	if requestMode {
+		// SubChunkCount was a request-mode sentinel: the payload held biomes,
+		// not blocks. The column stays empty until every requested sub-chunk
+		// arrives — marking it complete here would show holes as solid air.
+		col.ExpectSubChunks(subChunks)
+	}
+	a.World().AddChunk(w.ChunkPos(levelChunk.Position), col)
 	if !requestMode {
 		return nil
 	}

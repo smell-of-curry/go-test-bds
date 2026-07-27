@@ -68,6 +68,9 @@ func (*SubChunkHandler) Handle(p packet.Packet, b *Bot, a *actor.Actor) error {
 			}
 		}
 		c.Sub()[index] = decodedSC
+		// Each successful entry satisfies one outstanding request from the
+		// LevelChunk that put this column in the requested/partial state.
+		c.ReceiveSubChunk()
 	}
 	return util.MultiError(errors...)
 }

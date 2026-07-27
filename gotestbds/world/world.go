@@ -3,6 +3,7 @@ package world
 import (
 	"iter"
 	"maps"
+	"math"
 
 	_ "unsafe"
 
@@ -19,12 +20,15 @@ var blockRegistry = world.DefaultBlockRegistry
 // World stores all entities & blocks.
 type World struct {
 	entities map[uint64]Entity
+	byUnique map[int64]Entity
 	players  map[string]Entity
+
+	dimension int32
 
 	currentChunkPos world.ChunkPos
 	currentChunk    *Column
 
-	chunks map[world.ChunkPos]*Column
+	chunks map[int32]map[world.ChunkPos]*Column
 
 	// hashedIDs mirrors the server's UseBlockNetworkIDHashes game data flag.
 	hashedIDs bool
@@ -43,16 +47,86 @@ func NewWorld(hashedRuntimeIDs bool) *World {
 	blockRegistry.Finalize()
 	return &World{
 		entities:  make(map[uint64]Entity),
+		byUnique:  make(map[int64]Entity),
 		players:   make(map[string]Entity),
-		chunks:    make(map[world.ChunkPos]*Column),
+		chunks:    make(map[int32]map[world.ChunkPos]*Column),
 		hashedIDs: hashedRuntimeIDs,
 	}
 }
 
-// Chunks returns all chunks.
+// Dimension returns the dimension columns and block reads currently target.
+func (w *World) Dimension() int32 {
+	return w.dimension
+}
+
+// SetDimension switches the world's current dimension.
+//
+// Chunk lookups are keyed per dimension; leaving the one-entry cache pointing
+// at a column (or a cached nil) from the previous dimension would make the
+// same ChunkPos read the wrong world — or hide a column that already exists
+// in the new one.
+//
+// @param dim The dimension ID to make current.
+func (w *World) SetDimension(dim int32) {
+	if w.dimension == dim {
+		return
+	}
+	w.dimension = dim
+	w.invalidateChunkCache()
+}
+
+// FlushChunks drops every column in the current dimension.
+//
+// Used on ChangeDimension: the columns the bot held for the dimension it is
+// leaving are not valid in the destination, and keeping them under the old
+// key would only waste memory until a later revisit.
+func (w *World) FlushChunks() {
+	delete(w.chunks, w.dimension)
+	w.invalidateChunkCache()
+}
+
+// FlushEntities drops every entity except the one with the runtime ID passed.
+//
+// A dimension change leaves the bot in a world none of the entities it was
+// tracking exist in, and the server does not send a RemoveActor for each of
+// them — it simply stops mentioning them. Keeping them is the same ghost the
+// unique-ID removal fix exists to prevent, one dimension over.
+//
+// @param keep The runtime ID to preserve, normally the bot's own entity.
+func (w *World) FlushEntities(keep uint64) {
+	for rid, ent := range w.entities {
+		if rid == keep {
+			continue
+		}
+		w.RemoveEntity(ent)
+	}
+}
+
+// invalidateChunkCache drops the one-entry lookup cache.
+//
+// The zero ChunkPos {0,0} is a real column, so clearing to that with a nil
+// column would reintroduce the "first read of 0,0 stays empty forever" bug
+// unless AddChunk refreshes the cache — which it does. Using an unreachable
+// sentinel makes the next lookup always refill from the dimension map.
+func (w *World) invalidateChunkCache() {
+	w.currentChunk = nil
+	w.currentChunkPos = world.ChunkPos{math.MaxInt32, math.MaxInt32}
+}
+
+// columns returns the column map for the current dimension, creating it if needed.
+func (w *World) columns() map[world.ChunkPos]*Column {
+	m, ok := w.chunks[w.dimension]
+	if !ok {
+		m = make(map[world.ChunkPos]*Column)
+		w.chunks[w.dimension] = m
+	}
+	return m
+}
+
+// Chunks returns all chunks in the current dimension.
 func (w *World) Chunks() iter.Seq2[world.ChunkPos, *chunk.Chunk] {
 	return func(yield func(world.ChunkPos, *chunk.Chunk) bool) {
-		for pos, ch := range w.chunks {
+		for pos, ch := range w.chunks[w.dimension] {
 			if !yield(pos, ch.Chunk) {
 				return
 			}
@@ -66,9 +140,19 @@ func (w *World) Entity(rid uint64) (Entity, bool) {
 	return ent, ok
 }
 
+// EntityByUniqueID looks up an entity by the unique ID RemoveActor carries.
+//
+// @param uid The entity unique ID.
+// @returns the entity and whether it was tracked.
+func (w *World) EntityByUniqueID(uid int64) (Entity, bool) {
+	ent, ok := w.byUnique[uid]
+	return ent, ok
+}
+
 // AddEntity ...
 func (w *World) AddEntity(ent Entity) {
 	w.entities[ent.RuntimeID()] = ent
+	w.byUnique[ent.UniqueID()] = ent
 	if ent.Type() == "minecraft:player" {
 		name, ok := ent.(interface{ Name() string })
 		if ok {
@@ -80,12 +164,30 @@ func (w *World) AddEntity(ent Entity) {
 // RemoveEntity ...
 func (w *World) RemoveEntity(ent Entity) {
 	delete(w.entities, ent.RuntimeID())
+	delete(w.byUnique, ent.UniqueID())
 	if ent.Type() == "minecraft:player" {
 		name, ok := ent.(interface{ Name() string })
 		if ok {
 			delete(w.players, name.Name())
 		}
 	}
+}
+
+// RemoveEntityByUniqueID removes the entity with the given unique ID.
+//
+// RemoveActor identifies entities by unique ID, which is not always equal to
+// the runtime ID the entity map is keyed on — looking up by runtime ID left
+// ghosts whenever the two differed.
+//
+// @param uid The entity unique ID from RemoveActor.
+// @returns true if an entity was removed.
+func (w *World) RemoveEntityByUniqueID(uid int64) bool {
+	ent, ok := w.byUnique[uid]
+	if !ok {
+		return false
+	}
+	w.RemoveEntity(ent)
+	return true
 }
 
 func (w *World) Player(nick string) (Entity, bool) {
@@ -100,13 +202,13 @@ func (w *World) Entities() iter.Seq[Entity] {
 
 // Chunk ...
 func (w *World) Chunk(pos world.ChunkPos) (*Column, bool) {
-	ch, ok := w.chunks[pos]
+	ch, ok := w.chunks[w.dimension][pos]
 	return ch, ok
 }
 
 // AddChunk ...
 func (w *World) AddChunk(pos world.ChunkPos, c *Column) {
-	w.chunks[pos] = c
+	w.columns()[pos] = c
 	// The one-entry lookup cache starts out holding chunk 0, 0 with no column, so
 	// a world whose first read is in that chunk reads it as empty forever.
 	if w.currentChunkPos == pos {
@@ -116,7 +218,9 @@ func (w *World) AddChunk(pos world.ChunkPos, c *Column) {
 
 // RemoveChunk is called when chunk is too far away and don't fit in chunk radius.
 func (w *World) RemoveChunk(pos world.ChunkPos) {
-	delete(w.chunks, pos)
+	if m, ok := w.chunks[w.dimension]; ok {
+		delete(m, pos)
+	}
 	if w.currentChunkPos == pos {
 		w.currentChunk = nil
 	}
@@ -126,6 +230,31 @@ func (w *World) RemoveChunk(pos world.ChunkPos) {
 // at that position air will bee returned.
 func (w *World) Block(pos cube.Pos) world.Block {
 	return w.block(pos, 0)
+}
+
+// BlockAt reads a block and reports whether the column covering pos is loaded.
+//
+// Block treats an unloaded column as air so physics keeps working; a renderer
+// must tell the two apart, or a chunk boundary becomes an open void.
+//
+// @param pos The block position.
+// @returns the block at pos, and whether the column is loaded and in range.
+func (w *World) BlockAt(pos cube.Pos) (world.Block, bool) {
+	c := w.chunk(chunkPosFromBlockPos(pos))
+	if c == nil || pos.OutOfBounds(c.Range()) {
+		return block.Air{}, false
+	}
+	return w.block(pos, 0), true
+}
+
+// Loaded reports whether the column covering pos is present and the position
+// falls inside that column's vertical range.
+//
+// @param pos The block position.
+// @returns true when BlockAt would return ok.
+func (w *World) Loaded(pos cube.Pos) bool {
+	c := w.chunk(chunkPosFromBlockPos(pos))
+	return c != nil && !pos.OutOfBounds(c.Range())
 }
 
 // Liquid reads liquid from the position passed. If the chunk is not yet loaded
@@ -188,7 +317,7 @@ func (w *World) chunk(pos world.ChunkPos) *Column {
 	if w.currentChunkPos == pos {
 		return w.currentChunk
 	}
-	ch := w.chunks[pos]
+	ch := w.chunks[w.dimension][pos]
 	w.currentChunk = ch
 	w.currentChunkPos = pos
 	return ch
