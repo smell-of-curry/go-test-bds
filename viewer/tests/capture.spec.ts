@@ -313,7 +313,7 @@ function spawnHarness(stream: string): ChildProcessWithoutNullStreams {
   );
 }
 
-test("capture harness: stills + per-test video against fake bot", async () => {
+test("capture harness: stills + one run video against fake bot", async () => {
   await buildCaptureCli();
 
   const bot = await startFakeBot();
@@ -330,6 +330,7 @@ test("capture harness: stills + per-test video against fake bot", async () => {
     });
 
     // Node SSE + stills page EventSource (harness connects SSE before page).
+    // One context records video on that same page — no extra EventSource.
     await waitFor(() => bot.stream.attached >= 2);
 
     bot.stream.broadcast(
@@ -343,9 +344,6 @@ test("capture harness: stills + per-test video against fake bot", async () => {
         tick: 100,
       }),
     );
-
-    // + video page EventSource for the segment
-    await waitFor(() => bot.stream.attached >= 3, 30_000);
 
     bot.stream.broadcast(delta(110));
     bot.stream.broadcast(delta(120));
@@ -373,9 +371,6 @@ test("capture harness: stills + per-test video against fake bot", async () => {
     expect(capPng.height).toBe("360");
     expect(capPng.body.subarray(0, 8).toString("hex")).toBe("89504e470d0a1a0a");
 
-    const beforePassVideo = bot.artifacts.filter(
-      (a) => a.kind === "video",
-    ).length;
     bot.stream.broadcast(
       mark("testEnd", {
         runId: "run-cap",
@@ -387,20 +382,8 @@ test("capture harness: stills + per-test video against fake bot", async () => {
       }),
     );
 
-    const passVideo = await bot.waitForArtifact(
-      (a) =>
-        a.kind === "video" &&
-        a.suite === "machines" &&
-        a.test === "places a crate" &&
-        bot.artifacts.filter((x) => x.kind === "video").length >
-          beforePassVideo,
-    );
-    expect(passVideo.ext).toBe("webm");
-    expect(passVideo.bot).toBe("TestBot");
-    expect(passVideo.durationMs).toBeTruthy();
-    expect(passVideo.bytes).toBeGreaterThan(100);
-    expect(passVideo.runId).toBe("run-cap");
-    // passed testEnd must NOT also upload a failure still
+    // passed testEnd must NOT upload video or a failure still
+    expect(bot.artifacts.some((a) => a.kind === "video")).toBe(false);
     expect(
       bot.artifacts.some(
         (a) =>
@@ -419,7 +402,9 @@ test("capture harness: stills + per-test video against fake bot", async () => {
         tick: 120,
       }),
     );
-    await waitFor(() => bot.stream.attached > attachedAfterPass, 30_000);
+    // Same long-lived page — attachment count must not grow for video.
+    await new Promise((r) => setTimeout(r, 500));
+    expect(bot.stream.attached).toBe(attachedAfterPass);
 
     bot.stream.broadcast(delta(130));
     bot.stream.broadcast(
@@ -433,29 +418,18 @@ test("capture harness: stills + per-test video against fake bot", async () => {
       }),
     );
 
-    const failVideo = await bot.waitForArtifact(
-      (a) =>
-        a.kind === "video" &&
-        a.suite === "machines" &&
-        a.test === "opens the lid",
-    );
     const failStill = await bot.waitForArtifact(
       (a) =>
         a.kind === "screenshot" &&
         a.label === "failure" &&
         a.test === "opens the lid",
     );
-    expect(failVideo.ext).toBe("webm");
     expect(failStill.ext).toBe("png");
     expect(failStill.bot).toBe("TestBot");
     expect(failStill.runId).toBe("run-cap");
     expect(failStill.bytes).toBeGreaterThan(1_000);
-
-    for (const a of bot.artifacts) {
-      expect(a.kind === "screenshot" || a.kind === "video").toBe(true);
-      expect(a.ext === "png" || a.ext === "webm").toBe(true);
-      expect(a.bot).toBe("TestBot");
-    }
+    // Still no video until the stream closes.
+    expect(bot.artifacts.filter((a) => a.kind === "video")).toHaveLength(0);
 
     bot.stream.broadcast(
       mark("runEnd", {
@@ -465,6 +439,21 @@ test("capture harness: stills + per-test video against fake bot", async () => {
       }),
     );
     bot.stream.closeAll();
+
+    const runVideo = await bot.waitForArtifact((a) => a.kind === "video");
+    expect(runVideo.ext).toBe("webm");
+    expect(runVideo.bot).toBe("TestBot");
+    expect(runVideo.durationMs).toBeTruthy();
+    expect(runVideo.bytes).toBeGreaterThan(100);
+    expect(runVideo.runId).toBe("run-cap");
+    expect(runVideo.label).toBe("run");
+    expect(bot.artifacts.filter((a) => a.kind === "video")).toHaveLength(1);
+
+    for (const a of bot.artifacts) {
+      expect(a.kind === "screenshot" || a.kind === "video").toBe(true);
+      expect(a.ext === "png" || a.ext === "webm").toBe(true);
+      expect(a.bot).toBe("TestBot");
+    }
 
     const code = await exitPromise;
     expect(code).toBe(0);

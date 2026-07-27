@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import type { CameraController } from "./camera";
 import type { Block } from "./protocol";
-import { sectionIndex } from "./protocol";
+import { columnKey, sectionIndex } from "./protocol";
 import type { DecodedSection, StoredColumn, WorldState } from "./store";
 
 /** Soft budget for remeshing work per animation frame (ms). */
@@ -16,16 +16,102 @@ export interface Mesher {
    *
    * @param section - Decoded section (palette + indices).
    * @param column - Parent column (for world origin).
-   * @returns InstancedMeshes keyed by block identity, plus instance count.
+   * @param state - World state for cross-section neighbour lookups.
+   * @returns Meshes keyed by block identity, plus culled block-instance count.
    */
   meshSection(
     section: DecodedSection,
     column: StoredColumn,
-  ): { meshes: THREE.InstancedMesh[]; instanceCount: number };
+    state: WorldState,
+  ): { meshes: THREE.Mesh[]; instanceCount: number };
 }
 
-const _matrix = new THREE.Matrix4();
-const _boxGeo = new THREE.BoxGeometry(1, 1, 1);
+/** Unit-face quads (two tris) in local block space, centred on the cube. */
+const FACE_QUADS: ReadonlyArray<{
+  dx: number;
+  dy: number;
+  dz: number;
+  verts: ReadonlyArray<readonly [number, number, number]>;
+}> = [
+  {
+    dx: 1,
+    dy: 0,
+    dz: 0,
+    verts: [
+      [0.5, -0.5, -0.5],
+      [0.5, -0.5, 0.5],
+      [0.5, 0.5, 0.5],
+      [0.5, -0.5, -0.5],
+      [0.5, 0.5, 0.5],
+      [0.5, 0.5, -0.5],
+    ],
+  },
+  {
+    dx: -1,
+    dy: 0,
+    dz: 0,
+    verts: [
+      [-0.5, -0.5, 0.5],
+      [-0.5, -0.5, -0.5],
+      [-0.5, 0.5, -0.5],
+      [-0.5, -0.5, 0.5],
+      [-0.5, 0.5, -0.5],
+      [-0.5, 0.5, 0.5],
+    ],
+  },
+  {
+    dx: 0,
+    dy: 1,
+    dz: 0,
+    verts: [
+      [-0.5, 0.5, -0.5],
+      [0.5, 0.5, -0.5],
+      [0.5, 0.5, 0.5],
+      [-0.5, 0.5, -0.5],
+      [0.5, 0.5, 0.5],
+      [-0.5, 0.5, 0.5],
+    ],
+  },
+  {
+    dx: 0,
+    dy: -1,
+    dz: 0,
+    verts: [
+      [-0.5, -0.5, 0.5],
+      [0.5, -0.5, 0.5],
+      [0.5, -0.5, -0.5],
+      [-0.5, -0.5, 0.5],
+      [0.5, -0.5, -0.5],
+      [-0.5, -0.5, -0.5],
+    ],
+  },
+  {
+    dx: 0,
+    dy: 0,
+    dz: 1,
+    verts: [
+      [-0.5, -0.5, 0.5],
+      [-0.5, 0.5, 0.5],
+      [0.5, 0.5, 0.5],
+      [-0.5, -0.5, 0.5],
+      [0.5, 0.5, 0.5],
+      [0.5, -0.5, 0.5],
+    ],
+  },
+  {
+    dx: 0,
+    dy: 0,
+    dz: -1,
+    verts: [
+      [0.5, -0.5, -0.5],
+      [0.5, 0.5, -0.5],
+      [-0.5, 0.5, -0.5],
+      [0.5, -0.5, -0.5],
+      [-0.5, 0.5, -0.5],
+      [-0.5, -0.5, -0.5],
+    ],
+  },
+];
 
 function blockKey(block: Block): string {
   if (block.name === "" && block.rid !== 0) return `rid:${block.rid}`;
@@ -64,34 +150,90 @@ function isOpaque(block: Block | undefined): boolean {
   return block.name !== "" || block.rid !== 0;
 }
 
+/**
+ * Whether the block at a world-local neighbour offsets the given cell.
+ *
+ * Unknown neighbour policy: a missing/requested column is treated as **not
+ * opaque** (exposed). That draws the outer shell of loaded data — wrong the
+ * other way hides the frontier until neighbours arrive. When the neighbour
+ * later lands, the store dirties both sides so shared faces get culled.
+ * An absent section inside a known column is all-air (same as the store).
+ *
+ * @param state - World columns.
+ * @param cx - Column X of the cell being meshed.
+ * @param cz - Column Z of the cell being meshed.
+ * @param sy - Section Y of the cell being meshed.
+ * @param lx - Local X of the neighbour (may be outside 0..15).
+ * @param ly - Local Y of the neighbour (may be outside 0..15).
+ * @param lz - Local Z of the neighbour (may be outside 0..15).
+ * @returns true when the neighbour cell is known opaque.
+ */
 function neighbourOpaque(
-  sec: DecodedSection,
-  x: number,
-  y: number,
-  z: number,
+  state: WorldState,
+  cx: number,
+  cz: number,
+  sy: number,
+  lx: number,
+  ly: number,
+  lz: number,
 ): boolean {
-  if (x < 0 || x > 15 || y < 0 || y > 15 || z < 0 || z > 15) return false;
+  let ncx = cx;
+  let ncz = cz;
+  let nsy = sy;
+  let x = lx;
+  let y = ly;
+  let z = lz;
+  if (x < 0) {
+    ncx--;
+    x = 15;
+  } else if (x > 15) {
+    ncx++;
+    x = 0;
+  }
+  if (y < 0) {
+    nsy--;
+    y = 15;
+  } else if (y > 15) {
+    nsy++;
+    y = 0;
+  }
+  if (z < 0) {
+    ncz--;
+    z = 15;
+  } else if (z > 15) {
+    ncz++;
+    z = 0;
+  }
+
+  const col = state.columns.get(columnKey(ncx, ncz));
+  // Unknown / not-yet-received column → exposed (see policy comment above).
+  if (!col || col.state === "requested") return false;
+  const sec = col.sections.get(nsy);
+  // Known column, absent section → all air.
+  if (!sec) return false;
   const idx = sec.indices[sectionIndex(x, y, z)]!;
   return isOpaque(sec.palette[idx]);
 }
 
 /**
- * Stage-2 placeholder mesher: one unit cube per non-air cell, culled when all
- * six in-section neighbours are opaque. Stage 6 replaces the insides; keep the
- * surface (dirty-section in → meshes out) stable.
+ * Placeholder mesher: exposed faces only for non-air cells. Buried cells and
+ * shared faces are skipped — required for SwiftShader capture budgets on dense
+ * terrain. `instanceCount` still counts exposed *blocks* (overlay / tests).
  */
 export class PlaceholderMesher implements Mesher {
   meshSection(
     section: DecodedSection,
     column: StoredColumn,
-  ): { meshes: THREE.InstancedMesh[]; instanceCount: number } {
-    const byKey = new Map<
-      string,
-      { block: Block; positions: THREE.Vector3[] }
-    >();
+    state: WorldState,
+  ): { meshes: THREE.Mesh[]; instanceCount: number } {
+    const byKey = new Map<string, { block: Block; positions: number[] }>();
     const originX = column.x * 16;
     const originZ = column.z * 16;
     const originY = section.y * 16;
+    const cx = column.x;
+    const cz = column.z;
+    const sy = section.y;
+    let instanceCount = 0;
 
     for (let x = 0; x < 16; x++) {
       for (let z = 0; z < 16; z++) {
@@ -100,56 +242,55 @@ export class PlaceholderMesher implements Mesher {
           const block = section.palette[pi];
           if (!block || !isOpaque(block)) continue;
 
-          // Skip fully-enclosed cells — removes most interior geometry without
-          // cross-section face culling (that is stage 6).
-          if (
-            neighbourOpaque(section, x - 1, y, z) &&
-            neighbourOpaque(section, x + 1, y, z) &&
-            neighbourOpaque(section, x, y - 1, z) &&
-            neighbourOpaque(section, x, y + 1, z) &&
-            neighbourOpaque(section, x, y, z - 1) &&
-            neighbourOpaque(section, x, y, z + 1)
-          ) {
-            continue;
-          }
+          const cxw = originX + x + 0.5;
+          const cyw = originY + y + 0.5;
+          const czw = originZ + z + 0.5;
+          let exposed = false;
 
-          const key = blockKey(block);
-          let bucket = byKey.get(key);
-          if (!bucket) {
-            bucket = { block, positions: [] };
-            byKey.set(key, bucket);
+          for (const face of FACE_QUADS) {
+            if (
+              neighbourOpaque(
+                state,
+                cx,
+                cz,
+                sy,
+                x + face.dx,
+                y + face.dy,
+                z + face.dz,
+              )
+            ) {
+              continue;
+            }
+            exposed = true;
+            const key = blockKey(block);
+            let bucket = byKey.get(key);
+            if (!bucket) {
+              bucket = { block, positions: [] };
+              byKey.set(key, bucket);
+            }
+            for (const [vx, vy, vz] of face.verts) {
+              bucket.positions.push(cxw + vx, cyw + vy, czw + vz);
+            }
           }
-          bucket.positions.push(
-            new THREE.Vector3(
-              originX + x + 0.5,
-              originY + y + 0.5,
-              originZ + z + 0.5,
-            ),
-          );
+          if (exposed) instanceCount++;
         }
       }
     }
 
-    const meshes: THREE.InstancedMesh[] = [];
-    let instanceCount = 0;
+    const meshes: THREE.Mesh[] = [];
     for (const { block, positions } of byKey.values()) {
       if (positions.length === 0) continue;
-      // Unlit: Stage 2 is colour-ID placeholders; also survives software GL without lights.
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute(
+        "position",
+        new THREE.Float32BufferAttribute(positions, 3),
+      );
+      // Unlit: colour-ID placeholders; survives software GL without lights.
       const mat = new THREE.MeshBasicMaterial({ color: colorForBlock(block) });
-      const mesh = new THREE.InstancedMesh(_boxGeo, mat, positions.length);
+      const mesh = new THREE.Mesh(geo, mat);
       mesh.frustumCulled = false;
-      for (let i = 0; i < positions.length; i++) {
-        _matrix.makeTranslation(
-          positions[i]!.x,
-          positions[i]!.y,
-          positions[i]!.z,
-        );
-        mesh.setMatrixAt(i, _matrix);
-      }
-      mesh.instanceMatrix.needsUpdate = true;
       mesh.userData.blockKey = blockKey(block);
       meshes.push(mesh);
-      instanceCount += positions.length;
     }
     return { meshes, instanceCount };
   }
@@ -196,13 +337,14 @@ export class ViewerScene {
     this.labelsRoot = labelsRoot;
     this.renderer = new THREE.WebGLRenderer({
       canvas,
-      antialias: true,
+      // MSAA is ruinously expensive on SwiftShader; capture runs headless w/o GPU.
+      antialias: false,
       alpha: false,
       powerPreference: "default",
       // Needed so tests (and toDataURL) can read pixels after composite.
       preserveDrawingBuffer: true,
     });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.setPixelRatio(1);
     this.renderer.setSize(
       canvas.clientWidth || window.innerWidth,
       canvas.clientHeight || window.innerHeight,
@@ -379,7 +521,11 @@ export class ViewerScene {
     }
 
     this.removeSection(key);
-    const { meshes, instanceCount } = this.mesher.meshSection(section, col);
+    const { meshes, instanceCount } = this.mesher.meshSection(
+      section,
+      col,
+      state,
+    );
     if (meshes.length === 0 && instanceCount === 0) {
       // Empty after culling — still count as a meshed section only if we keep a marker?
       // No geometry → no section node (absent air sections stay absent).
@@ -402,8 +548,8 @@ export class ViewerScene {
     if (!node) return;
     this.scene.remove(node.group);
     for (const child of node.group.children) {
-      const mesh = child as THREE.InstancedMesh;
-      mesh.geometry = _boxGeo; // shared
+      const mesh = child as THREE.Mesh;
+      mesh.geometry.dispose();
       if (Array.isArray(mesh.material)) {
         for (const m of mesh.material) m.dispose();
       } else {

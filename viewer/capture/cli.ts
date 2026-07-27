@@ -4,14 +4,14 @@ import { runHarness, type HarnessOptions, type LogLevel } from "./harness";
 const HELP = `Usage: node viewer/dist-capture/cli.cjs --stream <url> --bot <name> [options]
 
 Headless capture harness for the go-test-bds viewer stream.
-Opens <stream>/?bot=<bot>, records per-test video + stills, POSTs to /artifact.
+Opens <stream>/?bot=<bot>, records one run video + stills, POSTs to /artifact.
 
 Options:
   --stream <url>                 Bot viewer base URL (required)
   --bot <name>                   Bot name (required)
   --width <n>                    Viewport width (default 1280)
   --height <n>                   Viewport height (default 720)
-  --max-segment-seconds <n>      Cap video segment length (default 120)
+  --max-segment-seconds <n>      Cap run recording length (default 120)
   --browser <path>               Chromium executable path
   --log-level <level>            debug | info | warn | error (default info)
   --help                         Show this help

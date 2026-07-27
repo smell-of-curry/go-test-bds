@@ -19,12 +19,13 @@ const camera = new CameraController(
 const overlay = new Overlay(overlayEl, errorEl);
 
 let streamError = "";
-let settled = true;
 
 installViewerHandle(
   store,
   scene,
-  () => settled,
+  // Live remesh queue — `flush()` drains it without sync/tickRemesh, so a
+  // cached boolean would stay false forever after a forced drain.
+  () => !store.getState().schemaOk || scene.pendingRemeshCount === 0,
   camera,
   () => streamError,
 );
@@ -56,11 +57,10 @@ function paintOverlay(): void {
 
 store.subscribe((state) => {
   if (!state.schemaOk) {
-    settled = true;
     paintOverlay();
     return;
   }
-  settled = scene.sync(state, camera.mode === "orbit");
+  scene.sync(state, camera.mode === "orbit");
   store.clearDirty();
   paintOverlay();
 });
@@ -81,7 +81,7 @@ function frame(): void {
   const state = store.getState();
   if (state.schemaOk) {
     if (scene.pendingRemeshCount > 0) {
-      settled = scene.tickRemesh(state);
+      scene.tickRemesh(state);
     }
     camera.update(state.actor);
     scene.setOrbitMode(

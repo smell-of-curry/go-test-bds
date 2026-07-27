@@ -124,6 +124,50 @@ function markAllSectionsDirty(state: WorldState, col: StoredColumn): void {
 }
 
 /**
+ * Dirty one section if it exists.
+ *
+ * @param state - World state whose dirty set is updated.
+ * @param cx - Column X.
+ * @param cz - Column Z.
+ * @param sy - Section Y.
+ */
+function dirtySectionIfPresent(
+  state: WorldState,
+  cx: number,
+  cz: number,
+  sy: number,
+): void {
+  const col = state.columns.get(columnKey(cx, cz));
+  if (!col?.sections.has(sy)) return;
+  state.dirtySections.add(sectionDirtyKey(cx, cz, sy));
+}
+
+/**
+ * Dirty sections that share a face with `(cx,cz,sy)`.
+ *
+ * Exposure culling looks across section/column borders, so a change on one
+ * side must remesh the neighbour or shared faces stay wrong (hole or ghost).
+ *
+ * @param state - World state whose dirty set is updated.
+ * @param cx - Column X.
+ * @param cz - Column Z.
+ * @param sy - Section Y.
+ */
+function dirtyNeighborSections(
+  state: WorldState,
+  cx: number,
+  cz: number,
+  sy: number,
+): void {
+  dirtySectionIfPresent(state, cx - 1, cz, sy);
+  dirtySectionIfPresent(state, cx + 1, cz, sy);
+  dirtySectionIfPresent(state, cx, cz - 1, sy);
+  dirtySectionIfPresent(state, cx, cz + 1, sy);
+  dirtySectionIfPresent(state, cx, cz, sy - 1);
+  dirtySectionIfPresent(state, cx, cz, sy + 1);
+}
+
+/**
  * In-memory world model. A keyframe replaces everything; a delta with `world`
  * drops columns + entities first (dimension change).
  */
@@ -263,6 +307,8 @@ export class Store {
         if (!existing) continue;
         for (const sy of existing.sections.keys()) {
           this.state.dirtySections.add(sectionDirtyKey(x, z, sy));
+          // Neighbours regain an exposed face where this column used to sit.
+          dirtyNeighborSections(this.state, x, z, sy);
         }
         this.state.dirtyColumns.add(key);
         this.state.columns.delete(key);
@@ -274,6 +320,11 @@ export class Store {
         const stored = decodeColumn(col);
         this.state.columns.set(columnKey(col.x, col.z), stored);
         markAllSectionsDirty(this.state, stored);
+        // Existing neighbours may have drawn an "edge of known data" face
+        // that is now buried against this column.
+        for (const sy of stored.sections.keys()) {
+          dirtyNeighborSections(this.state, stored.x, stored.z, sy);
+        }
       }
     }
 
@@ -347,6 +398,13 @@ export class Store {
     }
     sec.indices[sectionIndex(lx, ly, lz)] = paletteIndex;
     this.state.dirtySections.add(sectionDirtyKey(cx, cz, sy));
+    // Edge cells change the neighbour section's exposure too.
+    if (lx === 0) dirtySectionIfPresent(this.state, cx - 1, cz, sy);
+    if (lx === 15) dirtySectionIfPresent(this.state, cx + 1, cz, sy);
+    if (ly === 0) dirtySectionIfPresent(this.state, cx, cz, sy - 1);
+    if (ly === 15) dirtySectionIfPresent(this.state, cx, cz, sy + 1);
+    if (lz === 0) dirtySectionIfPresent(this.state, cx, cz - 1, sy);
+    if (lz === 15) dirtySectionIfPresent(this.state, cx, cz + 1, sy);
   }
 }
 

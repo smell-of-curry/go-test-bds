@@ -43,7 +43,7 @@ Keys: **C** toggles first-person (locked to actor `eyePos`/`rot`) ↔ orbit (dra
 
 ## Capture harness
 
-Headless Chromium process that turns the SSE stream into per-test webm + stills
+Headless Chromium process that turns the SSE stream into one run webm + stills
 and `POST`s them to the bot's `/artifact` endpoint. See [`PROTOCOL.md`](./PROTOCOL.md)
 § "The capture harness".
 
@@ -57,12 +57,14 @@ node dist-capture/cli.cjs --stream http://127.0.0.1:24680 --bot TestBot
 | `--stream` | required | Bot viewer base URL; opens `<stream>/?bot=<bot>` |
 | `--bot` | required | Bot name |
 | `--width` / `--height` | `1280` / `720` | Viewport + `recordVideo` size |
-| `--max-segment-seconds` | `120` | Stops and uploads a segment that never gets `testEnd` |
+| `--max-segment-seconds` | `120` | Caps the whole-run recording; closes the stream and uploads |
 | `--browser` | Playwright Chromium | Then `PLAYWRIGHT_CHROMIUM`, then `CHROME_PATH` |
 | `--log-level` | `info` | `debug` \| `info` \| `warn` \| `error` |
 
-Video uses Playwright `recordVideo` (whole page, including the DOM diagnostic
-overlay). Stills use the long-lived page that keeps `attached >= 1`.
+Video uses Playwright `recordVideo` on the **same** long-lived context as stills
+(whole page, including the DOM diagnostic / mark overlay). One webm is uploaded
+when the stream closes — not per test. Mark phases stay burnt into the overlay
+so a viewer can tell which test is on screen.
 
 ## Frame budget and chunk update strategy
 
@@ -79,11 +81,15 @@ Interface kept narrow on purpose:
 
 ```ts
 interface Mesher {
-  meshSection(section, column): { meshes: InstancedMesh[]; instanceCount: number };
+  meshSection(section, column, state): { meshes: Mesh[]; instanceCount: number };
 }
 ```
 
-Air is skipped. A cell whose six **in-section** neighbours are all opaque is skipped (cheap interior cull). Cross-section / cross-column face culling is Stage 6.
+Air is skipped. Only faces exposed to air (or the edge of known data) are
+emitted — buried cells contribute nothing. Unknown / not-yet-received neighbour
+columns count as exposed so the loaded frontier stays visible; when they arrive
+the store dirties both sides. Block changes on a section edge remesh the
+neighbour section.
 
 ## Smoke test / CI WebGL
 

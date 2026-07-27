@@ -3,7 +3,7 @@ import http from "node:http";
 import https from "node:https";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Browser, BrowserContext, Page } from "playwright";
+import type { BrowserContext, Page } from "playwright";
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
 
@@ -64,8 +64,9 @@ const GL_ARGS = [
 /**
  * Run the capture harness until the SSE stream closes.
  *
- * Start-up failures reject (caller exits non-zero). Mid-run failures are logged
- * and swallowed so the bot / test run is never taken down.
+ * One BrowserContext records the whole run (stills + video). Playwright only
+ * finalises `recordVideo` on context close, so per-test contexts produced blank
+ * ~3 KB webms when short tests ended before the app loaded.
  *
  * @param opts - Resolved CLI options including an existing browser binary.
  * @returns resolves when the stream closes cleanly.
@@ -85,18 +86,72 @@ export async function runHarness(opts: HarnessOptions): Promise<void> {
 
   const appUrl = `${opts.stream}/?bot=${encodeURIComponent(opts.bot)}`;
   const mark: MarkState = {};
-  let video: VideoSegment | null = null;
+  const videoDir = mkdtempSync(join(tmpdir(), "gotestbds-capture-"));
+  const videoStartedAt = Date.now();
 
-  const stillsCtx = await browser.newContext({
+  let stillsCtx: BrowserContext = await browser.newContext({
     viewport: { width: opts.width, height: opts.height },
+    recordVideo: {
+      dir: videoDir,
+      size: { width: opts.width, height: opts.height },
+    },
   });
-  const stillsPage = await stillsCtx.newPage();
+  let stillsPage: Page = await stillsCtx.newPage();
 
   // Subscribe before the page so marks/captures cannot race past us while the
   // stills page is still loading. Queue until stillsReady.
   let stillsReady = false;
   const pending: Array<{ type: string; data: string }> = [];
   let chain: Promise<void> = Promise.resolve();
+  let videoUploaded = false;
+
+  const uploadRunVideo = async (label: string): Promise<void> => {
+    if (videoUploaded) return;
+    videoUploaded = true;
+    const ctx = stillsCtx;
+    const page = stillsPage;
+    try {
+      const video = page.video();
+      await page.close().catch(() => undefined);
+      await ctx.close().catch(() => undefined);
+      if (!video) {
+        log.warn("capture: no video handle after run");
+        return;
+      }
+      const path = await video.path();
+      const body = readFileSync(path);
+      const durationMs = Date.now() - videoStartedAt;
+      await postArtifact(opts.stream, {
+        kind: "video",
+        ext: "webm",
+        bot: opts.bot,
+        body,
+        width: opts.width,
+        height: opts.height,
+        durationMs,
+        runId: mark.runId,
+        suite: mark.suite,
+        test: mark.test,
+        label,
+      });
+      log.info(
+        `capture: uploaded video run=${mark.runId ?? ""} bytes=${body.length} label=${label}`,
+      );
+      try {
+        unlinkSync(path);
+      } catch {
+        /* ignore */
+      }
+    } catch (err) {
+      log.warn(`capture: video upload failed: ${String(err)}`);
+    } finally {
+      try {
+        rmSync(videoDir, { recursive: true, force: true });
+      } catch {
+        /* ignore */
+      }
+    }
+  };
 
   const onFrame = async (type: string, data: string): Promise<void> => {
     let frame: { type: string };
@@ -112,14 +167,8 @@ export async function runHarness(opts: HarnessOptions): Promise<void> {
         handleMark(frame as MarkFrame, {
           opts,
           log,
-          browser,
-          appUrl,
-          mark,
           stillsPage,
-          getVideo: () => video,
-          setVideo: (v) => {
-            video = v;
-          },
+          mark,
         }),
       );
       return;
@@ -150,6 +199,15 @@ export async function runHarness(opts: HarnessOptions): Promise<void> {
     log,
   );
   sse.onEvent = enqueue;
+
+  const capTimer = setTimeout(() => {
+    log.info(
+      `capture: max-segment-seconds=${opts.maxSegmentSeconds} reached; uploading run video`,
+    );
+    // Force end: close SSE so the main loop unwinds and finally uploads once.
+    sse.close();
+  }, opts.maxSegmentSeconds * 1000);
+  if (typeof capTimer.unref === "function") capTimer.unref();
 
   try {
     await stillsPage.goto(appUrl, { waitUntil: "domcontentloaded" });
@@ -199,65 +257,35 @@ export async function runHarness(opts: HarnessOptions): Promise<void> {
     for (const p of pending) enqueue(p.type, p.data);
     pending.length = 0;
 
-    await sse.done;
+    await sse.done.catch(() => undefined);
     await chain.catch(() => undefined);
     log.info("capture: stream closed");
   } finally {
+    clearTimeout(capTimer);
     await safe(log, async () => {
-      if (video) await video.stopAndUpload("max-segment");
+      await uploadRunVideo("run");
     });
-    video = null;
-    await stillsCtx.close().catch(() => undefined);
     await browser.close().catch(() => undefined);
   }
 }
-
-type VideoSegment = {
-  stopAndUpload: (label: string) => Promise<void>;
-};
 
 async function handleMark(
   frame: MarkFrame,
   ctx: {
     opts: HarnessOptions;
     log: Logger;
-    browser: Browser;
-    appUrl: string;
-    mark: MarkState;
     stillsPage: Page;
-    getVideo: () => VideoSegment | null;
-    setVideo: (v: VideoSegment | null) => void;
+    mark: MarkState;
   },
 ): Promise<void> {
   if (frame.runId !== undefined) ctx.mark.runId = frame.runId;
   if (frame.suite !== undefined) ctx.mark.suite = frame.suite;
   if (frame.test !== undefined) ctx.mark.test = frame.test;
 
-  if (frame.phase === "testStart") {
-    const prev = ctx.getVideo();
-    if (prev) await prev.stopAndUpload("overlap");
-    ctx.setVideo(
-      await startVideoSegment({
-        browser: ctx.browser,
-        appUrl: ctx.appUrl,
-        opts: ctx.opts,
-        mark: { ...ctx.mark },
-        log: ctx.log,
-        onEnded: () => ctx.setVideo(null),
-      }),
-    );
-    return;
-  }
-
-  if (frame.phase === "testEnd") {
-    const seg = ctx.getVideo();
-    if (seg) {
-      await seg.stopAndUpload("test");
-      ctx.setVideo(null);
-    }
-    if (frame.status === "failed") {
-      await uploadFailureStill(ctx.stillsPage, ctx.opts, ctx.mark, ctx.log);
-    }
+  // Video is one continuous recording for the run; marks only update the
+  // burnt-in overlay (via the app's SSE) and failure stills.
+  if (frame.phase === "testEnd" && frame.status === "failed") {
+    await uploadFailureStill(ctx.stillsPage, ctx.opts, ctx.mark, ctx.log);
   }
 }
 
@@ -323,99 +351,6 @@ async function handleCapture(
       log.warn(`capture: error POST failed: ${String(e)}`),
     );
   }
-}
-
-async function startVideoSegment(args: {
-  browser: Browser;
-  appUrl: string;
-  opts: HarnessOptions;
-  mark: MarkState;
-  log: Logger;
-  onEnded: () => void;
-}): Promise<VideoSegment> {
-  const { browser, appUrl, opts, mark, log, onEnded } = args;
-  const dir = mkdtempSync(join(tmpdir(), "gotestbds-capture-"));
-  const startedAt = Date.now();
-  let ctx: BrowserContext | null = await browser.newContext({
-    viewport: { width: opts.width, height: opts.height },
-    recordVideo: {
-      dir,
-      size: { width: opts.width, height: opts.height },
-    },
-  });
-  const page = await ctx.newPage();
-  // Not awaited: frames are handled one at a time, so blocking here on the app
-  // becoming ready would stall every capture and mark queued behind this test's
-  // start. Recording begins when the context is created, so the only cost of
-  // not waiting is a blank first moment of the segment.
-  void page.goto(appUrl, { waitUntil: "domcontentloaded" }).catch((err) => {
-    log.warn(`capture: video page start: ${String(err)}`);
-  });
-
-  let finished = false;
-  const stopAndUpload = async (label: string): Promise<void> => {
-    if (finished) return;
-    finished = true;
-    clearTimeout(capTimer);
-    const active = ctx;
-    ctx = null;
-    if (!active) {
-      onEnded();
-      return;
-    }
-    try {
-      const video = page.video();
-      await page.close().catch(() => undefined);
-      await active.close();
-      if (!video) {
-        log.warn("capture: no video handle after segment");
-        return;
-      }
-      const path = await video.path();
-      const body = readFileSync(path);
-      const durationMs = Date.now() - startedAt;
-      await postArtifact(opts.stream, {
-        kind: "video",
-        ext: "webm",
-        bot: opts.bot,
-        body,
-        width: opts.width,
-        height: opts.height,
-        durationMs,
-        runId: mark.runId,
-        suite: mark.suite,
-        test: mark.test,
-        label,
-      });
-      log.info(
-        `capture: uploaded video suite=${mark.suite ?? ""} test=${mark.test ?? ""} bytes=${body.length}`,
-      );
-      try {
-        unlinkSync(path);
-      } catch {
-        /* ignore */
-      }
-    } catch (err) {
-      log.warn(`capture: video upload failed: ${String(err)}`);
-    } finally {
-      try {
-        rmSync(dir, { recursive: true, force: true });
-      } catch {
-        /* ignore */
-      }
-      onEnded();
-    }
-  };
-
-  const capTimer = setTimeout(() => {
-    log.info(
-      `capture: max-segment-seconds=${opts.maxSegmentSeconds} reached; uploading`,
-    );
-    void stopAndUpload("max-segment");
-  }, opts.maxSegmentSeconds * 1000);
-  if (typeof capTimer.unref === "function") capTimer.unref();
-
-  return { stopAndUpload };
 }
 
 async function uploadFailureStill(

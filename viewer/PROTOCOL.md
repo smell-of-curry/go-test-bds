@@ -224,8 +224,9 @@ instruction. Broadcast to every bot's stream, because a run is not per-bot.
 `runEnd`. `status` and `message` appear on `testEnd` and `runEnd`. Everything
 else is optional and absent when unknown.
 
-This is the event the capture harness segments video on, and the source of the
-burnt-in caption.
+This is the source of the burnt-in caption (suite/test/phase). The capture
+harness records **one** continuous video for the whole run; marks do not start
+or stop recording.
 
 ### `capture`
 
@@ -448,7 +449,7 @@ node viewer/dist-capture/cli.cjs \
   --stream http://127.0.0.1:24680 \
   --bot TestBot \
   [--width 1280] [--height 720] \
-  [--max-segment-seconds 120] \
+  [--max-segment-seconds 120] \  # cap whole-run recording length
   [--browser /path/to/chromium] \
   [--log-level info]
 ```
@@ -466,15 +467,18 @@ node viewer/dist-capture/cli.cjs \
 
 ### What it does
 
-1. Opens the viewer app against `--stream`, waits for the first rendered frame.
+1. Opens the viewer app against `--stream` in a context with `recordVideo`,
+   waits for the first rendered frame. That single page is both the stills
+   source and the run recording (mark overlay included).
 2. Subscribes to the same SSE stream and reacts to two frame types:
-   - `mark`: `testStart` starts a recording segment, `testEnd` stops it and
-     uploads it, and a `failed` status additionally uploads a still.
+   - `mark`: updates caption state; a `failed` `testEnd` additionally uploads
+     a still. Video is **not** started/stopped per test.
    - `capture`: waits for a rendered frame at or after `minTick`, then uploads
      the still against `X-Capture-Id`.
-3. Uploads everything through `POST /artifact`. It never writes to the artefact
-   directory itself, so paths are Go's to own and mean the same thing to every
-   consumer.
+3. When the stream closes (or `--max-segment-seconds` elapses), finalises the
+   one run webm and uploads it through `POST /artifact`. It never writes to the
+   artefact directory itself, so paths are Go's to own and mean the same thing
+   to every consumer.
 
 ### Artefact naming
 
