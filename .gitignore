@@ -1,1 +1,10 @@
-.ideaconfig.tomlnode_modules/.tsbuildinfotestdata/e2e-pack/scripts/main.jsbds/*.log/bin/.local/viewer/artifacts-*/
+.idea
+config.toml
+node_modules/
+.tsbuildinfo
+testdata/e2e-pack/scripts/main.js
+bds/
+*.log
+/bin/
+.local/
+viewer/artifacts-*/
