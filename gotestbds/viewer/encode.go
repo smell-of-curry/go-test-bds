@@ -53,6 +53,12 @@ type colCacheEntry struct {
 	col Column
 }
 
+// lightFillBudget caps light fill/spread operations per snapshot pass. Each
+// operation remaps hashed palettes and runs dragonfly light propagation on the
+// bot goroutine; an unbounded pass over a freshly streamed city stalled the
+// tick loop for tens of seconds and starved instruction responses.
+const lightFillBudget = 24
+
 // viewState is the last fully projected snapshot, used to build deltas.
 type viewState struct {
 	world    World
@@ -146,6 +152,7 @@ func (e *encoder) project(a *actor.Actor) (*viewState, error) {
 	columns := make(map[[2]int32]Column)
 	revs := make(map[[2]int32]uint64)
 	seen := make(map[[2]int32]struct{})
+	lightFills := 0
 	for cpos, col := range r {
 		// Chebyshev radius matches chunk-radius style caps used by the bot.
 		if chebyshev(cpos[0]-cx, cpos[1]-cz) > e.radius {
@@ -154,8 +161,14 @@ func (e *encoder) project(a *actor.Actor) (*viewState, error) {
 		key := [2]int32{cpos[0], cpos[1]}
 		seen[key] = struct{}{}
 		// Light fill is debounced here (once per dirty column per snapshot),
-		// not on every SetBlock — Fill is cheap for one column but not free.
-		w.EnsureColumnLight(cpos)
+		// not on every SetBlock — and budgeted per snapshot: the fill runs on
+		// the bot's goroutine, and an unbounded pass over hundreds of freshly
+		// streamed columns stalled the tick loop long enough for instructions
+		// to miss their status window. Columns over budget stay dirty (and get
+		// encoded without light — bright default) until a later snapshot.
+		if lightFills < lightFillBudget && w.EnsureColumnLight(cpos) {
+			lightFills++
+		}
 		rev := col.Revision
 		if !e.skipColCache {
 			if ent, ok := e.colCache[key]; ok && ent.rev == rev {
@@ -458,7 +471,9 @@ func (e *encoder) encodeColumn(w *gw.World, pos dfworld.ChunkPos, col *gw.Column
 		// the run. PROTOCOL.md promises arrays are present, possibly empty.
 		Sections: []Section{},
 	}
-	lit := col.State == gw.ColumnComplete
+	// Unfilled light slices are stale zeros — sending them renders the column
+	// black. Omit light instead; the viewer defaults omitted sky light to 15.
+	lit := col.State == gw.ColumnComplete && col.LightFilled()
 	subs := col.Sub()
 	for i, sub := range subs {
 		if sub == nil || sub.Empty() {
@@ -783,9 +798,9 @@ func (e *encoder) encodeUI(a *actor.Actor) UI {
 		ui.Messages = append(ui.Messages, m.Text)
 	}
 	st := a.ScreenTitle()
-	ui.Title = st.Title
-	ui.Subtitle = st.Subtitle
-	ui.ActionBar = st.ActionBar
+	ui.Title = filterHudControlText(st.Title)
+	ui.Subtitle = filterHudControlText(st.Subtitle)
+	ui.ActionBar = filterHudControlText(st.ActionBar)
 	// Omit default fade timings when nothing is on screen — keeps empty UI `{}`
 	// on the wire instead of always shipping 10/70/20.
 	if st.Title != "" || st.Subtitle != "" || st.ActionBar != "" {

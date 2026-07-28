@@ -8,13 +8,27 @@ import (
 // EnsureColumnLight runs dragonfly light propagation for a complete column when
 // it is dirty. Safe to call every snapshot tick — no-ops when clean or incomplete.
 //
+// Dragonfly's two-stage contract: Fill is a SINGLE-chunk stage (sky columns are
+// seeded from that chunk's own heightmap — LightArea.Fill only heightmap-seeds
+// c[0], so filling a 3×3 lights nothing but the corner), and Spread is the
+// cross-chunk 3×3 stage run after every member chunk has been filled.
+//
 // @param pos The column to fill.
-func (w *World) EnsureColumnLight(pos world.ChunkPos) {
+// @returns true when fill or spread work was performed.
+func (w *World) EnsureColumnLight(pos world.ChunkPos) bool {
 	col, ok := w.Chunk(pos)
-	if !ok || col.State != ColumnComplete || !col.lightDirty {
-		return
+	if !ok || col.State != ColumnComplete {
+		return false
 	}
-	w.fillColumnLight(pos, col)
+	worked := false
+	if col.lightDirty {
+		w.fillColumnLight(pos, col)
+		worked = true
+	}
+	if !col.lightSpread && w.spreadColumnLight(pos, col) {
+		worked = true
+	}
+	return worked
 }
 
 // MarkLightDirty queues a light re-fill for the next EnsureColumnLight call.
@@ -26,32 +40,49 @@ func (w *World) MarkLightDirty(pos world.ChunkPos) {
 		return
 	}
 	col.lightDirty = true
+	col.lightSpread = false
 }
 
-// fillColumnLight runs LightArea Fill+Spread over a 3×3 neighbourhood centred
-// on pos and stores sky/block light on the centre column's sub-chunks.
-//
-// ponytail: missing/incomplete neighbours become empty air placeholders for
-// LightArea's square requirement; Spread is skipped unless the full 3×3 is
-// ColumnComplete (otherwise open-sky placeholders leak light under platforms).
-// Upgrade: keep a dirty ring and re-Spread when neighbours complete.
+// fillColumnLight runs the dragonfly Fill stage over the single chunk at pos:
+// vertical sky light from the chunk's heightmap plus in-chunk block light.
 //
 // @param pos Centre column position.
 // @param col Centre column (must be ColumnComplete).
 func (w *World) fillColumnLight(pos world.ChunkPos, col *Column) {
-	r := col.Range()
+	restore := func() {}
+	if w.hashedIDs {
+		restore = remapChunksHashesToLocal([]*chunk.Chunk{col.Chunk})
+	}
+	chunk.LightArea([]*chunk.Chunk{col.Chunk}, int(pos[0]), int(pos[1])).Fill()
+	restore()
+
+	col.lightDirty = false
+	col.lightSpread = false
+	col.Revision++
+}
+
+// spreadColumnLight runs the dragonfly Spread stage over the 3×3 neighbourhood
+// centred on pos, once every neighbour is a real, complete, already-filled
+// column. Spread only pushes light from brighter cells into darker ones, so
+// running it never darkens the centre.
+//
+// ponytail: neighbours whose light Spread rewrites in place do not get a
+// Revision bump — that re-sent up to 8 columns per spread and blew
+// ColumnBudget. They pick up edge light when they fill/spread themselves.
+//
+// @param pos Centre column position.
+// @param col Centre column (must be ColumnComplete).
+// @returns true when the spread ran.
+func (w *World) spreadColumnLight(pos world.ChunkPos, col *Column) bool {
 	chunks := make([]*chunk.Chunk, 9)
-	var live [9]*Column
 	for dz := 0; dz < 3; dz++ {
 		for dx := 0; dx < 3; dx++ {
 			p := world.ChunkPos{pos[0] - 1 + int32(dx), pos[1] - 1 + int32(dz)}
-			idx := dx + dz*3
-			if n, ok := w.Chunk(p); ok && n.Chunk != nil {
-				chunks[idx] = n.Chunk
-				live[idx] = n
-				continue
+			n, ok := w.Chunk(p)
+			if !ok || n.State != ColumnComplete || n.lightDirty {
+				return false
 			}
-			chunks[idx] = chunk.New(blockRegistry, r)
+			chunks[dx+dz*3] = n.Chunk
 		}
 	}
 
@@ -59,39 +90,19 @@ func (w *World) fillColumnLight(pos world.ChunkPos, col *Column) {
 	if w.hashedIDs {
 		restore = remapChunksHashesToLocal(chunks)
 	}
-	area := chunk.LightArea(chunks, int(pos[0]-1), int(pos[1]-1))
-	area.Fill()
-	// Spread only when the full 3×3 is real+complete. Spreading into empty
-	// placeholder air chunks (full sky) leaks light under platforms at the
-	// loaded frontier — worse than skipping cross-chunk propagation.
-	spread := true
-	for i, n := range live {
-		if i == 4 {
-			continue
-		}
-		if n == nil || n.State != ColumnComplete {
-			spread = false
-			break
-		}
-	}
-	if spread {
-		area.Spread()
-	}
+	chunk.LightArea(chunks, int(pos[0]-1), int(pos[1]-1)).Spread()
 	restore()
 
-	col.lightDirty = false
+	col.lightSpread = true
 	col.Revision++
-	// ponytail: Spread may rewrite neighbour light slices in place, but we do
-	// not bump their Revision here — that re-sent up to 8 extra columns per
-	// edit and blew ColumnBudget. Neighbours pick up edge light the next time
-	// they themselves are filled (block edit / completion).
+	return true
 }
 
 // remapChunksHashesToLocal rewrites palette entries from network hashes to local
 // runtime IDs so LightBlock/FilteringBlock do not index out of range. Returns a
 // restore func that puts the hashes back.
 //
-// @param chunks The LightArea chunk slice (may include empty placeholders).
+// @param chunks The chunk slice to remap.
 // @returns a function that restores original palette values.
 func remapChunksHashesToLocal(chunks []*chunk.Chunk) func() {
 	type snap struct {

@@ -55,6 +55,19 @@ type Column struct {
 	// lightDirty means sky/block light needs a Fill before the next snapshot
 	// read. Set on completion and on block edits; cleared by EnsureColumnLight.
 	lightDirty bool
+
+	// lightSpread means the cross-chunk Spread stage ran for this column's 3×3
+	// neighbourhood. Cleared whenever lightDirty is set so edits re-spread.
+	lightSpread bool
+}
+
+// LightFilled reports whether this column's light has been filled since its
+// last block mutation. Encoders must omit light bytes for unfilled columns —
+// their light slices are stale zeros, which would render the column black.
+//
+// @returns true when sky/block light bytes are safe to read.
+func (c *Column) LightFilled() bool {
+	return !c.lightDirty
 }
 
 // SetBlock writes a block and bumps Revision so cache consumers notice.
@@ -69,6 +82,7 @@ func (c *Column) SetBlock(x uint8, y int16, z uint8, layer uint8, block uint32) 
 	c.Revision++
 	if c.State == ColumnComplete {
 		c.lightDirty = true
+		c.lightSpread = false
 	}
 }
 
@@ -108,6 +122,7 @@ func (c *Column) ExpectSubChunks(n int) {
 		c.pendingSubChunks = 0
 		c.State = ColumnComplete
 		c.lightDirty = true
+		c.lightSpread = false
 		return
 	}
 	c.pendingSubChunks = n
@@ -128,6 +143,7 @@ func (c *Column) ReceiveSubChunk() {
 	if c.pendingSubChunks == 0 {
 		c.State = ColumnComplete
 		c.lightDirty = true
+		c.lightSpread = false
 		return
 	}
 	c.State = ColumnPartial
