@@ -39,7 +39,7 @@ smooth lighting, direction lights, or fog.
 | Block → texture short-names | Merged `blocks.json` (`textures` preserved when a later pack only sets `sound`) |
 | Short-name → PNG path(s) | Merged `terrain_texture.json` (`texture_data`, all entry shapes) |
 | Animated tiles | Merged `flipbook_textures.json` (frame from **snapshot tick**) |
-| PNG pixels | Via `/asset` (with/without `textures/` prefix, with/without `.png`) |
+| Image pixels | Via `/asset` — `.png`, `_opaque.png`, then `.tga` (many foliage tiles) |
 | Neighbour / tick | `WorldState` from the SSE snapshot |
 | Layer-1 waterlogging | `TerrainSection.indices1` / `palette1` (duck-typed; store decode TBD) |
 | Biome tint | `biomeAt(x,z)` hook — **snapshot has no biome yet** |
@@ -49,7 +49,29 @@ smooth lighting, direction lights, or fog.
 every surface would resolve to `__missing__`. The Bedrock client merges
 per-block; we do the same via `/pack/<id>/…`.
 
+**Why namespace bare ids:** vanilla `blocks.json` keys are bare (`stone`); the
+snapshot always names blocks `minecraft:stone`. `parseBlocksJson` canonicalises
+bare keys to `minecraft:…` so lookups hit.
+
 No behaviour pack. Nothing vendored. Vanilla baseline arrives as pack id `vanilla`.
+
+## Real-pack diagnosis
+
+When a fixture is green but a live frame is all magenta, stop authoring more
+fixtures and run the packs you actually ship:
+
+```bash
+# Vanilla: Mojang/bedrock-samples @ viewer/baseline.tag →
+#   ../.cache/baseline/<tag>/resource_pack
+# Server (optional): pokebedrock-res development_resource_packs path
+node tools/diagnose-terrain-packs.mjs
+# or:
+# VANILLA_PACK=… SERVER_PACK=… node tools/diagnose-terrain-packs.mjs
+```
+
+Prints resolve/fallback counts, the first ten failure reasons, and writes
+`testdata/diagnose/atlas.png`. Exits 0 with `{ skipped: true }` when the
+vanilla pack is absent (CI without the cache).
 
 ## Fallback chain
 

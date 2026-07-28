@@ -1,5 +1,10 @@
 import { FALLBACK_TEXTURE } from "./atlas";
-import { expandTexturesField, parseBlocksJson, type BlocksJson } from "./parse";
+import {
+  canonicalizeBlockId,
+  expandTexturesField,
+  parseBlocksJson,
+  type BlocksJson,
+} from "./parse";
 import type {
   BlockDef,
   CubeModel,
@@ -107,6 +112,26 @@ export class BlockModelResolver {
   }
 
   /**
+   * Look up a block def, tolerating bare↔`minecraft:` key skew.
+   *
+   * @param name - Snapshot / network block name.
+   * @returns def or undefined.
+   */
+  defOf(name: string): BlockDef | undefined {
+    const direct = this.blocks[name];
+    if (direct) return direct;
+    const canon = canonicalizeBlockId(name);
+    if (canon !== name) {
+      const byCanon = this.blocks[canon];
+      if (byCanon) return byCanon;
+    }
+    if (name.startsWith("minecraft:")) {
+      return this.blocks[name.slice("minecraft:".length)];
+    }
+    return undefined;
+  }
+
+  /**
    * Classify a block for culling / passes.
    *
    * @param block - Block.
@@ -152,7 +177,7 @@ export class BlockModelResolver {
     const rc = this.renderClassOf(block);
     if (rc === "air" || rc === "liquid") return null;
 
-    const def = this.blocks[block.name];
+    const def = this.defOf(block.name);
     const faces = this.baseFaces(def, block);
     this.applyStateRemap(faces, block);
 

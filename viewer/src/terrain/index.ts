@@ -20,6 +20,7 @@ export {
 } from "./atlas";
 export {
   parseBlocksJson,
+  canonicalizeBlockId,
   parseTerrainTextureJson,
   parseFlipbookJson,
   pickVariationIndex,
@@ -51,6 +52,7 @@ export {
 } from "./mesher";
 export { createTerrainMaterial, wrapTileCoord } from "./material";
 export { tintAt, UNTINTED, BIOME_SNAPSHOT_NOTE } from "./biome";
+export { decodeTga, bitmapFromTga } from "./tga";
 export type {
   BiomeAt,
   CubeModel,

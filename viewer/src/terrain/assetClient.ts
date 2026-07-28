@@ -1,4 +1,5 @@
 import type { PackIndex, PackInfo } from "./types";
+import { bitmapFromTga } from "./tga";
 
 /**
  * HTTP client for the viewer's pack asset endpoints.
@@ -120,32 +121,42 @@ export class AssetClient {
 
   /**
    * Decode an image asset with `createImageBitmap` (never in Go).
-   * Tries `.png` then the bare path; also `textures/`-prefixed variants.
+   * Tries `.png`, `_opaque.png` (leaves), then `.tga` (grass_side / foliage).
    *
    * @param path - Pack-relative path, with or without `.png`.
    * @returns ImageBitmap or null when missing.
    */
   fetchImage(path: string): Promise<ImageBitmap | null> {
-    const bare = normalizePath(path).replace(/\.png$/i, "");
+    const bare = normalizePath(path)
+      .replace(/\.png$/i, "")
+      .replace(/\.tga$/i, "");
     const key = bare;
     let p = this.images.get(key);
     if (!p) {
       p = (async () => {
-        const candidates = new Set<string>([
-          `${bare}.png`,
+        const roots = new Set<string>([
           bare,
-          bare.startsWith("textures/")
-            ? `${bare.slice("textures/".length)}.png`
-            : `textures/${bare}.png`,
           bare.startsWith("textures/")
             ? bare.slice("textures/".length)
             : `textures/${bare}`,
         ]);
-        for (const candidate of candidates) {
-          const buf = await this.fetchBytes(candidate);
-          if (!buf) continue;
-          const blob = new Blob([buf], { type: "image/png" });
-          return createImageBitmap(blob);
+        for (const root of roots) {
+          for (const suffix of [".png", "_opaque.png"] as const) {
+            const buf = await this.fetchBytes(`${root}${suffix}`);
+            if (!buf) continue;
+            try {
+              return await createImageBitmap(
+                new Blob([buf], { type: "image/png" }),
+              );
+            } catch {
+              /* try next */
+            }
+          }
+          const tga = await this.fetchBytes(`${root}.tga`);
+          if (tga) {
+            const bmp = await bitmapFromTga(tga);
+            if (bmp) return bmp;
+          }
         }
         return null;
       })();

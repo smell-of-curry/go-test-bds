@@ -8,9 +8,12 @@ import {
   facingToFrontFace,
   greedyMerge,
   hashPos,
+  canonicalizeBlockId,
+  decodeTga,
   mergeBlockDef,
   mergeBlocksLayers,
   normalizeTexPath,
+  parseBlocksJson,
   parseTerrainTextureJson,
   pickVariationIndex,
   liquidFlowYaw,
@@ -97,6 +100,57 @@ test.describe("terrain parse / resolve (node)", () => {
     expect(liquidFlowYaw(flowing)).toBe(180);
     expect(liquidHeight(0)).toBeCloseTo(14 / 16);
     expect(liquidHeight(7)).toBeLessThan(liquidHeight(0));
+  });
+
+  test("decodes uncompressed 32-bit TGA tiles Bedrock ships without PNG", () => {
+    // 2×2 BGRA, bottom-up, image type 2.
+    const pixels = new Uint8Array([
+      // y=0 (bottom): R, G
+      0, 0, 255, 255, 0, 255, 0, 255,
+      // y=1 (top): B, W
+      255, 0, 0, 255, 255, 255, 255, 255,
+    ]);
+    const header = new Uint8Array(18);
+    header[2] = 2;
+    header[12] = 2;
+    header[14] = 2;
+    header[16] = 32;
+    header[17] = 8;
+    const buf = new Uint8Array(18 + pixels.length);
+    buf.set(header, 0);
+    buf.set(pixels, 18);
+    const decoded = decodeTga(buf.buffer)!;
+    expect(decoded.width).toBe(2);
+    expect(decoded.height).toBe(2);
+    // Bottom-up TGA: file's last row is image top → blue
+    expect([...decoded.rgba.slice(0, 4)]).toEqual([0, 0, 255, 255]);
+    // File's first row is image bottom → red
+    expect([...decoded.rgba.slice(2 * 2 * 4 - 8, 2 * 2 * 4 - 4)]).toEqual([
+      255, 0, 0, 255,
+    ]);
+  });
+
+  test("vanilla bare blocks.json keys resolve as minecraft: ids", () => {
+    expect(canonicalizeBlockId("stone")).toBe("minecraft:stone");
+    expect(canonicalizeBlockId("pokeb:apricorn_planks")).toBe(
+      "pokeb:apricorn_planks",
+    );
+    const blocks = parseBlocksJson({
+      stone: { textures: "flattened_stone" },
+      "pokeb:x": { textures: "x" },
+    });
+    expect(blocks["minecraft:stone"]?.textures).toBe("flattened_stone");
+    expect(blocks.stone).toBeUndefined();
+    const resolver = BlockModelResolver.fromJson({
+      stone: { textures: "flattened_stone" },
+    });
+    const cube = resolver.resolveCube(
+      { name: "minecraft:stone", states: {}, rid: 1 },
+      0,
+      0,
+      0,
+    )!;
+    expect(cube.faces.up.texture).toBe("flattened_stone");
   });
 
   test("merge keeps vanilla textures when overlay only sets sound", () => {

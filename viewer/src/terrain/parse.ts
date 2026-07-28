@@ -11,17 +11,32 @@ import type {
 export type BlocksJson = Record<string, BlockDef>;
 
 /**
- * Parse blocks.json. Strips the `format_version` key.
+ * Canonicalise a blocks.json key the way the runtime names blocks.
+ *
+ * Mojang's vanilla `blocks.json` uses bare ids (`stone`); the network /
+ * snapshot always sends `minecraft:stone`. Keys that already contain `:`
+ * (e.g. `pokeb:apricorn_planks`) are left alone.
+ *
+ * @param id - Raw key from blocks.json.
+ * @returns namespaced block identifier.
+ */
+export function canonicalizeBlockId(id: string): string {
+  if (!id || id.includes(":")) return id;
+  return `minecraft:${id}`;
+}
+
+/**
+ * Parse blocks.json. Strips the `format_version` key and namespaces bare ids.
  *
  * @param raw - JSON root object.
- * @returns block id → definition.
+ * @returns block id → definition (keys always namespaced when bare in source).
  */
 export function parseBlocksJson(raw: unknown): BlocksJson {
   if (!raw || typeof raw !== "object") return {};
   const out: BlocksJson = {};
   for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
     if (k === "format_version") continue;
-    if (v && typeof v === "object") out[k] = v as BlockDef;
+    if (v && typeof v === "object") out[canonicalizeBlockId(k)] = v as BlockDef;
   }
   return out;
 }

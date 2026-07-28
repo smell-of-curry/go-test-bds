@@ -6,3 +6,5 @@ playwright-report/
 blob-report/
 .vite/
 *.tsbuildinfo
+# Real-pack diagnose dumps Mojang/server atlas pixels — never commit.
+testdata/diagnose/
