@@ -29,7 +29,8 @@ export class AssetClient {
   async getPacks(): Promise<PackInfo[]> {
     const res = await fetch(`${this.baseUrl}/packs`);
     if (!res.ok) throw new Error(`GET /packs → ${res.status}`);
-    return (await res.json()) as PackInfo[];
+    const packs = (await res.json()) as PackInfo[];
+    return packs.slice().sort((a, b) => a.priority - b.priority);
   }
 
   /**
@@ -119,7 +120,7 @@ export class AssetClient {
 
   /**
    * Decode an image asset with `createImageBitmap` (never in Go).
-   * Tries `.png` then the bare path.
+   * Tries `.png` then the bare path; also `textures/`-prefixed variants.
    *
    * @param path - Pack-relative path, with or without `.png`.
    * @returns ImageBitmap or null when missing.
@@ -130,7 +131,17 @@ export class AssetClient {
     let p = this.images.get(key);
     if (!p) {
       p = (async () => {
-        for (const candidate of [`${bare}.png`, bare]) {
+        const candidates = new Set<string>([
+          `${bare}.png`,
+          bare,
+          bare.startsWith("textures/")
+            ? `${bare.slice("textures/".length)}.png`
+            : `textures/${bare}.png`,
+          bare.startsWith("textures/")
+            ? bare.slice("textures/".length)
+            : `textures/${bare}`,
+        ]);
+        for (const candidate of candidates) {
           const buf = await this.fetchBytes(candidate);
           if (!buf) continue;
           const blob = new Blob([buf], { type: "image/png" });
@@ -141,6 +152,51 @@ export class AssetClient {
       this.images.set(key, p);
     }
     return p;
+  }
+
+  /**
+   * Fetch JSON from a specific pack (`GET /pack/<id>/...`), not the winner.
+   * Needed so `blocks.json` / `terrain_texture.json` can be merged across the
+   * stack — a server pack that only lists sound must not erase vanilla textures.
+   *
+   * @param packId - Pack id from GET /packs.
+   * @param path - Pack-relative path.
+   * @returns parsed JSON or null on 404.
+   */
+  async fetchPackJson<T = unknown>(
+    packId: string,
+    path: string,
+  ): Promise<T | null> {
+    const key = normalizePath(path);
+    const res = await fetch(
+      `${this.baseUrl}/pack/${encodeURIComponent(packId)}/${key
+        .split("/")
+        .map(encodeURIComponent)
+        .join("/")}`,
+    );
+    if (res.status === 404) return null;
+    if (!res.ok) {
+      throw new Error(`GET /pack/${packId}/${key} → ${res.status}`);
+    }
+    const text = await res.text();
+    return parsePackJson<T>(text, `${packId}:${key}`);
+  }
+
+  /**
+   * Fetch a JSON file from every pack in stack order (lowest priority first).
+   * Missing packs are skipped.
+   *
+   * @param path - Pack-relative path.
+   * @returns non-null parsed roots in stack order.
+   */
+  async fetchJsonLayers(path: string): Promise<unknown[]> {
+    const packs = await this.getPacks();
+    const layers: unknown[] = [];
+    for (const pack of packs) {
+      const j = await this.fetchPackJson(pack.id, path);
+      if (j != null) layers.push(j);
+    }
+    return layers;
   }
 
   /** Drop caches (tests / pack reload). */

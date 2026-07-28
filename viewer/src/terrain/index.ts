@@ -2,10 +2,15 @@ import type { Mesher } from "../scene";
 import { AssetClient } from "./assetClient";
 import { buildTerrainAtlas, type TerrainAtlas } from "./atlas";
 import type { BiomeAt, CustomGeometryHook } from "./types";
+import {
+  mergeBlocksLayers,
+  mergeFlipbookLayers,
+  mergeTerrainLayers,
+} from "./merge";
 import { BlockModelResolver } from "./resolve";
 import { TexturedMesher } from "./mesher";
 
-export { AssetClient } from "./assetClient";
+export { AssetClient, parsePackJson, normalizePath } from "./assetClient";
 export {
   TerrainAtlas,
   buildTerrainAtlas,
@@ -21,7 +26,15 @@ export {
   flipbookFrameAt,
   expandTexturesField,
   hashPos,
+  normalizeTexPath,
+  stripExt,
 } from "./parse";
+export {
+  mergeBlockDef,
+  mergeBlocksLayers,
+  mergeTerrainLayers,
+  mergeFlipbookLayers,
+} from "./merge";
 export {
   BlockModelResolver,
   isAir,
@@ -79,8 +92,9 @@ export interface TexturedMesherBundle {
  * const scene = new Scene(camera, asMesher);
  * ```
  *
- * Loads `/packs/index`, `blocks.json`, `terrain_texture.json`,
- * `flipbook_textures.json`, and referenced PNGs via `/asset/...`.
+ * Merges `blocks.json` / `terrain_texture.json` / flipbooks across the pack
+ * stack via `GET /pack/<id>/...` (not the winner-only `/asset` path). A server
+ * pack that only lists `sound` must not erase vanilla `textures`.
  *
  * @param opts - Base URL, biome hook, extras.
  * @returns mesher + supporting objects.
@@ -97,17 +111,29 @@ export async function createTexturedMesher(
   const client = new AssetClient(baseUrl);
   await client.getIndex();
 
-  const blocksJson = await client.fetchJson("blocks.json");
-  if (!blocksJson) {
-    throw new Error("blocks.json missing from pack stack");
+  const blockLayers = await client.fetchJsonLayers("blocks.json");
+  if (blockLayers.length === 0) {
+    throw new Error("blocks.json missing from every pack in the stack");
   }
-  const resolver = BlockModelResolver.fromJson(blocksJson);
+  const blocksMerged = mergeBlocksLayers(blockLayers);
+  const resolver = new BlockModelResolver(blocksMerged);
+
+  const terrainMerged = mergeTerrainLayers(
+    await client.fetchJsonLayers("textures/terrain_texture.json"),
+  );
+  const flipbooksMerged = mergeFlipbookLayers(
+    await client.fetchJsonLayers("textures/flipbook_textures.json"),
+  );
+
   const names = resolver.allTextureNames();
   if (opts.extraTextures) {
     for (const n of opts.extraTextures) names.add(n);
   }
 
-  const atlas = await buildTerrainAtlas(client, names);
+  const atlas = await buildTerrainAtlas(client, names, {
+    terrain: terrainMerged,
+    flipbooks: flipbooksMerged,
+  });
   const mesher = new TexturedMesher(atlas, resolver, {
     biomeAt: opts.biomeAt ?? null,
     customGeometry: opts.customGeometry ?? null,

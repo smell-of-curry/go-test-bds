@@ -82,14 +82,32 @@ export function parseTerrainTextureJson(
 function parseTerrainEntry(entry: unknown): TerrainTextureEntry {
   if (!entry || typeof entry !== "object") return { paths: [] };
   const textures = (entry as { textures?: unknown }).textures;
+  // Bare string.
   if (typeof textures === "string") {
-    return { paths: [{ path: stripExt(textures), weight: 1 }] };
+    return { paths: [{ path: normalizeTexPath(textures), weight: 1 }] };
   }
+  // Object with path (and optional overlay_color / tint_color — ignored here).
+  if (textures && typeof textures === "object" && !Array.isArray(textures)) {
+    const o = textures as { path?: string; textures?: string; weight?: number };
+    const p = o.path ?? o.textures;
+    if (typeof p === "string") {
+      return {
+        paths: [
+          {
+            path: normalizeTexPath(p),
+            weight: typeof o.weight === "number" ? o.weight : 1,
+          },
+        ],
+      };
+    }
+    return { paths: [] };
+  }
+  // Array of strings and/or { path, weight?, overlay_color?, tint_color? }.
   if (Array.isArray(textures)) {
     const paths: TerrainVariation[] = [];
     for (const item of textures) {
       if (typeof item === "string") {
-        paths.push({ path: stripExt(item), weight: 1 });
+        paths.push({ path: normalizeTexPath(item), weight: 1 });
         continue;
       }
       if (item && typeof item === "object") {
@@ -97,7 +115,7 @@ function parseTerrainEntry(entry: unknown): TerrainTextureEntry {
         const p = o.path ?? o.textures;
         if (typeof p === "string") {
           paths.push({
-            path: stripExt(p),
+            path: normalizeTexPath(p),
             weight: typeof o.weight === "number" ? o.weight : 1,
           });
         }
@@ -201,6 +219,24 @@ export function flipbookFrameAt(
  */
 export function stripExt(path: string): string {
   return path.replace(/\\/g, "/").replace(/\.png$/i, "");
+}
+
+/**
+ * Normalise a terrain texture path from terrain_texture.json.
+ * Accepts with/without `textures/` prefix and with/without `.png`.
+ *
+ * @param path - Raw path from pack JSON.
+ * @returns pack-relative path without `.png`, with `textures/` when implied.
+ */
+export function normalizeTexPath(path: string): string {
+  let p = stripExt(path);
+  if (
+    !p.startsWith("textures/") &&
+    (p.startsWith("blocks/") || p.startsWith("items/"))
+  ) {
+    p = `textures/${p}`;
+  }
+  return p;
 }
 
 /**

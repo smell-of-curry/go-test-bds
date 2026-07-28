@@ -8,6 +8,10 @@ import {
   facingToFrontFace,
   greedyMerge,
   hashPos,
+  mergeBlockDef,
+  mergeBlocksLayers,
+  normalizeTexPath,
+  parseTerrainTextureJson,
   pickVariationIndex,
   liquidFlowYaw,
   liquidHeight,
@@ -17,6 +21,8 @@ import {
 import { BlockModelResolver } from "../src/terrain/resolve";
 import {
   buildFixturePack,
+  buildRealisticPackStack,
+  startMultiPackAssetServer,
   startTerrainAssetServer,
 } from "./terrainAssetServer";
 import type { Block } from "../src/protocol";
@@ -91,6 +97,49 @@ test.describe("terrain parse / resolve (node)", () => {
     expect(liquidFlowYaw(flowing)).toBe(180);
     expect(liquidHeight(0)).toBeCloseTo(14 / 16);
     expect(liquidHeight(7)).toBeLessThan(liquidHeight(0));
+  });
+
+  test("merge keeps vanilla textures when overlay only sets sound", () => {
+    const merged = mergeBlockDef({ textures: "stone" }, { sound: "stone" });
+    expect(merged.textures).toBe("stone");
+    expect(merged.sound).toBe("stone");
+
+    const layers = mergeBlocksLayers([
+      { "minecraft:stone": { textures: "stone" } },
+      { "minecraft:stone": { sound: "stone" } },
+    ]);
+    expect(layers["minecraft:stone"]?.textures).toBe("stone");
+  });
+
+  test("terrain_texture accepts all four real entry shapes + path variants", () => {
+    const map = parseTerrainTextureJson({
+      texture_data: {
+        bare: { textures: "textures/blocks/stone" },
+        arr_str: { textures: ["textures/blocks/a", "textures/blocks/b"] },
+        obj: {
+          textures: { path: "textures/blocks/dirt", overlay_color: "#fff" },
+        },
+        arr_obj: {
+          textures: [
+            { path: "blocks/grass_side", tint_color: "#ffffff", weight: 2 },
+          ],
+        },
+        with_png: { textures: "blocks/planks_oak.png" },
+      },
+    });
+    expect(map.bare?.paths[0]?.path).toBe("textures/blocks/stone");
+    expect(map.arr_str?.paths.map((p) => p.path)).toEqual([
+      "textures/blocks/a",
+      "textures/blocks/b",
+    ]);
+    expect(map.obj?.paths[0]?.path).toBe("textures/blocks/dirt");
+    expect(map.arr_obj?.paths[0]?.path).toBe("textures/blocks/grass_side");
+    expect(map.arr_obj?.paths[0]?.weight).toBe(2);
+    expect(map.with_png?.paths[0]?.path).toBe("textures/blocks/planks_oak");
+    expect(normalizeTexPath("blocks/stone.png")).toBe("textures/blocks/stone");
+    expect(normalizeTexPath("textures/blocks/stone")).toBe(
+      "textures/blocks/stone",
+    );
   });
 
   test("greedy merge reduces coplanar same-key quads", () => {
@@ -556,6 +605,188 @@ test.describe("terrain atlas + mesher (browser)", () => {
       }, assets.url);
 
       expect(ok).toBe(true);
+    } finally {
+      await page.close().catch(() => undefined);
+      await devServer?.close();
+      await assets.close();
+    }
+  });
+
+  test("realistic pack stack resolves own texture, not magenta fallback", async ({
+    page,
+  }) => {
+    // Would have caught the live regression: server blocks.json sound-only
+    // entries wiped vanilla textures when /asset winner-takes-all was used.
+    test.setTimeout(120_000);
+    const assets = await startMultiPackAssetServer(buildRealisticPackStack());
+    let devServer: ViteDevServer | undefined;
+    try {
+      devServer = await createServer({
+        root: viewerRoot,
+        configFile: join(viewerRoot, "vite.config.ts"),
+        server: { host: "127.0.0.1", port: 5182, strictPort: false },
+      });
+      await devServer.listen();
+      const base = devServer.resolvedUrls?.local[0];
+      if (!base) throw new Error("no vite url");
+      await page.goto(base, { waitUntil: "domcontentloaded" });
+
+      const result = await page.evaluate(async (assetBase) => {
+        const THREE = await import("/node_modules/three/build/three.module.js");
+        const { createTexturedMesher, FALLBACK_TEXTURE } =
+          await import("/src/terrain/index.ts");
+        const { sectionIndex, columnKey } = await import("/src/protocol.ts");
+
+        const AIR = { name: "minecraft:air", states: {}, rid: 0 };
+        const STONE = { name: "minecraft:stone", states: {}, rid: 1 };
+        const PLANKS = {
+          name: "pokeb:apricorn_planks",
+          states: {},
+          rid: 2,
+        };
+
+        const indices = new Uint16Array(4096);
+        indices[sectionIndex(0, 0, 0)] = 1;
+        indices[sectionIndex(2, 0, 0)] = 2;
+        const section = {
+          y: 0,
+          indices,
+          palette: [AIR, STONE, PLANKS],
+        };
+        const col = {
+          x: 0,
+          z: 0,
+          state: "complete" as const,
+          minY: 0,
+          maxY: 15,
+          sections: new Map([[0, section]]),
+        };
+        const state = {
+          schemaOk: true,
+          schemaError: null,
+          hello: null,
+          tick: 0,
+          bot: "t",
+          world: null,
+          actor: null,
+          columns: new Map([[columnKey(0, 0), col]]),
+          entities: new Map(),
+          ui: null,
+          mark: null,
+          pendingCapture: null,
+          resyncCount: 0,
+          droppedCount: 0,
+          framesReceived: 1,
+          revision: 1,
+          dirtySections: new Set(),
+          dirtyColumns: new Set(),
+          dirtyEntities: new Set(),
+          removedEntities: new Set(),
+          dirtyBlocks: [],
+          fullReset: false,
+        };
+
+        const bundle = await createTexturedMesher({ baseUrl: assetBase });
+        // Merge must keep stone short-name from vanilla despite server sound-only.
+        if (!bundle.atlas.has("stone")) {
+          throw new Error("stone missing from atlas after pack merge");
+        }
+        if (!bundle.atlas.has("apricorn_planks")) {
+          throw new Error("server-pack short-name missing from atlas");
+        }
+        if (
+          bundle.atlas.uvFor("stone", 0, 0, 0, 0).u0 ===
+            bundle.atlas.uvRect(FALLBACK_TEXTURE, 0).u0 &&
+          bundle.atlas.uvFor("stone", 0, 0, 0, 0).v0 ===
+            bundle.atlas.uvRect(FALLBACK_TEXTURE, 0).v0
+        ) {
+          throw new Error("stone UV landed on fallback rect");
+        }
+
+        const { meshes } = bundle.mesher.meshSection(
+          section as never,
+          col as never,
+          state as never,
+        );
+
+        const W = 128;
+        const H = 128;
+        const renderer = new THREE.WebGLRenderer({
+          antialias: false,
+          preserveDrawingBuffer: true,
+        });
+        renderer.setSize(W, H, false);
+        renderer.setPixelRatio(1);
+        renderer.outputColorSpace = THREE.SRGBColorSpace;
+        renderer.toneMapping = THREE.NoToneMapping;
+        renderer.setClearColor(0x101010, 1);
+        document.body.appendChild(renderer.domElement);
+
+        const scene = new THREE.Scene();
+        for (const m of meshes) scene.add(m);
+
+        const pick = (px: number, py: number) => {
+          const buf = new Uint8Array(4);
+          const gl = renderer.getContext() as WebGLRenderingContext;
+          gl.readPixels(px, py, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, buf);
+          return [buf[0]!, buf[1]!, buf[2]!] as const;
+        };
+        const isMagentaOrBlack = (c: readonly [number, number, number]) =>
+          (c[0] > 200 && c[1] < 50 && c[2] > 200) ||
+          (c[0] < 40 && c[1] < 40 && c[2] < 40);
+        const isLime = (c: readonly [number, number, number]) =>
+          c[1] > 160 && c[0] < 100 && c[2] < 100;
+        const isYellow = (c: readonly [number, number, number]) =>
+          c[0] > 200 && c[1] > 160 && c[2] < 80;
+
+        // Top-down onto stone at (0.5, 0, 0.5).
+        const camStone = new THREE.OrthographicCamera(
+          -0.6,
+          0.6,
+          0.6,
+          -0.6,
+          0.1,
+          50,
+        );
+        camStone.up.set(0, 0, -1);
+        camStone.position.set(0.5, 20, 0.5);
+        camStone.lookAt(0.5, 0, 0.5);
+        camStone.updateMatrixWorld(true);
+        renderer.render(scene, camStone);
+        const stonePx = pick(W >> 1, H >> 1);
+
+        // Top-down onto apricorn planks at (2.5, 0, 0.5).
+        const camPlanks = new THREE.OrthographicCamera(
+          -0.6,
+          0.6,
+          0.6,
+          -0.6,
+          0.1,
+          50,
+        );
+        camPlanks.up.set(0, 0, -1);
+        camPlanks.position.set(2.5, 20, 0.5);
+        camPlanks.lookAt(2.5, 0, 0.5);
+        camPlanks.updateMatrixWorld(true);
+        renderer.render(scene, camPlanks);
+        const planksPx = pick(W >> 1, H >> 1);
+
+        bundle.mesher.dispose();
+        renderer.dispose();
+        renderer.domElement.remove();
+
+        return {
+          stonePx: [...stonePx],
+          planksPx: [...planksPx],
+          stoneNotFallback: !isMagentaOrBlack(stonePx) && isLime(stonePx),
+          planksNotFallback: !isMagentaOrBlack(planksPx) && isYellow(planksPx),
+        };
+      }, assets.url);
+
+      expect(result.stoneNotFallback, `stone px=${result.stonePx}`).toBe(true);
+      expect(result.planksNotFallback, `planks px=${result.planksPx}`).toBe(
+        true,
+      );
     } finally {
       await page.close().catch(() => undefined);
       await devServer?.close();

@@ -33,15 +33,21 @@ smooth lighting, direction lights, or fog.
 
 | Need | Source |
 | --- | --- |
-| Pack stack / winning paths | `GET /packs`, `GET /packs/index` |
-| Bytes | `GET /asset/<path>` |
-| Block → texture short-names | `blocks.json` (`textures`, `carried_textures`, per-face maps) |
-| Short-name → PNG path(s) | `textures/terrain_texture.json` (`texture_data`, weighted `variations`) |
-| Animated tiles | `textures/flipbook_textures.json` (frame from **snapshot tick**, not wall clock) |
-| PNG pixels | `textures/blocks/*.png` (via `/asset`) |
+| Pack stack | `GET /packs` (low → high priority) |
+| Winning PNG bytes | `GET /asset/<path>` |
+| Merged JSON | `GET /pack/<id>/blocks.json` etc. from **every** pack, then merge |
+| Block → texture short-names | Merged `blocks.json` (`textures` preserved when a later pack only sets `sound`) |
+| Short-name → PNG path(s) | Merged `terrain_texture.json` (`texture_data`, all entry shapes) |
+| Animated tiles | Merged `flipbook_textures.json` (frame from **snapshot tick**) |
+| PNG pixels | Via `/asset` (with/without `textures/` prefix, with/without `.png`) |
 | Neighbour / tick | `WorldState` from the SSE snapshot |
 | Layer-1 waterlogging | `TerrainSection.indices1` / `palette1` (duck-typed; store decode TBD) |
 | Biome tint | `biomeAt(x,z)` hook — **snapshot has no biome yet** |
+
+**Why merge:** `/asset/blocks.json` is winner-takes-all. A server pack that ships a
+`blocks.json` with only `sound` would otherwise erase vanilla `textures` and
+every surface would resolve to `__missing__`. The Bedrock client merges
+per-block; we do the same via `/pack/<id>/…`.
 
 No behaviour pack. Nothing vendored. Vanilla baseline arrives as pack id `vanilla`.
 

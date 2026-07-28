@@ -237,22 +237,37 @@ export class TerrainAtlas {
   }
 }
 
+export interface BuildAtlasOptions {
+  /** Pre-merged terrain_texture data (short-name → entry). */
+  terrain?: Record<string, TerrainTextureEntry>;
+  /** Pre-merged flipbook entries. */
+  flipbooks?: FlipbookEntry[];
+}
+
 /**
  * Load terrain_texture + flipbooks + images for the given short-names; pack atlas.
  * Missing paths are skipped (queries fall through to the magenta fallback tile).
  *
  * @param client - Asset client.
  * @param shortNames - Terrain short-names referenced by blocks.
+ * @param opts - Optional pre-merged pack-stack data (avoids winner-only /asset).
  * @returns built atlas.
  */
 export async function buildTerrainAtlas(
   client: AssetClient,
   shortNames: Iterable<string>,
+  opts: BuildAtlasOptions = {},
 ): Promise<TerrainAtlas> {
-  const terrainRaw = await client.fetchJson("textures/terrain_texture.json");
-  const terrain = parseTerrainTextureJson(terrainRaw);
-  const flipRaw = await client.fetchJson("textures/flipbook_textures.json");
-  const flipbooks = parseFlipbookJson(flipRaw ?? []);
+  const terrain =
+    opts.terrain ??
+    parseTerrainTextureJson(
+      await client.fetchJson("textures/terrain_texture.json"),
+    );
+  const flipbooks =
+    opts.flipbooks ??
+    parseFlipbookJson(
+      (await client.fetchJson("textures/flipbook_textures.json")) ?? [],
+    );
 
   const needed = new Set<string>();
   for (const n of shortNames) {
