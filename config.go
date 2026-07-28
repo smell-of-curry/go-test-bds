@@ -38,8 +38,11 @@ type Config struct {
 		Address       string
 		Radius        int
 		SectionRadius int
-		ArtifactDir   string
-		AppDir        string
+		// ColumnBudget caps columns per stream frame; leftover columns arrive
+		// on later deltas as columnsAdded. Default 4 (~few hundred KB/frame).
+		ColumnBudget int
+		ArtifactDir  string
+		AppDir       string
 		// CacheDir holds the gitignored pack/baseline cache. Empty defaults to
 		// <ArtifactDir>/.cache so artefacts and packs share one root.
 		CacheDir string
@@ -67,6 +70,7 @@ func DefaultConfig() Config {
 	c.Viewer.Address = "127.0.0.1:24680"
 	c.Viewer.Radius = 4
 	c.Viewer.SectionRadius = 4
+	c.Viewer.ColumnBudget = 4
 	c.Viewer.ArtifactDir = "artifacts"
 	c.Viewer.AppDir = ""
 	c.Viewer.CacheDir = ""
@@ -114,6 +118,9 @@ func ReadConfig() (Config, error) {
 	}
 	if c.Viewer.SectionRadius <= 0 {
 		c.Viewer.SectionRadius = def.Viewer.SectionRadius
+	}
+	if c.Viewer.ColumnBudget <= 0 {
+		c.Viewer.ColumnBudget = def.Viewer.ColumnBudget
 	}
 	if c.Viewer.ArtifactDir == "" {
 		c.Viewer.ArtifactDir = def.Viewer.ArtifactDir
@@ -182,6 +189,11 @@ func applyEnv(c *Config) {
 			c.Viewer.SectionRadius = n
 		}
 	}
+	if v := os.Getenv("GOTESTBDS_VIEWER_COLUMN_BUDGET"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			c.Viewer.ColumnBudget = n
+		}
+	}
 	if v := os.Getenv("GOTESTBDS_VIEWER_ARTIFACTS"); v != "" {
 		c.Viewer.ArtifactDir = v
 	}
@@ -232,6 +244,7 @@ func applyFlags(c *Config) error {
 	viewerAddress := set.String("viewer-address", c.Viewer.Address, "host:port for the viewer HTTP server")
 	viewerRadius := set.Int("viewer-radius", c.Viewer.Radius, "column radius carried by the viewer stream")
 	viewerSectionRadius := set.Int("viewer-section-radius", c.Viewer.SectionRadius, "vertical section window (±N) around the actor")
+	viewerColumnBudget := set.Int("viewer-column-budget", c.Viewer.ColumnBudget, "max columns per viewer stream frame")
 	viewerArtifacts := set.String("viewer-artifacts", c.Viewer.ArtifactDir, "directory for viewer artefacts")
 	viewerApp := set.String("viewer-app", c.Viewer.AppDir, "optional built viewer app directory to serve at /")
 	viewerCache := set.String("viewer-cache", c.Viewer.CacheDir, "gitignored cache for vanilla baseline and server packs")
@@ -258,6 +271,7 @@ func applyFlags(c *Config) error {
 	c.Viewer.Address = *viewerAddress
 	c.Viewer.Radius = *viewerRadius
 	c.Viewer.SectionRadius = *viewerSectionRadius
+	c.Viewer.ColumnBudget = *viewerColumnBudget
 	c.Viewer.ArtifactDir = *viewerArtifacts
 	c.Viewer.AppDir = *viewerApp
 	c.Viewer.CacheDir = *viewerCache

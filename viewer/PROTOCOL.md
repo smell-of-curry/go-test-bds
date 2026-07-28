@@ -168,7 +168,10 @@ First-person stays locked to `eyePos`/`rot`. Orbit is the free inspection camera
 
 ### `keyframe`
 
-Everything the stream knows, in one frame.
+World metadata, actor, entities, UI, and registries, plus a **budgeted** subset
+of columns. A full radius (tens of columns, hundreds of sections) is several
+megabytes; the stream therefore paces columns the way a real client streams
+chunks — first batch on the keyframe, the rest on later `delta.columnsAdded`.
 
 ```json
 {
@@ -184,11 +187,25 @@ Everything the stream knows, in one frame.
   },
   "actor": { "...": "see Actor" },
   "columns": [ { "...": "see Column" } ],
+  "columnsPending": 77,
   "entities": [ { "...": "see Entity" } ],
   "ui": { "...": "see UI" },
   "registries": { "...": "see Registries" }
 }
 ```
+
+- `columns` holds at most `ColumnBudget` columns (config; default 4), nearest the
+  actor first. It may be empty when the radius holds nothing yet.
+- `columnsPending` is how many columns in the stream radius have **not** been
+  delivered to this subscriber yet. Absent or `0` means the world is fully
+  delivered; a positive value means more columns follow on `delta.columnsAdded`.
+- A consumer applies the keyframe as a wholesale replace (drop prior columns /
+  entities), then merges later `columnsAdded` the same way it would for any
+  delta. Partial keyframe + `columnsAdded` is the normal catch-up path, not an
+  error.
+- Every connection still starts with exactly one `keyframe` before any `delta`.
+  A mid-run attach or a resync re-queues columns from scratch rather than
+  blasting the full radius in one frame.
 
 `dimensionName` is one of `overworld`, `nether`, `end`, or `custom:<id>` for a
 script-registered dimension the bot only knows by number.
@@ -209,6 +226,7 @@ means "unchanged", never "empty".
   "columnsAdded": [ { "...": "see Column" } ],
   "columnsRemoved": [ [0, 0], [0, 1] ],
   "columnsState": [ { "x": 0, "z": 1, "state": "complete" } ],
+  "columnsPending": 60,
   "entitiesAdded": [ { "...": "see Entity" } ],
   "entitiesUpdated": [ { "...": "see Entity" } ],
   "entitiesRemoved": [ 41, 42 ],
@@ -218,7 +236,13 @@ means "unchanged", never "empty".
 ```
 
 - `world` present at all means the dimension changed: the client must drop every
-  column and entity it holds before applying the rest of the frame.
+  column and entity it holds before applying the rest of the frame. (Dimension
+  changes are delivered as a fresh paced keyframe, not a delta with `world`.)
+- `columnsAdded` is both "chunk entered the radius" and "next batch of a paced
+  keyframe catch-up". At most `ColumnBudget` columns per frame. An unchanged
+  column that the subscriber already has is never re-sent.
+- `columnsPending` mirrors the keyframe field: columns still outstanding for
+  this subscriber. Absent or `0` when caught up.
 - `entitiesUpdated` carries whole entity objects, not field patches. An entity
   is a few hundred bytes and a patch protocol is a second schema to maintain.
 - `actor` is sent every tick — it is small and always moving.
@@ -496,13 +520,20 @@ most recent 20 chat lines, oldest first.
 The tick loop is the bot's only goroutine for world state, so a slow client must
 never reach it.
 
-- Each subscriber has a buffered channel of encoded frames, capacity 8.
-- A send that would block is dropped, and the subscriber is flagged for resync.
-- A flagged subscriber's next frame is a fresh `keyframe`, not the delta it
-  missed.
-- Frames are encoded once per tick and shared across subscribers.
+- World state is projected once per tick on the bot goroutine. Each subscriber
+  then gets its own paced frame (column bookkeeping differs per connection).
+- Each subscriber keeps at most one pending world frame: a newer frame replaces
+  an unread one. Events (mark/capture) queue separately and never drop for world
+  backpressure.
+- Skipping a delta flags the subscriber for resync; its next world frame is a
+  fresh paced `keyframe`. A delta never replaces an unsent keyframe.
+- Per-subscriber `sentColumns` tracks what the SSE writer has actually
+  dequeued, so a mid-run attach or resync re-queues columns instead of
+  re-sending the full radius in one frame.
 - The stream carries columns within `radius` of the bot's chunk. Columns leaving
   the radius are emitted as `columnsRemoved`.
+- `ColumnBudget` (default 4) caps columns per frame so a single write stays in
+  the few-hundred-KB range even when the radius holds ~80 columns.
 
 ## Instructions
 
@@ -580,6 +611,8 @@ Following the existing precedence in `config.go` — defaults, then
 | `Viewer.Enabled` | `GOTESTBDS_VIEWER` | `-viewer` | `false` |
 | `Viewer.Address` | `GOTESTBDS_VIEWER_ADDRESS` | `-viewer-address` | `127.0.0.1:24680` |
 | `Viewer.Radius` | `GOTESTBDS_VIEWER_RADIUS` | `-viewer-radius` | `4` |
+| `Viewer.SectionRadius` | `GOTESTBDS_VIEWER_SECTION_RADIUS` | `-viewer-section-radius` | `4` |
+| `Viewer.ColumnBudget` | `GOTESTBDS_VIEWER_COLUMN_BUDGET` | `-viewer-column-budget` | `4` |
 | `Viewer.ArtifactDir` | `GOTESTBDS_VIEWER_ARTIFACTS` | `-viewer-artifacts` | `artifacts` |
 | `Viewer.AppDir` | `GOTESTBDS_VIEWER_APP` | `-viewer-app` | `""` |
 | `Viewer.CacheDir` | `GOTESTBDS_VIEWER_CACHE` | `-viewer-cache` | `<ArtifactDir>/.cache` |

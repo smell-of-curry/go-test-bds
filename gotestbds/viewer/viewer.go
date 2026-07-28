@@ -13,15 +13,27 @@ import (
 	"github.com/smell-of-curry/go-test-bds/gotestbds/assets"
 )
 
+// DefaultColumnBudget is how many columns one world frame may carry.
+//
+// Measured on a live spawn view (~81 columns, ~350 non-air sections): each
+// section is ~11 KB on the wire, so a full keyframe is several megabytes and
+// the SSE writer cannot flush even one frame at 20 Hz. Four columns of the
+// dense bench world (8 sections each) marshal to ~350 KB — a few hundred KB
+// per frame, not megabytes. Override via Options.ColumnBudget / config.
+const DefaultColumnBudget = 4
+
 // Options configures the viewer Hub.
 type Options struct {
 	Address       string // bind address
 	Radius        int    // column radius carried by the stream
 	SectionRadius int    // vertical section window around the actor (§Y ± N)
-	ArtifactDir   string // where artefacts are written
-	AppDir        string // built viewer app to serve at "/", optional
-	Assets        *assets.Manager
-	Logger        *slog.Logger
+	// ColumnBudget caps columns per keyframe/delta. Remaining columns ride
+	// subsequent deltas as columnsAdded. <=0 means DefaultColumnBudget.
+	ColumnBudget int
+	ArtifactDir  string // where artefacts are written
+	AppDir       string // built viewer app to serve at "/", optional
+	Assets       *assets.Manager
+	Logger       *slog.Logger
 }
 
 // Hub is the process-wide viewer server. All bots share one Hub; streams are
@@ -62,6 +74,9 @@ func New(opts Options) (*Hub, error) {
 	}
 	if opts.SectionRadius <= 0 {
 		opts.SectionRadius = 4
+	}
+	if opts.ColumnBudget <= 0 {
+		opts.ColumnBudget = DefaultColumnBudget
 	}
 	if opts.Logger == nil {
 		opts.Logger = slog.Default()
@@ -115,7 +130,7 @@ func (h *Hub) Register(botName string) *Stream {
 	if s, ok := h.streams[botName]; ok {
 		return s
 	}
-	s := newStream(h, botName, h.opts.Radius, h.opts.SectionRadius)
+	s := newStream(h, botName, h.opts.Radius, h.opts.SectionRadius, h.opts.ColumnBudget)
 	h.streams[botName] = s
 	h.meta[botName] = botMeta{}
 	return s

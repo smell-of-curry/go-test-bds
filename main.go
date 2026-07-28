@@ -86,6 +86,7 @@ func main() {
 			Address:       config.Viewer.Address,
 			Radius:        config.Viewer.Radius,
 			SectionRadius: config.Viewer.SectionRadius,
+			ColumnBudget:  config.Viewer.ColumnBudget,
 			ArtifactDir:   config.Viewer.ArtifactDir,
 			AppDir:        config.Viewer.AppDir,
 			Assets:        assetM,

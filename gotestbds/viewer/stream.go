@@ -2,6 +2,7 @@ package viewer
 
 import (
 	"encoding/json"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -26,9 +27,10 @@ const streamHealthWindow = 2 * time.Second
 // read World/Actor. Subscriber attach/detach and emitRaw are safe from any
 // goroutine.
 type Stream struct {
-	hub  *Hub
-	name string
-	enc  *encoder
+	hub          *Hub
+	name         string
+	enc          *encoder
+	columnBudget int
 
 	mu   sync.Mutex
 	subs map[*subscriber]struct{}
@@ -47,6 +49,10 @@ type Stream struct {
 // wants the current world, not a backlog of stale ones it will render and throw
 // away. Skipping a delta invalidates the client's state, so any replacement
 // flags a resync and the next frame it receives is a fresh keyframe.
+//
+// Column delivery is paced per subscriber: sentColumns tracks what the writer
+// has actually dequeued, and a pending frame's columnsDelivered are treated as
+// already claimed so a superseded frame does not double-count.
 type subscriber struct {
 	mu      sync.Mutex
 	events  []encodedFrame
@@ -62,14 +68,24 @@ type subscriber struct {
 	lastReportedSent     int
 	lastReportedReplaced int
 
+	// sentColumns is what this subscriber has been given on the wire. Touched
+	// from the bot goroutine (Tick planning) and the HTTP writer (next).
+	sentColumns map[[2]int32]struct{}
+
 	// wake carries no data; it only tells the writer there is something to send.
 	wake chan struct{}
 }
 
-// encodedFrame is an already-marshaled SSE event shared across subscribers.
+// encodedFrame is an already-marshaled SSE event. World frames may carry
+// column bookkeeping applied when the writer dequeues them.
 type encodedFrame struct {
 	event string
 	data  []byte
+
+	// resetSent clears sentColumns before applying columnsDelivered (keyframe).
+	resetSent        bool
+	columnsDelivered [][2]int32
+	columnsRemoved   [][2]int32
 }
 
 // signal wakes the writer without blocking a producer.
@@ -104,7 +120,7 @@ func (sub *subscriber) pushEvent(f encodedFrame) int {
 // A delta never replaces a keyframe that has not been sent yet: the client needs
 // the keyframe to have anything to apply the delta to, and dropping it left a
 // subscriber that had fallen behind receiving deltas against a world it had
-// never been given. A keyframe replaces anything, because it is the whole world.
+// never been given. A keyframe replaces anything, because it is a fresh base.
 //
 // @param f The frame to deliver.
 // @param keyframe Whether f is a keyframe rather than a delta.
@@ -143,10 +159,63 @@ func (sub *subscriber) next() (encodedFrame, bool) {
 	if sub.pending != nil {
 		f := *sub.pending
 		sub.pending = nil
+		sub.applyColumnDelivery(f)
 		sub.sent++
 		return f, true
 	}
 	return encodedFrame{}, false
+}
+
+// applyColumnDelivery updates sentColumns for a dequeued world frame.
+// Caller holds sub.mu.
+func (sub *subscriber) applyColumnDelivery(f encodedFrame) {
+	if sub.sentColumns == nil {
+		sub.sentColumns = make(map[[2]int32]struct{})
+	}
+	if f.resetSent {
+		clear(sub.sentColumns)
+	}
+	for _, key := range f.columnsRemoved {
+		delete(sub.sentColumns, key)
+	}
+	for _, key := range f.columnsDelivered {
+		sub.sentColumns[key] = struct{}{}
+	}
+}
+
+// projectedSent is sentColumns plus any columns claimed by the pending frame.
+// Caller holds sub.mu.
+func (sub *subscriber) projectedSent() map[[2]int32]struct{} {
+	if sub.pending != nil && sub.pending.resetSent {
+		out := make(map[[2]int32]struct{}, len(sub.pending.columnsDelivered))
+		for _, key := range sub.pending.columnsDelivered {
+			out[key] = struct{}{}
+		}
+		return out
+	}
+	out := make(map[[2]int32]struct{}, len(sub.sentColumns)+8)
+	for key := range sub.sentColumns {
+		out[key] = struct{}{}
+	}
+	if sub.pending == nil {
+		return out
+	}
+	for _, key := range sub.pending.columnsRemoved {
+		delete(out, key)
+	}
+	for _, key := range sub.pending.columnsDelivered {
+		out[key] = struct{}{}
+	}
+	return out
+}
+
+// markResync flags the subscriber for a fresh keyframe and drops paced progress.
+func (sub *subscriber) markResync() {
+	sub.mu.Lock()
+	defer sub.mu.Unlock()
+	sub.resync = true
+	clear(sub.sentColumns)
+	sub.pending = nil
 }
 
 // stats reports delivery counters for the health log.
@@ -165,20 +234,24 @@ func (sub *subscriber) needsResync() bool {
 	return sub.resync
 }
 
-func newStream(h *Hub, name string, radius, sectionRadius int) *Stream {
+func newStream(h *Hub, name string, radius, sectionRadius, columnBudget int) *Stream {
+	if columnBudget <= 0 {
+		columnBudget = DefaultColumnBudget
+	}
 	return &Stream{
-		hub:  h,
-		name: name,
-		enc:  newEncoder(name, radius, sectionRadius),
-		subs: make(map[*subscriber]struct{}),
+		hub:          h,
+		name:         name,
+		enc:          newEncoder(name, radius, sectionRadius),
+		columnBudget: columnBudget,
+		subs:         make(map[*subscriber]struct{}),
 	}
 }
 
 // Tick encodes one frame from the live Actor and fans it out.
 //
-// Must run on the bot goroutine. Encoding happens once; every subscriber
-// receives the same byte slice. A subscriber whose buffer is full drops the
-// frame and is flagged so its next delivery is a fresh keyframe.
+// Must run on the bot goroutine. Projection happens once; each subscriber gets
+// a paced slice of columns based on what it has already been sent. A slow
+// subscriber never blocks this call.
 func (s *Stream) Tick(a *actor.Actor) {
 	s.reportHealth(time.Now())
 	s.lastTick.Store(a.CurrentTick())
@@ -186,14 +259,11 @@ func (s *Stream) Tick(a *actor.Actor) {
 	s.hub.setBotMeta(s.name, s.lastTick.Load(), s.lastDim.Load())
 
 	s.mu.Lock()
-	needKey := s.enc.prev == nil || s.enc.forceKey
-	for sub := range s.subs {
-		if sub.needsResync() {
-			needKey = true
-			break
-		}
-	}
 	nsubs := len(s.subs)
+	subs := make([]*subscriber, 0, nsubs)
+	for sub := range s.subs {
+		subs = append(subs, sub)
+	}
 	s.mu.Unlock()
 
 	if nsubs == 0 {
@@ -203,27 +273,183 @@ func (s *Stream) Tick(a *actor.Actor) {
 		return
 	}
 
-	if needKey {
-		s.enc.forceKey = true
-	}
-	event, data, err := s.enc.frame(a)
+	cur, err := s.enc.project(a)
 	if err != nil {
 		if s.hub.log != nil {
 			s.hub.log.Error("viewer encode", "bot", s.name, "error", err)
 		}
 		return
 	}
-	frame := encodedFrame{event: event, data: data}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for sub := range s.subs {
-		if sub.needsResync() && event != "keyframe" {
-			// Should not happen when needKey forced a keyframe; belt and braces.
+	globalKey := s.enc.prev == nil || s.enc.forceKey
+	var shared Delta
+	if !globalKey {
+		shared = s.enc.delta(cur)
+	}
+	s.enc.forceKey = false
+	s.enc.prev = cur
+
+	if globalKey {
+		for _, sub := range subs {
+			sub.markResync()
+		}
+	}
+
+	for _, sub := range subs {
+		frame, keyframe, err := s.frameFor(sub, cur, shared, a)
+		if err != nil {
+			if s.hub.log != nil {
+				s.hub.log.Error("viewer encode", "bot", s.name, "error", err)
+			}
 			continue
 		}
-		sub.pushWorld(frame, event == "keyframe")
+		sub.pushWorld(frame, keyframe)
 	}
+}
+
+// frameFor builds one subscriber's paced world frame from the shared projection.
+//
+// @param sub The subscriber to build for.
+// @param cur The projected view for this tick.
+// @param shared The encoder delta against the previous tick (empty on keyframe).
+// @param a The live actor (registries on keyframe).
+// @returns the encoded frame, whether it is a keyframe, and any marshal error.
+func (s *Stream) frameFor(sub *subscriber, cur *viewState, shared Delta, a *actor.Actor) (encodedFrame, bool, error) {
+	sub.mu.Lock()
+	needKey := sub.resync
+	budget := s.columnBudget
+	var claimed map[[2]int32]struct{}
+	if needKey {
+		// Resync ignores prior progress; resetSent clears sentColumns on dequeue.
+		claimed = map[[2]int32]struct{}{}
+	} else {
+		claimed = sub.projectedSent()
+	}
+	sub.mu.Unlock()
+
+	if needKey {
+		pendingKeys := pendingColumnKeys(cur, claimed)
+		batch := pendingKeys
+		if len(batch) > budget {
+			batch = batch[:budget]
+		}
+		cols := make([]Column, 0, len(batch))
+		for _, key := range batch {
+			cols = append(cols, cur.columns[key])
+		}
+		kf := Keyframe{
+			V:              SchemaVersion,
+			Type:           "keyframe",
+			Bot:            s.name,
+			Tick:           cur.tick,
+			World:          cur.world,
+			Actor:          cur.actor,
+			Columns:        cols,
+			Entities:       entitiesSlice(cur.entities),
+			UI:             mustDecodeUI(cur.uiBytes),
+			ColumnsPending: len(pendingKeys) - len(batch),
+			Registries:     encodeRegistries(a.WireRegistries()),
+		}
+		data, err := json.Marshal(kf)
+		if err != nil {
+			return encodedFrame{}, false, err
+		}
+		return encodedFrame{
+			event:            "keyframe",
+			data:             data,
+			resetSent:        true,
+			columnsDelivered: append([][2]int32(nil), batch...),
+		}, true, nil
+	}
+
+	var removed [][2]int32
+	for _, key := range shared.ColumnsRemoved {
+		if _, ok := claimed[key]; ok {
+			removed = append(removed, key)
+			delete(claimed, key)
+		}
+	}
+	for key := range claimed {
+		if _, ok := cur.columns[key]; !ok {
+			removed = append(removed, key)
+			delete(claimed, key)
+		}
+	}
+
+	pendingKeys := pendingColumnKeys(cur, claimed)
+	batch := pendingKeys
+	if len(batch) > budget {
+		batch = batch[:budget]
+	}
+
+	d := Delta{
+		V:               SchemaVersion,
+		Type:            "delta",
+		Bot:             s.name,
+		Tick:            cur.tick,
+		ColumnsRemoved:  removed,
+		ColumnsPending:  len(pendingKeys) - len(batch),
+		EntitiesAdded:   shared.EntitiesAdded,
+		EntitiesUpdated: shared.EntitiesUpdated,
+		EntitiesRemoved: shared.EntitiesRemoved,
+		UI:              shared.UI,
+	}
+	act := cur.actor
+	d.Actor = &act
+
+	for _, st := range shared.ColumnsState {
+		key := [2]int32{st.X, st.Z}
+		if _, ok := claimed[key]; ok {
+			d.ColumnsState = append(d.ColumnsState, st)
+		}
+	}
+	for _, bc := range shared.Blocks {
+		key := [2]int32{int32(bc.Pos[0] >> 4), int32(bc.Pos[2] >> 4)}
+		if _, ok := claimed[key]; ok {
+			d.Blocks = append(d.Blocks, bc)
+		}
+	}
+	if len(batch) > 0 {
+		d.ColumnsAdded = make([]Column, 0, len(batch))
+		for _, key := range batch {
+			d.ColumnsAdded = append(d.ColumnsAdded, cur.columns[key])
+		}
+	}
+
+	data, err := json.Marshal(d)
+	if err != nil {
+		return encodedFrame{}, false, err
+	}
+	return encodedFrame{
+		event:            "delta",
+		data:             data,
+		columnsDelivered: append([][2]int32(nil), batch...),
+		columnsRemoved:   append([][2]int32(nil), removed...),
+	}, false, nil
+}
+
+// pendingColumnKeys lists columns in cur that the subscriber has not claimed,
+// nearest to the actor first (Chebyshev), then by (x,z).
+func pendingColumnKeys(cur *viewState, claimed map[[2]int32]struct{}) [][2]int32 {
+	out := make([][2]int32, 0, len(cur.columns))
+	for key := range cur.columns {
+		if _, ok := claimed[key]; ok {
+			continue
+		}
+		out = append(out, key)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		di := chebyshev(out[i][0]-cur.centerX, out[i][1]-cur.centerZ)
+		dj := chebyshev(out[j][0]-cur.centerX, out[j][1]-cur.centerZ)
+		if di != dj {
+			return di < dj
+		}
+		if out[i][0] != out[j][0] {
+			return out[i][0] < out[j][0]
+		}
+		return out[i][1] < out[j][1]
+	})
+	return out
 }
 
 // reportHealth logs once per window while a subscriber is losing world frames.
@@ -275,19 +501,25 @@ func (s *Stream) reportHealth(now time.Time) {
 	}
 }
 
-// DimensionChanged forces a keyframe on the next Tick.
+// DimensionChanged forces a keyframe on the next Tick for every subscriber.
 func (s *Stream) DimensionChanged(from, to int32) {
 	_ = from
 	_ = to
 	s.enc.DimensionChanged()
+	s.mu.Lock()
+	for sub := range s.subs {
+		sub.markResync()
+	}
+	s.mu.Unlock()
 }
 
 // attach adds a subscriber. The caller sends hello itself; the next Tick that
 // sees resync delivers a keyframe.
 func (s *Stream) attach() *subscriber {
 	sub := &subscriber{
-		wake:   make(chan struct{}, 1),
-		resync: true,
+		wake:        make(chan struct{}, 1),
+		resync:      true,
+		sentColumns: make(map[[2]int32]struct{}),
 	}
 	s.mu.Lock()
 	s.subs[sub] = struct{}{}

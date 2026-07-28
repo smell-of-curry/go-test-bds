@@ -17,7 +17,9 @@ type Hello struct {
 	Radius   int    `json:"radius"`
 }
 
-// Keyframe carries everything the stream knows in one frame.
+// Keyframe carries world metadata, actor, entities, UI, registries, and a
+// budgeted subset of columns. Remaining columns arrive on later deltas as
+// columnsAdded; columnsPending counts how many are still outstanding.
 type Keyframe struct {
 	V        int      `json:"v"`
 	Type     string   `json:"type"`
@@ -28,6 +30,10 @@ type Keyframe struct {
 	Columns  []Column `json:"columns"`
 	Entities []Entity `json:"entities"`
 	UI       UI       `json:"ui"`
+	// ColumnsPending is how many columns in the stream radius have not yet
+	// been delivered to this subscriber. Zero/absent means the world is
+	// fully delivered; non-zero means more columnsAdded frames follow.
+	ColumnsPending int `json:"columnsPending,omitempty"`
 	// Registries is join-static wire content (custom blocks, items, entity
 	// property defs). Present on every keyframe (including after hello); omitted
 	// on deltas because it does not change during a run.
@@ -37,20 +43,23 @@ type Keyframe struct {
 // Delta carries only keys that changed since the previous frame.
 // Absent keys mean unchanged, never empty.
 type Delta struct {
-	V               int           `json:"v"`
-	Type            string        `json:"type"`
-	Bot             string        `json:"bot"`
-	Tick            uint64        `json:"tick"`
-	World           *World        `json:"world,omitempty"`
-	Blocks          []BlockChange `json:"blocks,omitempty"`
-	ColumnsAdded    []Column      `json:"columnsAdded,omitempty"`
-	ColumnsRemoved  [][2]int32    `json:"columnsRemoved,omitempty"`
-	ColumnsState    []ColumnState `json:"columnsState,omitempty"`
-	EntitiesAdded   []Entity      `json:"entitiesAdded,omitempty"`
-	EntitiesUpdated []Entity      `json:"entitiesUpdated,omitempty"`
-	EntitiesRemoved []uint64      `json:"entitiesRemoved,omitempty"`
-	Actor           *Actor        `json:"actor,omitempty"`
-	UI              *UI           `json:"ui,omitempty"`
+	V              int           `json:"v"`
+	Type           string        `json:"type"`
+	Bot            string        `json:"bot"`
+	Tick           uint64        `json:"tick"`
+	World          *World        `json:"world,omitempty"`
+	Blocks         []BlockChange `json:"blocks,omitempty"`
+	ColumnsAdded   []Column      `json:"columnsAdded,omitempty"`
+	ColumnsRemoved [][2]int32    `json:"columnsRemoved,omitempty"`
+	ColumnsState   []ColumnState `json:"columnsState,omitempty"`
+	// ColumnsPending is how many columns in the stream radius this subscriber
+	// has not yet received. Present while catch-up is in progress.
+	ColumnsPending  int      `json:"columnsPending,omitempty"`
+	EntitiesAdded   []Entity `json:"entitiesAdded,omitempty"`
+	EntitiesUpdated []Entity `json:"entitiesUpdated,omitempty"`
+	EntitiesRemoved []uint64 `json:"entitiesRemoved,omitempty"`
+	Actor           *Actor   `json:"actor,omitempty"`
+	UI              *UI      `json:"ui,omitempty"`
 }
 
 // Mark is a run-lifecycle event broadcast to every bot stream.

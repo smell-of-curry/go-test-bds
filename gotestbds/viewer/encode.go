@@ -55,6 +55,8 @@ type viewState struct {
 	world    World
 	columns  map[[2]int32]Column
 	revs     map[[2]int32]uint64
+	centerX  int32
+	centerZ  int32
 	centerY  int
 	entities map[uint64]Entity
 	actor    Actor
@@ -189,6 +191,8 @@ func (e *encoder) project(a *actor.Actor) (*viewState, error) {
 		world:    worldMeta,
 		columns:  columns,
 		revs:     revs,
+		centerX:  cx,
+		centerZ:  cz,
 		centerY:  centerY,
 		entities: entities,
 		actor:    act,

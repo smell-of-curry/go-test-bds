@@ -134,6 +134,8 @@ export interface KeyframeFrame {
   world: WorldMeta;
   actor: Actor;
   columns: Column[];
+  /** Columns in the stream radius not yet delivered; 0/absent = caught up. */
+  columnsPending?: number;
   entities: Entity[];
   ui?: UI;
 }
@@ -160,6 +162,8 @@ export interface DeltaFrame {
   columnsAdded?: Column[];
   columnsRemoved?: [number, number][];
   columnsState?: ColumnStateUpdate[];
+  /** Columns in the stream radius not yet delivered; 0/absent = caught up. */
+  columnsPending?: number;
   entitiesAdded?: Entity[];
   entitiesUpdated?: Entity[];
   entitiesRemoved?: number[];
