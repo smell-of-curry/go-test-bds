@@ -27,6 +27,27 @@ what it could see when an assertion failed — and every later stage improves wh
 that same path records without touching it. Building fidelity first would mean
 months of work before anyone outside this directory benefits.
 
+## Status
+
+Stages 0–4 are shipped and running in CI. `pokebedrock-beh`'s `addon-tests` job
+asks the dev-server manager for capture, and each run publishes its stills and
+run video as the `addon-test-viewer` workflow artefact. Stages 5 and up are
+untouched.
+
+Four things shipped differently from what the boxes below predicted, each noted
+where it applies: the stream is Server-Sent Events rather than a WebSocket,
+there is one video per run rather than a segment per test, frame rate is not a
+knob (the recording is a time lapse of whatever the software renderer painted),
+and the caption burnt into the frame names the phase, suite, test and verdict
+but not yet the elapsed time or the assertion text.
+
+Written down along the way, and normative from here on:
+
+- [`PROTOCOL.md`](PROTOCOL.md) — stream schema, endpoints, harness contract.
+- [`PACKETS.md`](PACKETS.md) — the unhandled-packet audit stage 0 asked for.
+- [`FINDINGS-capture.md`](FINDINGS-capture.md) — capture-mechanism research.
+- [`README.md`](README.md) — the app, the harness flags, the frame budget.
+
 ## Invariants
 
 These hold at every stage. Breaking one is what turns a renderer into a second
@@ -69,85 +90,107 @@ codebase that has to be maintained by hand.
 The world mirror is currently good enough for physics and assertions. Rendering
 exposes gaps physics never noticed.
 
-- [ ] Reconcile entity removal. `bot.RemoveActorHandler` looks up
+- [x] Reconcile entity removal. `bot.RemoveActorHandler` looks up
       `packet.RemoveActor.EntityUniqueID`, while `world.World.AddEntity` keys the
       map on `Entity.RuntimeID()`. Removed entities therefore survive in the map
       whenever the two IDs differ, which a renderer shows as ghosts. Store the
       unique ID on the entity at spawn and resolve removals through it.
-- [ ] Partition chunk storage by dimension. `World.chunks` is one
+- [x] Partition chunk storage by dimension. `World.chunks` is one
       `map[world.ChunkPos]*Column` with no dimension key, and `Actor.Dimension()`
       reads the spawn dimension out of `GameData` rather than tracking
       `packet.ChangeDimension`. Overworld and a custom dimension currently share
       one coordinate space.
-- [ ] Handle `packet.ChangeDimension`: flush columns, update the actor's
+- [x] Handle `packet.ChangeDimension`: flush columns, update the actor's
       dimension, and expose the change as an event the snapshot stream forwards.
-- [ ] Distinguish "not loaded" from "air" in `World.block`. Both return
+      Entities are flushed with the columns — the server stops mentioning the old
+      dimension's mobs rather than removing them, so keeping them is the same
+      ghost the unique-ID fix exists to prevent, one dimension over.
+- [x] Distinguish "not loaded" from "air" in `World.block`. Both return
       `block.Air{}` today; a renderer must not draw a chunk boundary as an open
       void, and must not mesh a column it has not received.
-- [ ] Record per-column receipt state (requested / partial / complete) so the
-      viewer can show load progress instead of holes.
-- [ ] Audit which packets are dropped by `Bot.HandlePacket`'s default debug log
+- [x] Record per-column receipt state (requested / partial / complete) so the
+      viewer can show load progress instead of holes. An all-air sub-chunk answers
+      a request with no payload, so it has to retire that request like any other
+      or every column with sky above it reads as a permanent hole.
+- [x] Audit which packets are dropped by `Bot.HandlePacket`'s default debug log
       and classify each as render-relevant or not. The list is the input to the
-      later fidelity stages.
+      later fidelity stages — [`PACKETS.md`](PACKETS.md).
 
-**Check:** extend `gotestbds/world/world_test.go` with cases for removal by
-unique ID, dimension isolation, and unloaded-versus-air.
+**Check:** `gotestbds/world/world_test.go` covers removal by unique ID
+(`TestRemoveEntityByUniqueID`), dimension isolation (`TestDimensionIsolation`),
+unloaded-versus-air (`TestBlockAtUnloadedVersusAir`) and receipt state
+(`TestColumnReceiptState`); `gotestbds/bot` covers the dimension flush and the
+all-air sub-chunk case.
 
 ---
 
 ## Stage 1 — state export
 
-- [ ] Define the snapshot schema: world metadata (dimension, range, tick), block
+- [x] Define the snapshot schema: world metadata (dimension, range, tick), block
       volumes, entities, the observed actor's pose, held items, and open UI
-      state. Version the schema explicitly from the first commit.
-- [ ] Encode blocks as identifier plus state properties, sourced from
+      state. Version the schema explicitly from the first commit — schema 1, spelled
+      out in [`PROTOCOL.md`](PROTOCOL.md).
+- [x] Encode blocks as identifier plus state properties, sourced from
       `world.Block`'s `EncodeBlock()`. Carry the raw network runtime ID
       alongside it as an opaque fallback for blocks the registry cannot name —
       those are exactly the addon blocks a renderer most needs to draw.
-- [ ] Encode entities with type identifier, unique and runtime IDs, position,
+- [x] Encode entities with type identifier, unique and runtime IDs, position,
       rotation, velocity, bounding box, name tag, held and armour items, and the
       full decoded `metadata.State` flag set. Molang queries later read from this
       set, so drop nothing that decodes cleanly.
-- [ ] Emit a keyframe (everything in radius) on connect and deltas after: block
+- [x] Emit a keyframe (everything in radius) on connect and deltas after: block
       changes from `UpdateBlockHandler` and `UpdateSubChunkBlocksHandler`,
       column add/remove, entity add/move/update/remove.
-- [ ] Serve the stream over a local WebSocket, wired from the bot's tick loop so
-      snapshots are consistent within a tick and never race a partial mutation.
-- [ ] Stamp every snapshot with the tick it describes. Capture correlates frames
+- [x] Serve the stream from the bot's tick loop so snapshots are consistent
+      within a tick and never race a partial mutation. **Server-Sent Events, not a
+      WebSocket:** the viewer only ever listens (the read-only-observer invariant)
+      and SSE reconnects on its own, so a socket would have been a second protocol
+      to write for nothing it needs.
+- [x] Stamp every snapshot with the tick it describes. Capture correlates frames
       to ticks through this field, so it exists from the first commit rather
       than being retrofitted once screenshots turn out to be stale.
-- [ ] Add `--viewer` / `GOTESTBDS_VIEWER` / `config.toml` plumbing following the
+- [x] Add `--viewer` / `GOTESTBDS_VIEWER` / `config.toml` plumbing following the
       existing precedence in `config.go`, plus the bind address and radius.
-- [ ] Make the stream multi-bot aware. `main.go` runs N bots concurrently; the
+- [x] Make the stream multi-bot aware. `main.go` runs N bots concurrently; the
       viewer selects among them, so identify streams by bot name.
-- [ ] Bound memory and bandwidth: a radius cap, delta coalescing per tick, and
-      backpressure that drops frames rather than stalling the tick loop.
+- [x] Bound memory and bandwidth: a radius cap (horizontal and vertical), a
+      per-column revision counter so an unchanged column is never re-encoded, and
+      backpressure that drops snapshot frames rather than stalling the tick loop —
+      a dropped frame is followed by a keyframe resync, and the count is on the
+      overlay. Event frames (mark, capture) wait briefly instead of dropping,
+      because losing one strands a capture request.
 
-**Check:** a Go test that drives a synthetic `World` through add/modify/remove
-and asserts the emitted delta sequence reconstructs the same state.
+**Check:** `gotestbds/viewer/encode_test.go` drives a synthetic `World` through
+add/modify/remove and asserts the delta sequence reconstructs the same state;
+`stream_test.go` covers the drop-then-resync path, and `fixture_test.go` writes
+the golden stream the web app's smoke test replays.
 
 ---
 
 ## Stage 2 — viewer shell
 
-- [ ] Scaffold `viewer/` as a self-contained web app with its own
+- [x] Scaffold `viewer/` as a self-contained web app with its own
       `package.json`, kept out of the published SDK entry points.
-- [ ] Implement the client side of the snapshot protocol with reconnect and
+- [x] Implement the client side of the snapshot protocol with reconnect and
       keyframe resync.
-- [ ] Build the scene: first-person camera locked to the actor's eye position
+- [x] Build the scene: first-person camera locked to the actor's eye position
       and rotation, plus a detached orbit camera for inspection.
-- [ ] Render placeholder geometry — colored cubes per block identifier, boxes
+- [x] Render placeholder geometry — colored cubes per block identifier, boxes
       per entity bounding box — so the pipeline is verifiable before any asset
       work. This is deliberately the last thing before capture: it is enough to
-      make a recording worth watching.
-- [ ] Add a diagnostic overlay: bot name, position, dimension, tick, loaded
+      make a recording worth watching. Only exposed faces are emitted: dense
+      terrain is ~650k blocks in radius, and drawing the buried ones put a single
+      screenshot past its timeout under software GL.
+- [x] Add a diagnostic overlay: bot name, position, dimension, tick, loaded
       column count, and the identifier under the crosshair.
-- [ ] Decide and document the frame budget and the chunk update strategy
+- [x] Decide and document the frame budget and the chunk update strategy
       (dirty-section remesh, worker pool) before the mesher exists, since both
-      constrain its interface.
+      constrain its interface — [`README.md`](README.md).
 
-**Check:** a headless smoke test that boots the app against a recorded snapshot
-stream and asserts the scene graph contains the expected node counts.
+**Check:** `viewer/tests/smoke.spec.ts` boots the app against the golden stream
+`gotestbds/viewer/testdata/go-stream.jsonl` (written by the Go fixture test, so
+the two languages cannot drift apart quietly) and asserts the scene graph node
+counts and that pixels reached the canvas.
 
 ---
 
@@ -157,59 +200,83 @@ The first stage that produces something a test author uses directly. Screenshots
 come before video: they are the smaller contract and the one the Script API
 suites are waiting on.
 
-- [ ] Add a screenshot instruction to `instruction.DefaultPull`, so a suite can
-      ask for a frame mid-test the same way it asks for a block.
-- [ ] Settle what the instruction returns. A PNG does not fit in the chat
+- [x] Add a screenshot instruction to `instruction.DefaultPull`, so a suite can
+      ask for a frame mid-test the same way it asks for a block. It is registered
+      only when a viewer hub exists, so a bot without one rejects the instruction
+      instead of pretending to serve it.
+- [x] Settle what the instruction returns. A PNG does not fit in the chat
       message the `[STATUS]` channel rides on, so the instruction writes the
       image to the artefact directory and returns its path, dimensions and byte
       count as instruction data. Tests assert on the artefact's existence and
       metadata; humans and CI consume the file.
-- [ ] Make the frame correspond to the moment the instruction was issued.
+- [x] Make the frame correspond to the moment the instruction was issued.
       Resolve it only once a frame rendered from a snapshot at or after the
       current tick has been captured, or the screenshot silently shows a stale
-      world and is worse than none.
-- [ ] Decide the headless capture mechanism and write down why. The viewer is a
+      world and is worse than none. The wait runs outside `Execute`: the loop it
+      would block is the one producing the ticks it waits for.
+- [x] Decide the headless capture mechanism and write down why. The viewer is a
       web app, so a headless browser driving `Page.captureScreenshot` is the
       path of least resistance and needs no GPU on a CI runner; a native GL
       context in Node is the alternative. Both must produce identical output to
-      the interactive path.
-- [ ] Support headless capture in CI, where no display exists and frames must be
+      the interactive path — [`FINDINGS-capture.md`](FINDINGS-capture.md);
+      Playwright's Chromium on SwiftShader won.
+- [x] Support headless capture in CI, where no display exists and frames must be
       produced deterministically rather than in real time.
-- [ ] Capture the rendered canvas to a video stream, started and stopped by the
-      run rather than by hand.
-- [ ] Drive capture from the run lifecycle. `StructuredReporter` already emits
+- [x] Capture the rendered canvas to a video stream, started and stopped by the
+      run rather than by hand. Playwright's `recordVideo` on the same long-lived
+      context as the stills, so the DOM overlay is in frame.
+- [x] Drive capture from the run lifecycle. `StructuredReporter` already emits
       `runStart`, `suiteStart`, `testEnd`, `suiteEnd` and `runEnd` as
-      `[GOTESTBDS]`-prefixed lines; the viewer subscribes to the same events and
-      segments recordings by suite and by test.
+      `[GOTESTBDS]`-prefixed lines; the viewer subscribes to the same events.
+      **One recording per run, not per suite or test:** segmenting was built and
+      reverted — short tests ended before a fresh page had painted, leaving blank
+      files and a context that kept closing under the next test.
 - [ ] Burn in a caption track: suite, test, elapsed time, and the assertion text
-      when one fails.
-- [ ] Write per-test artefacts: a video segment and a still at the moment of
-      failure, named so they correlate with the run record by `runId`.
-- [ ] Bound artefact size: resolution, frame rate, segment length and a
-      retention policy.
+      when one fails. **Partial:** phase, suite, test and verdict are burnt into
+      every frame through the overlay. `elapsedMs` and the assertion `message`
+      already ride in the mark frame; the overlay does not draw them yet.
+- [x] Write per-test artefacts: a still at the moment of failure plus any the
+      test asked for, named so they correlate with the run record by `runId` —
+      `<suite>/<test>/<label>.png` under the run's artefact directory, with the
+      run video beside them.
+- [x] Bound artefact size: resolution and recording length are harness flags,
+      retention and a byte cap are the manager's. **Frame rate is not a knob:**
+      Playwright's recorder does not take one, and the app paints on snapshot
+      arrival, so the video is a time lapse — read the overlay's tick for timing.
 
-**Check:** an e2e suite that calls the screenshot instruction and asserts a
-non-empty PNG of the requested size came back, plus a run against the fixture
-pack producing one decodable segment per test with the failing test's still
-showing the failure caption. Both must also pass with no viewer running, where
-the instruction returns a clear error instead of hanging.
+**Check:** `viewer/tests/capture.spec.ts` runs the harness against a fake bot
+server and asserts a PNG (magic bytes and all) of the requested size at a tick at
+or after the request, a still for the failing test, and exactly one WebM for the
+run; `gotestbds/viewer/capture_test.go` asserts a request with nobody rendering
+fails fast rather than hanging until its deadline.
+
+A run with the viewer switched off was checked against the live dev server: the
+bot rejects `screenshot` as unregistered, `ctx.screenshot` returns null, and the
+same tests pass with the same verdicts.
 
 ---
 
 ## Stage 4 — integration
 
-- [ ] Extend the aggregator contract so screenshots and recordings are
+- [x] Extend the aggregator contract so screenshots and recordings are
       discoverable alongside results. `bds-manager`'s `TestRunAggregator` parses
       the `[GOTESTBDS]` event shape, so any addition to it is a breaking change
-      for that consumer and has to be made deliberately.
-- [ ] Publish artefacts from the `addon-tests` CI job and attach them to the
-      pull request that produced them.
-- [ ] Document the viewer's configuration, asset requirements and CI wiring in
+      for that consumer and has to be made deliberately. `artifacts` rides on
+      `testEnd` and `runEnd`; the manager also reconciles the artefact directory
+      after teardown, because the run video is finalised after the last event a
+      dying bot can report.
+- [x] Publish artefacts from the `addon-tests` CI job and attach them to the
+      pull request that produced them — the `addon-test-viewer` workflow artefact
+      plus a list in the job summary.
+- [x] Document the viewer's configuration, asset requirements and CI wiring in
       the repository README, and record the architectural rules from this file
-      where a future contributor will read them.
+      where a future contributor will read them — this repo's `README.md`,
+      `viewer/README.md`, [`PROTOCOL.md`](PROTOCOL.md), and the dev-server section
+      of `bds-manager`'s README.
 
-**Check:** a PR that fails a test carries a watchable video and a still of the
-failure, with no manual step.
+**Check:** verified on PR #704 of `pokebedrock-beh` — the `addon-tests` job
+published three stills and the run video with no manual step, and an earlier run
+with two failing tests carried a still of each failure.
 
 ---
 
@@ -490,9 +557,14 @@ directory, a fixture, or a test — before the stage that depends on it is built
 **Protocol**
 
 - The full set of currently unhandled packets, each classified as render-
-  relevant or not, and the cost of handling each.
+  relevant or not, and the cost of handling each. **Answered:**
+  [`PACKETS.md`](PACKETS.md).
 - How the client renders block updates it has not yet been told about, and what
-  a chunk boundary looks like when the neighbour is unloaded.
+  a chunk boundary looks like when the neighbour is unloaded. **Half answered:**
+  the placeholder mesher's policy is decided and documented (an unknown neighbour
+  counts as exposed, so the frontier is drawn rather than hidden, and a column
+  still missing sub-chunks is outlined instead of drawn solid). What the real
+  client does there is still unstudied.
 - Whether the client cache blob protocol needs implementing for chunks to arrive
   intact on servers that enable it.
 
@@ -500,9 +572,15 @@ directory, a fixture, or a test — before the stage that depends on it is built
 
 - Which headless capture mechanism produces frames identical to the interactive
   path, and whether a CI runner without a GPU can sustain the frame rate a
-  watchable video needs.
+  watchable video needs. **Answered:** [`FINDINGS-capture.md`](FINDINGS-capture.md)
+  picks Playwright's Chromium, and no — SwiftShader paints a few frames a second
+  on real terrain, which is why the video is a time lapse and why the mesher only
+  emits exposed faces.
 - How a screenshot request is made deterministic with respect to the bot's tick,
   and what the failure mode is when the requested tick never renders.
+  **Answered:** the request carries `minTick` and a deadline, the harness resolves
+  it on the first frame at or past that tick, and a deadline that expires comes
+  back as an error the SDK turns into a null screenshot and a log line.
 - What a practical golden-image tolerance is across GPUs and drivers, and
   whether software rendering is fast enough for CI.
 
