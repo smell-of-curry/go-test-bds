@@ -413,6 +413,7 @@ func TestSupersededCatchUpDeltaRequeuesOnlyItsColumns(t *testing.T) {
 	}
 
 	a.World().SetBlock(cube.Pos{1, 70, 1}, block.Stone{})
+	edited := [2]int32{0, 0} // chunk covering {1,70,1}
 	s.Tick(a) // supersedes the unread delta
 
 	if sub.needsResync() {
@@ -433,7 +434,9 @@ func TestSupersededCatchUpDeltaRequeuesOnlyItsColumns(t *testing.T) {
 	if fr.event == "keyframe" {
 		t.Fatal("superseded catch-up delta must not restart with a keyframe")
 	}
-	// Already-delivered columns must not appear again on this frame.
+	// Already-delivered columns must not appear again on this frame — except
+	// the column just edited, which is re-sent so sky/block light stay in sync
+	// (BlockChange deltas do not carry light).
 	var d Delta
 	if err := json.Unmarshal(fr.data, &d); err != nil {
 		t.Fatal(err)
@@ -444,6 +447,9 @@ func TestSupersededCatchUpDeltaRequeuesOnlyItsColumns(t *testing.T) {
 	}
 	for _, c := range d.ColumnsAdded {
 		key := [2]int32{c.X, c.Z}
+		if key == edited {
+			continue
+		}
 		if _, ok := sentSet[key]; ok {
 			t.Fatalf("re-sent already-delivered column %v after supersede", key)
 		}
@@ -511,9 +517,10 @@ func TestSupersededKeyframeRestartsCleanly(t *testing.T) {
 // few hundred KB for a world several times the budget.
 func TestPerFramePayloadUnderBudget(t *testing.T) {
 	const budget = 4
-	// Dense column ≈ 8 sections × ~11 KB ≈ 88 KB; 4 columns ≈ 350 KB wire.
-	// Cap with headroom for JSON/palette overhead.
-	const maxFrameBytes = 500_000
+	// Dense column ≈ 8 sections × (~11 KB blocks + ~3 KB skyLight) ≈ 110 KB;
+	// 4 columns ≈ 440 KB wire before JSON/palette/biome overhead. Light nibbles
+	// for non-default sky (anything under a platform) ride every section.
+	const maxFrameBytes = 900_000
 
 	hub, err := New(Options{
 		Address:      "127.0.0.1:0",

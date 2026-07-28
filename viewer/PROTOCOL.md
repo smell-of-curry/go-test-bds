@@ -337,9 +337,13 @@ components carry geometry / material_instances (network palette wins over any
       "y": -4,
       "palette": [ { "name": "minecraft:air", "states": {}, "rid": 0 } ],
       "blocks": "<base64>",
-      "blocks1": "<base64>"
+      "blocks1": "<base64>",
+      "skyLight": "<base64>",
+      "blockLight": "<base64>"
     }
-  ]
+  ],
+  "biomePalette": ["plains", "forest", 192],
+  "biomes": "<base64>"
 }
 ```
 
@@ -355,6 +359,28 @@ components carry geometry / material_instances (network palette wins over any
   That is Bedrock's own sub-chunk order, so the encoder is a straight loop.
 - `blocks1` is layer 1 (the waterlogging layer) in the same encoding, present
   only when that layer holds something other than air.
+- `skyLight` / `blockLight` are base64 of **2048 bytes** (4096 four-bit
+  nibbles) in the **same index order as `blocks`**:
+  `index = (x << 8) | (z << 4) | y`, packed two nibbles per byte with the
+  even index in the low nibble (Bedrock / dragonfly packing). Bedrock never
+  sends light on the wire — the bot fills it with dragonfly
+  `chunk.LightArea(...).Fill()` + `Spread()` when a column completes, and
+  re-fills on block edits (debounced to once per snapshot tick).
+  - Absent `skyLight` means every nibble is `15` (full sky).
+  - Absent `blockLight` means every nibble is `0`.
+  - Incomplete columns (`requested` / `partial`) omit both fields.
+  - Fill uses a 3×3 `LightArea` when neighbours exist; `Spread()` runs only
+    when every neighbour column is `complete`. Missing edges use empty
+    placeholder chunks and skip Spread (no open-sky leak under platforms).
+- `biomePalette` + `biomes` are a **16×16 surface** map for grass/foliage/water
+  tinting. For each local `(x, z)`, the biome is sampled at the top non-air
+  block Y (`HighestBlock`). `biomes` is base64 of 256 `uint8` indices into
+  `biomePalette`, ordered `index = (x << 4) | z`. Palette entries are
+  dragonfly `Biome.String()` names when the network id is registered (e.g.
+  `"plains"`), otherwise the numeric id. Both fields are omitted on
+  incomplete columns. On block edits, the stream re-queues the column through
+  budgeted `columnsAdded` so light/biomes stay in sync (per-block deltas do
+  not carry those fields).
 
 ### Entity
 

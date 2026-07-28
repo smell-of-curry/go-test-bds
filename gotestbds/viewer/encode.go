@@ -17,6 +17,9 @@ import (
 	"github.com/smell-of-curry/go-test-bds/gotestbds/actor"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/wire"
 	gw "github.com/smell-of-curry/go-test-bds/gotestbds/world"
+
+	// Register vanilla biome ids so BiomeByID can name snapshot biomes.
+	_ "github.com/df-mc/dragonfly/server/world/biome"
 )
 
 // encoder projects World/Actor into schema v1 frames.
@@ -150,6 +153,9 @@ func (e *encoder) project(a *actor.Actor) (*viewState, error) {
 		}
 		key := [2]int32{cpos[0], cpos[1]}
 		seen[key] = struct{}{}
+		// Light fill is debounced here (once per dirty column per snapshot),
+		// not on every SetBlock — Fill is cheap for one column but not free.
+		w.EnsureColumnLight(cpos)
 		rev := col.Revision
 		if !e.skipColCache {
 			if ent, ok := e.colCache[key]; ok && ent.rev == rev {
@@ -253,6 +259,11 @@ func (e *encoder) delta(cur *viewState) Delta {
 		if prev.State != col.State {
 			d.ColumnsState = append(d.ColumnsState, ColumnState{X: key[0], Z: key[1], State: col.State})
 		}
+		// Light/biomes ride on Column payloads, not BlockChange. Re-send the
+		// column when those fields moved so already-delivered clients update.
+		if columnLightOrBiomeChanged(prev, col) {
+			d.ColumnsAdded = append(d.ColumnsAdded, col)
+		}
 		d.Blocks = append(d.Blocks, diffBlocks(key, prev, col)...)
 	}
 	for key := range e.prev.columns {
@@ -323,7 +334,9 @@ func sectionsByY(col Column) map[int]Section {
 }
 
 func sectionWireEqual(a, b Section) bool {
-	if a.Y != b.Y || a.Blocks != b.Blocks || a.Blocks1 != b.Blocks1 || len(a.Palette) != len(b.Palette) {
+	if a.Y != b.Y || a.Blocks != b.Blocks || a.Blocks1 != b.Blocks1 ||
+		a.SkyLight != b.SkyLight || a.BlockLight != b.BlockLight ||
+		len(a.Palette) != len(b.Palette) {
 		return false
 	}
 	for i := range a.Palette {
@@ -332,6 +345,31 @@ func sectionWireEqual(a, b Section) bool {
 		}
 	}
 	return true
+}
+
+// columnLightOrBiomeChanged reports whether a re-encoded column carries new
+// light or biome bytes that BlockChange deltas cannot express.
+func columnLightOrBiomeChanged(prev, cur Column) bool {
+	if prev.Biomes != cur.Biomes || len(prev.BiomePalette) != len(cur.BiomePalette) {
+		return true
+	}
+	for i := range prev.BiomePalette {
+		if prev.BiomePalette[i] != cur.BiomePalette[i] {
+			return true
+		}
+	}
+	prevByY := sectionsByY(prev)
+	curByY := sectionsByY(cur)
+	if len(prevByY) != len(curByY) {
+		return true
+	}
+	for y, sec := range curByY {
+		ps, ok := prevByY[y]
+		if !ok || ps.SkyLight != sec.SkyLight || ps.BlockLight != sec.BlockLight {
+			return true
+		}
+	}
+	return false
 }
 
 // diffSectionBlocks expands one section pair into BlockChanges. missingPrev
@@ -420,6 +458,7 @@ func (e *encoder) encodeColumn(w *gw.World, pos dfworld.ChunkPos, col *gw.Column
 		// the run. PROTOCOL.md promises arrays are present, possibly empty.
 		Sections: []Section{},
 	}
+	lit := col.State == gw.ColumnComplete
 	subs := col.Sub()
 	for i, sub := range subs {
 		if sub == nil || sub.Empty() {
@@ -430,10 +469,13 @@ func (e *encoder) encodeColumn(w *gw.World, pos dfworld.ChunkPos, col *gw.Column
 		if absInt(secY-centerY) > e.sectionRadius {
 			continue
 		}
-		sec, ok := e.encodeSection(w, sub, secY)
+		sec, ok := e.encodeSection(w, sub, secY, lit)
 		if ok {
 			out.Sections = append(out.Sections, sec)
 		}
+	}
+	if lit {
+		out.BiomePalette, out.Biomes = encodeColumnBiomes(col)
 	}
 	return out
 }
@@ -450,7 +492,9 @@ func absInt(v int) int {
 // blocks is base64 of 4096 little-endian uint16 palette indices ordered
 // index = (x << 8) | (z << 4) | y — Bedrock's own sub-chunk order, so the
 // encoder is a straight triple loop with no swizzle.
-func (e *encoder) encodeSection(w *gw.World, sub *chunk.SubChunk, secY int) (Section, bool) {
+//
+// @param lit Whether sky/block light may be read (column complete + filled).
+func (e *encoder) encodeSection(w *gw.World, sub *chunk.SubChunk, secY int, lit bool) (Section, bool) {
 	layers := sub.Layers()
 	if len(layers) == 0 {
 		return Section{}, false
@@ -465,8 +509,15 @@ func (e *encoder) encodeSection(w *gw.World, sub *chunk.SubChunk, secY int) (Sec
 			// Layer 1 shares no palette with layer 0 on the wire; PROTOCOL
 			// puts both indices into the same section palette. Rebuild with
 			// a unified palette covering both layers.
-			return e.encodeSectionUnified(w, sub, secY)
+			sec, ok := e.encodeSectionUnified(w, sub, secY)
+			if ok && lit {
+				attachSectionLight(&sec, sub)
+			}
+			return sec, ok
 		}
+	}
+	if lit {
+		attachSectionLight(&sec, sub)
 	}
 	return sec, true
 }
@@ -895,7 +946,104 @@ func entityEqual(a, b Entity) bool {
 // encodeSectionForTest exposes section encoding for the palette-order test.
 func encodeSectionForTest(w *gw.World, sub *chunk.SubChunk, secY int) (Section, bool) {
 	e := newEncoder("test", 4, 4)
-	return e.encodeSection(w, sub, secY)
+	return e.encodeSection(w, sub, secY, false)
+}
+
+// attachSectionLight sets skyLight/blockLight on sec, omitting defaults
+// (sky all 15, block all 0).
+//
+// @param sec Section to mutate.
+// @param sub Source sub-chunk whose light slices were filled by LightArea.
+func attachSectionLight(sec *Section, sub *chunk.SubChunk) {
+	sky, block := packSectionLight(sub)
+	if !isAllNibbles(sky, 15) {
+		sec.SkyLight = base64.StdEncoding.EncodeToString(sky)
+	}
+	if !isAllNibbles(block, 0) {
+		sec.BlockLight = base64.StdEncoding.EncodeToString(block)
+	}
+}
+
+// packSectionLight reads 4096 sky and block light nibbles into 2048-byte
+// arrays using index = (x << 8) | (z << 4) | y (same as blocks).
+//
+// @param sub Filled sub-chunk.
+// @returns sky and block light byte slices.
+func packSectionLight(sub *chunk.SubChunk) (sky, block []byte) {
+	sky = make([]byte, 2048)
+	block = make([]byte, 2048)
+	for x := 0; x < 16; x++ {
+		for z := 0; z < 16; z++ {
+			for y := 0; y < 16; y++ {
+				index := (uint16(x) << 8) | (uint16(z) << 4) | uint16(y)
+				i := index >> 1
+				bit := (index & 1) << 2
+				sky[i] |= sub.SkyLight(byte(x), byte(y), byte(z)) << bit
+				block[i] |= sub.BlockLight(byte(x), byte(y), byte(z)) << bit
+			}
+		}
+	}
+	return sky, block
+}
+
+// isAllNibbles reports whether every nibble in raw equals level.
+//
+// @param raw 2048-byte nibble array.
+// @param level Expected 0–15 value.
+// @returns true when every nibble matches.
+func isAllNibbles(raw []byte, level uint8) bool {
+	want := level | (level << 4)
+	for _, b := range raw {
+		if b != want {
+			return false
+		}
+	}
+	return true
+}
+
+// encodeColumnBiomes builds a 16×16 surface biome map for a column.
+//
+// For each (x,z), the biome is sampled at the top non-air block Y (or the
+// column minimum when the column is empty air).
+//
+// @param col Source column.
+// @returns biomePalette entries and base64 of 256 uint8 indices, or empty when
+// the palette is unused.
+func encodeColumnBiomes(col *gw.Column) (palette []any, biomesB64 string) {
+	indexOf := map[uint32]uint8{}
+	raw := make([]byte, 256)
+	for x := uint8(0); x < 16; x++ {
+		for z := uint8(0); z < 16; z++ {
+			y := col.HighestBlock(x, z)
+			id := col.Biome(x, y, z)
+			idx, ok := indexOf[id]
+			if !ok {
+				if len(palette) >= 256 {
+					idx = 0
+				} else {
+					idx = uint8(len(palette))
+					indexOf[id] = idx
+					palette = append(palette, biomePaletteEntry(id))
+				}
+			}
+			raw[(int(x)<<4)|int(z)] = idx
+		}
+	}
+	if len(palette) == 0 {
+		return nil, ""
+	}
+	return palette, base64.StdEncoding.EncodeToString(raw)
+}
+
+// biomePaletteEntry maps a network biome id to a wire palette value.
+//
+// @param id Network biome id from the chunk biome storage.
+// @returns dragonfly biome String() when registered, otherwise the numeric id.
+func biomePaletteEntry(id uint32) any {
+	if b, ok := dfworld.BiomeByID(int(id)); ok {
+		return b.String()
+	}
+	return id
 }
 
 // encodeRegistries projects wire.Registries into the snapshot shape.

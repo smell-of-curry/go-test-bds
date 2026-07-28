@@ -238,6 +238,12 @@ type Column struct {
 	MinY     int       `json:"minY"`
 	MaxY     int       `json:"maxY"`
 	Sections []Section `json:"sections"`
+	// BiomePalette lists biome ids referenced by Biomes. Entries are dragonfly
+	// biome String() names when known, otherwise the numeric network id.
+	BiomePalette []any `json:"biomePalette,omitempty"`
+	// Biomes is base64 of 256 uint8 palette indices, one per column (x,z) at the
+	// surface (top non-air). Index order is (x << 4) | z. Absent when unknown.
+	Biomes string `json:"biomes,omitempty"`
 }
 
 // ColumnState reports a column's load-progress change without resending blocks.
@@ -253,6 +259,12 @@ type Section struct {
 	Palette []Block `json:"palette"`
 	Blocks  string  `json:"blocks"`
 	Blocks1 string  `json:"blocks1,omitempty"`
+	// SkyLight is base64 of 2048 bytes (4096 nibbles) in the same index order as
+	// blocks: index = (x << 8) | (z << 4) | y. Absent means all 15.
+	SkyLight string `json:"skyLight,omitempty"`
+	// BlockLight is base64 of 2048 bytes in the same nibble order as SkyLight.
+	// Absent means all 0.
+	BlockLight string `json:"blockLight,omitempty"`
 }
 
 // Entity is a tracked world entity.

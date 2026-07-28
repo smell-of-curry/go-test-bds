@@ -447,6 +447,13 @@ func (s *Stream) frameFor(sub *subscriber, cur *viewState, shared Delta, a *acto
 			delete(claimed, key)
 		}
 	}
+	// Light/biome refreshes arrive as encoder ColumnsAdded for columns the
+	// subscriber already holds. Unclaim them so they re-enter the budgeted
+	// catch-up batch instead of appending past ColumnBudget.
+	for _, c := range shared.ColumnsAdded {
+		key := [2]int32{c.X, c.Z}
+		delete(claimed, key)
+	}
 
 	pendingKeys := pendingColumnKeys(cur, claimed)
 	batch := pendingKeys
@@ -477,6 +484,18 @@ func (s *Stream) frameFor(sub *subscriber, cur *viewState, shared Delta, a *acto
 	}
 	for _, bc := range shared.Blocks {
 		key := [2]int32{int32(bc.Pos[0] >> 4), int32(bc.Pos[2] >> 4)}
+		// Skip block patches for columns this frame re-sends whole — the
+		// column payload already has the new blocks + light.
+		inBatch := false
+		for _, b := range batch {
+			if b == key {
+				inBatch = true
+				break
+			}
+		}
+		if inBatch {
+			continue
+		}
 		if _, ok := claimed[key]; ok {
 			d.Blocks = append(d.Blocks, bc)
 		}

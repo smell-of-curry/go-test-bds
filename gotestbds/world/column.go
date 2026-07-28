@@ -51,6 +51,10 @@ type Column struct {
 	// after a request-mode LevelChunk. Zero once complete or when the payload
 	// arrived inline.
 	pendingSubChunks int
+
+	// lightDirty means sky/block light needs a Fill before the next snapshot
+	// read. Set on completion and on block edits; cleared by EnsureColumnLight.
+	lightDirty bool
 }
 
 // SetBlock writes a block and bumps Revision so cache consumers notice.
@@ -63,11 +67,19 @@ type Column struct {
 func (c *Column) SetBlock(x uint8, y int16, z uint8, layer uint8, block uint32) {
 	c.Chunk.SetBlock(x, y, z, layer, block)
 	c.Revision++
+	if c.State == ColumnComplete {
+		c.lightDirty = true
+	}
 }
 
 // NewColumn ...
 func NewColumn(c *chunk.Chunk, nbters []chunk.BlockEntity) *Column {
-	col := &Column{Chunk: c, BlockEntities: make(map[cube.Pos]world.Block, len(nbters)), State: ColumnComplete}
+	col := &Column{
+		Chunk:         c,
+		BlockEntities: make(map[cube.Pos]world.Block, len(nbters)),
+		State:         ColumnComplete,
+		lightDirty:    true,
+	}
 	for _, be := range nbters {
 		rid := c.Block(uint8(be.Pos[0]), int16(be.Pos[1]), uint8(be.Pos[2]), 0)
 		b, ok := world.BlockByRuntimeID(rid)
@@ -95,10 +107,12 @@ func (c *Column) ExpectSubChunks(n int) {
 	if n <= 0 {
 		c.pendingSubChunks = 0
 		c.State = ColumnComplete
+		c.lightDirty = true
 		return
 	}
 	c.pendingSubChunks = n
 	c.State = ColumnRequested
+	c.lightDirty = false
 }
 
 // ReceiveSubChunk records one requested sub-chunk arriving and promotes the
@@ -113,6 +127,7 @@ func (c *Column) ReceiveSubChunk() {
 	}
 	if c.pendingSubChunks == 0 {
 		c.State = ColumnComplete
+		c.lightDirty = true
 		return
 	}
 	c.State = ColumnPartial

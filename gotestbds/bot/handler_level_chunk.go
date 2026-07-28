@@ -29,8 +29,8 @@ func (*LevelChunkHandler) Handle(p packet.Packet, b *Bot, a *actor.Actor) error 
 
 	ch := chunk.New(blockRegistry, dimensionRange)
 	var blockEntities []chunk.BlockEntity
+	buf := bytes.NewBuffer(levelChunk.RawPayload)
 	if !requestMode {
-		buf := bytes.NewBuffer(levelChunk.RawPayload)
 		// in case of an error we are just ignoring it, cause blocks are sent via SubChunk.
 		decoded, err := chunk.NetworkDecodeBuffer(blockRegistry, buf, subChunks, dimensionRange)
 		if err == nil {
@@ -38,6 +38,12 @@ func (*LevelChunkHandler) Handle(p packet.Packet, b *Bot, a *actor.Actor) error 
 			// reading one byte for the border block count.
 			_, _ = buf.ReadByte()
 			blockEntities, _ = decodeBlockEntities(buf)
+		}
+	} else if len(levelChunk.RawPayload) > 0 {
+		// Request-mode payload is biomes only (no block sub-chunks). count=0
+		// skips the block loop and still runs dragonfly's biome decode.
+		if decoded, err := chunk.NetworkDecodeBuffer(blockRegistry, buf, 0, dimensionRange); err == nil {
+			ch = decoded
 		}
 	}
 
