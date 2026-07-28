@@ -44,6 +44,7 @@ export interface Entity {
   uid: number;
   type: string;
   pos: [number, number, number];
+  /** Degrees: `[yaw, pitch]` or `[yaw, pitch, headYaw]` (see PROTOCOL.md). */
   rot: [number, number] | [number, number, number];
   vel: [number, number, number];
   bbox: [number, number];
@@ -68,6 +69,7 @@ export interface Actor {
   name: string;
   pos: [number, number, number];
   eyePos: [number, number, number];
+  /** Degrees: `[yaw, pitch]` or `[yaw, pitch, headYaw]` (see PROTOCOL.md). */
   rot: [number, number] | [number, number, number];
   vel: [number, number, number];
   onGround: boolean;

@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import type { CameraController } from "./camera";
-import type { Block } from "./protocol";
+import type { BuiltEntityModel, EntityModelRegistry } from "./entity";
+import type { Block, Entity } from "./protocol";
 import { columnKey, sectionIndex } from "./protocol";
 import type { DecodedSection, StoredColumn, WorldState } from "./store";
 
@@ -326,6 +327,12 @@ interface SectionNode {
 interface EntityNode {
   rid: number;
   group: THREE.Group;
+  /** Wireframe bbox fallback (kept until a model loads; restored on failure). */
+  wire: THREE.LineSegments;
+  model: BuiltEntityModel | null;
+  /** In-flight model load token — bumped to ignore stale async results. */
+  loadToken: number;
+  type: string;
   label: HTMLDivElement;
 }
 
@@ -347,6 +354,10 @@ export class ViewerScene {
   private readonly columnBounds = new Map<string, THREE.LineSegments>();
   private readonly highlights: HighlightNode[] = [];
   private readonly actorGroup: THREE.Group;
+  private readonly actorWire: THREE.LineSegments;
+  private actorModel: BuiltEntityModel | null = null;
+  private actorLoadToken = 0;
+  private entityRegistry: EntityModelRegistry | null = null;
   private readonly pendingSections: string[] = [];
   private pendingSet = new Set<string>();
   private storeRef: WorldState | null = null;
@@ -394,13 +405,29 @@ export class ViewerScene {
     this.actorGroup.visible = false;
     const actorGeo = new THREE.BoxGeometry(0.6, 1.8, 0.6);
     const actorEdges = new THREE.EdgesGeometry(actorGeo);
-    const actorLine = new THREE.LineSegments(
+    this.actorWire = new THREE.LineSegments(
       actorEdges,
       new THREE.LineBasicMaterial({ color: 0x66ccff }),
     );
-    actorLine.position.y = 0.9;
-    this.actorGroup.add(actorLine);
+    this.actorWire.position.y = 0.9;
+    this.actorGroup.add(this.actorWire);
     this.scene.add(this.actorGroup);
+  }
+
+  /**
+   * Attach the entity model registry (pack-backed). Triggers async model loads
+   * for any entities already on screen, and for the observed bot body.
+   *
+   * @param registry - Loaded (or loadable) registry, or null to disable.
+   */
+  setEntityRegistry(registry: EntityModelRegistry | null): void {
+    this.entityRegistry = registry;
+    if (!registry) return;
+    for (const node of this.entities.values()) {
+      const ent = this.storeRef?.entities.get(node.rid);
+      if (ent) this.requestEntityModel(node, ent);
+    }
+    this.requestActorModel();
   }
 
   resize(width: number, height: number): void {
@@ -488,12 +515,14 @@ export class ViewerScene {
   /**
    * Place / show the observed bot body (follow and orbit; hidden in first-person).
    *
-   * @param show - Whether the body wireframe is visible.
+   * @param show - Whether the body is visible.
    * @param actorPos - Feet position, or null when no actor.
+   * @param rot - Optional `[yaw, pitch]` degrees for the player model.
    */
   setActorVisible(
     show: boolean,
     actorPos: [number, number, number] | null,
+    rot?: [number, number] | [number, number, number],
   ): void {
     if (!actorPos) {
       this.actorWantedVisible = false;
@@ -501,6 +530,13 @@ export class ViewerScene {
       return;
     }
     this.actorGroup.position.set(actorPos[0], actorPos[1], actorPos[2]);
+    if (rot && this.actorModel) {
+      this.entityRegistry?.applyPose(this.actorModel, rot);
+    } else if (rot) {
+      // Wireframe-only: yaw the whole actor group.
+      this.actorGroup.rotation.order = "YXZ";
+      this.actorGroup.rotation.y = Math.PI - THREE.MathUtils.degToRad(rot[0]);
+    }
     this.actorWantedVisible = show;
     this.actorGroup.visible = this.worldVisible && show;
   }
@@ -540,11 +576,22 @@ export class ViewerScene {
    *
    * @param rid - Entity runtime ID.
    * @param pos - World position.
+   * @param rot - Optional `[yaw, pitch]` degrees.
    */
-  setEntityPos(rid: number, pos: [number, number, number]): void {
+  setEntityPos(
+    rid: number,
+    pos: [number, number, number],
+    rot?: [number, number] | [number, number, number],
+  ): void {
     const node = this.entities.get(rid);
     if (!node) return;
     node.group.position.set(pos[0], pos[1], pos[2]);
+    if (rot && node.model) {
+      this.entityRegistry?.applyPose(node.model, rot);
+    } else if (rot) {
+      node.group.rotation.order = "YXZ";
+      node.group.rotation.y = Math.PI - THREE.MathUtils.degToRad(rot[0]);
+    }
   }
 
   /** Continue draining the remesh queue under the per-frame budget. */
@@ -718,15 +765,7 @@ export class ViewerScene {
     this.columnBounds.delete(key);
   }
 
-  private upsertEntity(
-    rid: number,
-    ent: {
-      pos: [number, number, number];
-      bbox: [number, number];
-      name: string;
-      type: string;
-    },
-  ): void {
+  private upsertEntity(rid: number, ent: Entity): void {
     let node = this.entities.get(rid);
     if (!node) {
       const group = new THREE.Group();
@@ -734,12 +773,12 @@ export class ViewerScene {
       const [w, h] = ent.bbox;
       const geo = new THREE.BoxGeometry(w, h, w);
       const edges = new THREE.EdgesGeometry(geo);
-      const line = new THREE.LineSegments(
+      const wire = new THREE.LineSegments(
         edges,
         new THREE.LineBasicMaterial({ color: 0xa0e0ff }),
       );
-      line.position.y = h / 2;
-      group.add(line);
+      wire.position.y = h / 2;
+      group.add(wire);
       group.visible = this.worldVisible;
       this.scene.add(group);
 
@@ -748,31 +787,118 @@ export class ViewerScene {
       label.style.visibility = this.worldVisible ? "visible" : "hidden";
       this.labelsRoot.appendChild(label);
 
-      node = { rid, group, label };
+      node = {
+        rid,
+        group,
+        wire,
+        model: null,
+        loadToken: 0,
+        type: ent.type,
+        label,
+      };
       this.entities.set(rid, node);
+      this.requestEntityModel(node, ent);
+    } else if (node.type !== ent.type) {
+      node.type = ent.type;
+      this.clearEntityModel(node);
+      this.requestEntityModel(node, ent);
+    } else if (!node.model && this.entityRegistry) {
+      this.requestEntityModel(node, ent);
     }
 
     const [w, h] = ent.bbox;
     node.group.position.set(ent.pos[0], ent.pos[1], ent.pos[2]);
-    // Resize: replace geometry if bbox changed — cheap at entity counts we see.
-    const line = node.group.children[0] as THREE.LineSegments;
-    line.geometry.dispose();
-    line.geometry = new THREE.EdgesGeometry(new THREE.BoxGeometry(w, h, w));
-    line.position.y = h / 2;
+    if (node.model) {
+      this.entityRegistry?.applyPose(node.model, ent.rot);
+    } else {
+      node.group.rotation.order = "YXZ";
+      node.group.rotation.y = Math.PI - THREE.MathUtils.degToRad(ent.rot[0]);
+      // Resize wireframe if bbox changed.
+      node.wire.geometry.dispose();
+      node.wire.geometry = new THREE.EdgesGeometry(
+        new THREE.BoxGeometry(w, h, w),
+      );
+      node.wire.position.y = h / 2;
+    }
     node.label.textContent = ent.name || ent.type;
   }
 
   private removeEntity(rid: number): void {
     const node = this.entities.get(rid);
     if (!node) return;
+    node.loadToken++;
+    this.clearEntityModel(node);
     this.scene.remove(node.group);
-    for (const child of node.group.children) {
-      const line = child as THREE.LineSegments;
-      line.geometry.dispose();
-      (line.material as THREE.Material).dispose();
-    }
+    node.wire.geometry.dispose();
+    (node.wire.material as THREE.Material).dispose();
     node.label.remove();
     this.entities.delete(rid);
+  }
+
+  /**
+   * Async-load a textured model; keep wireframe until it resolves.
+   *
+   * @param node - Entity node.
+   * @param ent - Latest entity snapshot.
+   */
+  private requestEntityModel(node: EntityNode, ent: Entity): void {
+    const registry = this.entityRegistry;
+    if (!registry) return;
+    const token = ++node.loadToken;
+    void registry.getModel(ent).then((model) => {
+      if (token !== node.loadToken) {
+        model?.dispose();
+        return;
+      }
+      if (!model) return;
+      this.clearEntityModel(node);
+      node.model = model;
+      node.wire.visible = false;
+      node.group.add(model.root);
+      // Model owns yaw; clear group yaw so we don't double-apply.
+      node.group.rotation.set(0, 0, 0);
+      registry.applyPose(model, ent.rot);
+    });
+  }
+
+  /**
+   * @param node - Entity node.
+   */
+  private clearEntityModel(node: EntityNode): void {
+    if (!node.model) return;
+    node.group.remove(node.model.root);
+    node.model.dispose();
+    node.model = null;
+    node.wire.visible = true;
+  }
+
+  /** Load Steve player model onto the observed bot body when available. */
+  private requestActorModel(): void {
+    const registry = this.entityRegistry;
+    if (!registry) return;
+    const token = ++this.actorLoadToken;
+    void registry
+      .getModel({
+        type: "minecraft:player",
+        player: true,
+        props: {},
+        flags: {},
+      })
+      .then((model) => {
+        if (token !== this.actorLoadToken) {
+          model?.dispose();
+          return;
+        }
+        if (!model) return;
+        if (this.actorModel) {
+          this.actorGroup.remove(this.actorModel.root);
+          this.actorModel.dispose();
+        }
+        this.actorModel = model;
+        this.actorWire.visible = false;
+        this.actorGroup.rotation.set(0, 0, 0);
+        this.actorGroup.add(model.root);
+      });
   }
 
   private clearWorld(): void {

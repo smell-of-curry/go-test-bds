@@ -1,5 +1,6 @@
 import { CameraController, cameraModeFromSearch } from "./camera";
 import { installViewerHandle } from "./debug";
+import { EntityModelRegistry } from "./entity";
 import { MotionLerp } from "./motion";
 import { Overlay } from "./overlay";
 import type { Actor } from "./protocol";
@@ -81,13 +82,27 @@ const firstKeyframe = new Promise<void>((resolve) => {
 
 void firstKeyframe
   .then(() => createTexturedMesher({ registries: store.getState().registries }))
-  .then((bundle) => {
+  .then(async (bundle) => {
     scene.setMesher(bundle.asMesher);
     assetsPhase = "ready";
     showWorld();
     // Remesh may be pending after setMesher — store subscribe / frame loop drain it.
     paintOverlay();
     watchLateRegistries(bundle, store.getState().registries !== null);
+
+    // Entity defs share the terrain AssetClient / pack stack. Failure keeps
+    // wireframes — do not fail the whole asset phase.
+    try {
+      const entities = new EntityModelRegistry(bundle.client);
+      await entities.load();
+      scene.setEntityRegistry(entities);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      assetError = assetError
+        ? `${assetError}; entities: ${msg}`
+        : `entities: ${msg}`;
+      paintOverlay();
+    }
   })
   .catch((err: unknown) => {
     assetError = err instanceof Error ? err.message : String(err);
@@ -253,11 +268,15 @@ function frame(): void {
     const actor = motion.sampleActor() ?? state.actor;
     const entities = motion.sampleEntities();
     for (const [rid, ent] of entities) {
-      scene.setEntityPos(rid, ent.pos);
+      scene.setEntityPos(rid, ent.pos, ent.rot);
     }
 
     camera.update(actor);
-    scene.setActorVisible(showActorBody(), actor ? actor.pos : null);
+    scene.setActorVisible(
+      showActorBody(),
+      actor ? actor.pos : null,
+      actor?.rot,
+    );
     scene.render(camera);
   }
   paintOverlay();
