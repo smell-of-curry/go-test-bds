@@ -31,13 +31,16 @@ export {
 } from "./reporter";
 export {
   decodeStatus,
+  decodeStatusPart,
   encodeInstruction,
   INSTRUCTION_PREFIX,
   type InstructionEnvelope,
   type InstructionStatusKind,
   msToTicks,
+  STATUS_PART_PREFIX,
   STATUS_PREFIX,
   type StatusEnvelope,
+  type StatusPart,
 } from "./protocol";
 export {
   defineSuite,
