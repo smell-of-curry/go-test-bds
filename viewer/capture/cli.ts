@@ -16,7 +16,7 @@ Options:
   --bot <name>                   Bot name (required)
   --width <n>                    Viewport width (default 1280)
   --height <n>                   Viewport height (default 720)
-  --max-segment-seconds <n>      Cap run recording length (default 120)
+  --max-segment-seconds <n>      Cap run recording length (default 900)
   --browser <path>               Chromium executable path
   --video-out <file>             Write the run video here instead of POSTing it
   --log-level <level>            debug | info | warn | error (default info)
@@ -47,7 +47,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
   const options: ParsedArgs["options"] = {
     width: 1280,
     height: 720,
-    maxSegmentSeconds: 120,
+    maxSegmentSeconds: 900,
     logLevel: "info",
   };
   let help = false;
@@ -169,7 +169,7 @@ async function main(): Promise<void> {
     bot,
     width: parsed.options.width ?? 1280,
     height: parsed.options.height ?? 720,
-    maxSegmentSeconds: parsed.options.maxSegmentSeconds ?? 120,
+    maxSegmentSeconds: parsed.options.maxSegmentSeconds ?? 900,
     browserPath,
     logLevel: parsed.options.logLevel ?? "info",
     ...(parsed.options.videoOut ? { videoOut: parsed.options.videoOut } : {}),

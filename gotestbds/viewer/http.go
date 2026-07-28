@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/pprof"
 	"strconv"
 	"time"
 )
@@ -21,6 +22,10 @@ func (h *Hub) routes() http.Handler {
 	mux.HandleFunc("GET /", h.handleRoot)
 	mux.HandleFunc("POST /artifact", h.handleArtifact)
 	mux.HandleFunc("POST /capture/{id}/error", h.handleCaptureError)
+	// Live goroutine/heap dumps for diagnosing a hung bot from outside —
+	// the hub listens on loopback only, so exposure matches the stream.
+	mux.HandleFunc("GET /debug/pprof/", pprof.Index)
+	mux.HandleFunc("GET /debug/pprof/profile", pprof.Profile)
 	return mux
 }
 
