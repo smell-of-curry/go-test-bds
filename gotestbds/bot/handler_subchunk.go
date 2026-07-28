@@ -35,7 +35,8 @@ func (*SubChunkHandler) Handle(p packet.Packet, b *Bot, a *actor.Actor) error {
 
 	// Credit: https://github.com/oomph-ac/oomph/blob/3ad077131b68cd30a5fcab4daa835f3e134a49e7/player/component/acknowledgement/chunks.go#L65
 	for _, entry := range subChunk.SubChunkEntries {
-		if entry.Result != protocol.SubChunkResultSuccess {
+		if entry.Result != protocol.SubChunkResultSuccess &&
+			entry.Result != protocol.SubChunkResultSuccessAllAir {
 			continue
 		}
 
@@ -46,8 +47,17 @@ func (*SubChunkHandler) Handle(p packet.Packet, b *Bot, a *actor.Actor) error {
 
 		c, ok := a.World().Chunk(chunkPos)
 		if !ok {
-			c.Chunk = chunk.New(blockRegistry, dim.Range())
+			c = world.NewColumn(chunk.New(blockRegistry, dim.Range()), nil)
 			a.World().AddChunk(chunkPos, c)
+		}
+
+		// An all-air sub-chunk carries no payload, and a fresh column already
+		// reads as air, so there is nothing to decode — but it is still an answer
+		// to one of the requests the LevelChunk queued. Dropping it here left
+		// every column with sky above it stuck partial forever.
+		if entry.Result == protocol.SubChunkResultSuccessAllAir {
+			c.ReceiveSubChunk()
+			continue
 		}
 
 		// Whatever the previous entry left behind (its block entities, or the tail
