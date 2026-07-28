@@ -61,9 +61,10 @@ setLoadingVisible(true, "loading textures…");
  * registries. Wait briefly for it so the atlas builds ONCE with custom tiles,
  * instead of building vanilla-only and rebuilding on arrival. `world` is set
  * only by a keyframe, so it doubles as the "keyframe applied" signal.
- * ponytail: no late re-apply — registries are join-static, and every boot that
- * has custom blocks (capture, dev, fixtures) attaches the stream well inside
- * the timeout; a timed-out boot just renders vanilla-only.
+ * If the timeout fires first (vanilla-only atlas), the late-registries watcher
+ * below rebuilds the atlas once when they finally land — a rebuilt atlas has a
+ * different tile layout, so every already-meshed section must be remeshed or
+ * its baked UV rects point at the wrong tiles (flat wrong-colour sections).
  */
 const REGISTRIES_WAIT_MS = 5000;
 const firstKeyframe = new Promise<void>((resolve) => {
@@ -80,12 +81,13 @@ const firstKeyframe = new Promise<void>((resolve) => {
 
 void firstKeyframe
   .then(() => createTexturedMesher({ registries: store.getState().registries }))
-  .then(({ asMesher }) => {
-    scene.setMesher(asMesher);
+  .then((bundle) => {
+    scene.setMesher(bundle.asMesher);
     assetsPhase = "ready";
     showWorld();
     // Remesh may be pending after setMesher — store subscribe / frame loop drain it.
     paintOverlay();
+    watchLateRegistries(bundle, store.getState().registries !== null);
   })
   .catch((err: unknown) => {
     assetError = err instanceof Error ? err.message : String(err);
@@ -93,6 +95,36 @@ void firstKeyframe
     showWorld();
     paintOverlay();
   });
+
+/**
+ * Rebuild the atlas once if registries arrive only after the mesher was built
+ * (keyframe slower than {@link REGISTRIES_WAIT_MS}). Registries are
+ * join-static, so one application is enough for the life of the page.
+ *
+ * @param bundle - Installed textured-mesher bundle.
+ * @param alreadyApplied - True when the mesher was built with registries.
+ */
+function watchLateRegistries(
+  bundle: Awaited<ReturnType<typeof createTexturedMesher>>,
+  alreadyApplied: boolean,
+): void {
+  if (alreadyApplied) return;
+  let applying = false;
+  const unsubscribe = store.subscribe((state) => {
+    if (applying || state.registries === null) return;
+    applying = true;
+    unsubscribe();
+    void bundle
+      .applyRegistries(state.registries)
+      .then(() => {
+        // New atlas, new tile layout — baked UV rects in existing meshes are stale.
+        scene.remeshAll();
+      })
+      .catch(() => {
+        /* atlas rebuild failed — keep the vanilla-only atlas */
+      });
+  });
+}
 
 const camera = new CameraController(
   (canvas.clientWidth || window.innerWidth) /

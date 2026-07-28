@@ -119,6 +119,10 @@ export interface TexturedMesherBundle {
    * Bind/replace network palette and rebuild the atlas so new short-names pack.
    * Existing call sites that never pass registries stay valid (no-op-capable).
    *
+   * The rebuilt atlas has a different tile layout, so callers MUST remesh every
+   * already-meshed section afterwards (e.g. `scene.remeshAll()`) — stale meshes
+   * keep UV rects baked against the old layout and render the wrong tiles.
+   *
    * @param registries - Keyframe registries or null.
    */
   applyRegistries(registries: Registries | null): Promise<void>;
