@@ -31,9 +31,31 @@ months of work before anyone outside this directory benefits.
 
 Stages 0–4 are shipped and running in CI. `pokebedrock-beh`'s `addon-tests` job
 asks the dev-server manager for capture, and each run publishes its stills and
-run video as the `addon-test-viewer` workflow artefact. Stage 5 (Go-side pack
-acquisition, cache, baseline, stack resolver, asset HTTP) is implemented;
-renderer consumption of those assets starts at stage 6.
+run video as the `addon-test-viewer` workflow artefact.
+
+Stages 5, 6 and 8 are shipped too, and the viewer now renders the real server
+world with the server's own pack textures during a live run. Stage 9's Molang
+interpreter and stage 7's geometry parser exist as libraries; nothing draws an
+entity with them yet. Stage 11's form panel is done. Stages 7, 10 and 12, and the
+rest of 9 and 11, are not started — every box below says which.
+
+Getting the picture right cost a run of bugs worth naming, because each was
+invisible from outside and each looked like a different problem:
+
+- A keyframe carried the whole world (~6.8 MB) twenty times a second, so the SSE
+  writer never finished one and the viewer sat frozen. Frames are paced now.
+- A column with no sections in range encoded as `null`, which threw in the
+  consumer and froze every frame after it.
+- Playwright closes the browser on `SIGTERM` by default — which is how the runner
+  ends a harness — so the run video was lost every time.
+- `blocks.json` resolved winner-takes-all, letting a sound-only server entry erase
+  vanilla's textures.
+- Vanilla keys blocks bare while the wire namespaces them, so 4 identifiers out of
+  1231 resolved and the whole world drew as the missing-texture fallback.
+
+The lesson that generalises: **judge a capture by decoding it.** Every one of those
+was found by pulling frames out of a recording and reading the burnt-in overlay,
+and none was visible in a run that reported itself green.
 
 Four things shipped differently from what the boxes below predicted, each noted
 where it applies: the stream is Server-Sent Events rather than a WebSocket,
@@ -340,28 +362,50 @@ path-traversal coverage. Endpoints documented in [`PROTOCOL.md`](PROTOCOL.md).
 
 ## Stage 6 — terrain
 
-- [ ] Parse `blocks.json` and `terrain_texture.json`, including per-face texture
-      maps, `carried_textures`, and weighted `variations`.
-- [ ] Build the terrain atlas with nearest-neighbour filtering, correct handling
+- [x] Parse `blocks.json` and `terrain_texture.json`, including per-face texture
+      maps, `carried_textures`, and weighted `variations`. Two things about real
+      packs that fixtures will not teach you: vanilla keys blocks **bare**
+      (`stone`, not `minecraft:stone`) while every name on the wire is namespaced,
+      and `blocks.json` must be **merged across the stack** rather than resolved
+      winner-takes-all, because a server pack routinely ships an entry carrying
+      only `sound` and would otherwise erase vanilla's textures. Either mistake
+      renders the entire world as the missing-texture fallback.
+- [x] Build the terrain atlas with nearest-neighbour filtering, correct handling
       of non-16px textures, and animated flipbook entries from
-      `flipbook_textures.json`.
-- [ ] Implement the chunk mesher: face culling against neighbours, greedy
+      `flipbook_textures.json`. Much of the vanilla foliage ships as **TGA only**,
+      so that decodes too (uncompressed and run-length), with `_opaque.png` as a
+      fallback.
+- [x] Implement the chunk mesher: face culling against neighbours, greedy
       merging, a transparency pass, and correct behaviour at column boundaries
-      that have not loaded.
-- [ ] Map block state properties to visual variation — rotation, axis, facing,
+      that have not loaded. Merged quads carry tile-space coordinates and their
+      atlas rect so the texture repeats across the run instead of the sheet being
+      stretched over it.
+- [x] Map block state properties to visual variation — rotation, axis, facing,
       open/closed, age — for vanilla blocks.
-- [ ] Implement liquids: surface geometry, flow direction from state, animated
+- [x] Implement liquids: surface geometry, flow direction from state, animated
       texture, and the layer-1 waterlogging the world already tracks through
       `World.Liquid`.
 - [ ] Implement biome tinting for grass, foliage and water. This needs biome
       data the world does not currently expose; add it to the chunk decode and
-      to the snapshot.
+      to the snapshot. **The renderer's half is done** — tinting runs through a
+      `biomeAt` lookup and degrades to untinted — so this is waiting on the Go
+      side to carry biome ids per column.
 - [ ] Render block entities that the client draws with dedicated geometry rather
       than from the atlas: chests, signs, banners, beds, skulls. The NBT already
-      arrives through `BlockActorDataHandler`.
+      arrives through `BlockActorDataHandler`. Non-cube shapes (slabs, stairs,
+      fences, doors) are still drawn as full cubes.
 
-**Check:** golden-image tests over a fixed fixture volume, plus unit tests for
-the atlas builder and the state-to-model resolver.
+**Check:** unit tests for the atlas builder and the state-to-model resolver, a
+mesher fixture that proves interior faces are culled and merging reduces
+triangles, and a pixel assertion that a merged run repeats its texture rather
+than sampling the sheet. Golden images belong to stage 12.
+
+Reality check that fixtures cannot give you: `npm run diagnose:terrain` serves the
+**real** pinned baseline and a **real** server pack through the bot's own routes
+and counts how many block identifiers resolve against how many fall back, naming
+the reason for each failure and dumping the atlas to a PNG. It found the bare-key
+mismatch above in one local run after three deploy-and-look cycles had failed to,
+and it skips itself when those packs are absent.
 
 ---
 
@@ -443,13 +487,21 @@ asserted. Renderer pack resolution remains for later stage boxes.
 
 ## Stage 9 — animation and Molang
 
-- [ ] Integrate a Molang interpreter and bind the query surface the renderer can
+- [x] Integrate a Molang interpreter and bind the query surface the renderer can
       answer: entity state flags, health and attributes, position and rotation,
       velocity-derived queries, `query.life_time`, `query.anim_time`,
       `query.modified_distance_moved`, variant and mark-variant, and the
-      `query.property` accessor for entity properties.
-- [ ] Extend the snapshot with everything those queries need, including entity
-      properties, which the world does not currently decode.
+      `query.property` accessor for entity properties. The interpreter is in
+      `viewer/src/molang/` (tokeniser, Pratt parser, evaluator, compile cache) with
+      the host supplying queries, arrays, variables and an **injectable** random
+      source — a golden-image renderer cannot call `Math.random`. Unknown queries
+      resolve to 0 and are recorded, so an unimplemented one is reportable rather
+      than silently wrong. Trig is in degrees and out-of-range array indices wrap;
+      both verified against the documentation, not assumed.
+- [x] Extend the snapshot with everything those queries need, including entity
+      properties, which the world does not currently decode. *(entity `props`,
+      flags and attributes ride the snapshot; property **definitions** come from
+      `packet.SyncActorProperty` in stage 8)*
 - [ ] Implement animation playback: bone keyframes, interpolation modes,
       `anim_time_update`, looping, and Molang-valued channels.
 - [ ] Implement animation controllers: states, transitions with Molang
@@ -471,10 +523,18 @@ series.
 
 ## Stage 10 — lighting and environment
 
-- [ ] Decode and store sky and block light from the chunk payload; the world
-      currently discards it.
+- [ ] ~~Decode and store sky and block light from the chunk payload; the world
+      currently discards it.~~ **Wrong premise, corrected.** Bedrock does not send
+      light at all — the client computes it, which is why nothing in the chunk
+      decode touches it. Fill it locally instead: dragonfly already implements the
+      propagation (`chunk.LightArea(...).Fill()`), so a column completing runs a
+      fill and the snapshot carries the result per section. Reimplementing
+      propagation in the browser would be a great deal of code for something
+      already sitting in a dependency.
 - [ ] Implement the client's lighting model: per-face shading, smooth lighting,
-      ambient occlusion, and light propagation on block change.
+      ambient occlusion, and light propagation on block change. Until this lands,
+      terrain renders **unlit at authored brightness** — deliberately, so a flat
+      frame reads as "no lighting yet" rather than as a lighting bug.
 - [ ] Implement the sky: time of day, sun and moon, star field, clouds, and the
       horizon gradient per dimension.
 - [ ] Implement fog from client biome definitions and `fog` JSON, including
@@ -497,9 +557,12 @@ series.
       `packet.LevelEvent`.
 - [ ] Render the heads-up display: hotbar, health, hunger, experience, effect
       icons, and the action bar and title text the bot already receives.
-- [ ] Render forms and containers. The bot tracks open forms, containers, signs
+- [x] Render forms and containers. The bot tracks open forms, containers, signs
       and NPC dialogues; drawing them is what makes a recording of a test show
-      what the player would have seen at the moment of failure.
+      what the player would have seen at the moment of failure. Drawn as a plain
+      DOM panel showing the open form's title, body and buttons, or a container's
+      name and slot count — which is the half that matters for a recording. JSON
+      UI and the font atlas are the boxes below, and are untouched.
 - [ ] Implement JSON UI to the extent the HUD and forms require, driven by the
       pack stack so a server's custom UI appears.
 - [ ] Render text with the client's font atlas, including glyph pages, format
