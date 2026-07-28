@@ -86,7 +86,9 @@ function bufferStatusPart(
   const key = `${senderId}:${part.id}`;
   let parts = partBuffers.get(key);
   if (!parts || parts.length !== part.total) {
-    parts = new Array<string | undefined>(part.total);
+    // fill() matters: Array(n) is sparse and some() skips holes, which made
+    // a fresh buffer look complete after its first fragment.
+    parts = new Array<string | undefined>(part.total).fill(undefined);
     partBuffers.set(key, parts);
   }
   parts[part.index - 1] = part.fragment;
