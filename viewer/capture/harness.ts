@@ -126,9 +126,12 @@ export async function runHarness(opts: HarnessOptions): Promise<void> {
     const page = stillsPage;
     try {
       const video = page.video();
+      // Close the page, keep the context: saveAs waits for the recording to be
+      // finalised and needs a live connection to do it. Closing the context
+      // first tears that down and saveAs fails with "browser has been closed".
       await page.close().catch(() => undefined);
-      await ctx.close().catch(() => undefined);
       if (!video) {
+        await ctx.close().catch(() => undefined);
         log.warn("capture: no video handle after run");
         return;
       }
@@ -151,8 +154,10 @@ export async function runHarness(opts: HarnessOptions): Promise<void> {
           `capture: wrote video ${opts.videoOut} bytes=${bytes} ms=${durationMs}`,
         );
         await video.delete().catch(() => undefined);
+        await ctx.close().catch(() => undefined);
         return;
       }
+      await ctx.close().catch(() => undefined);
 
       const path = await video.path();
       const body = readFileSync(path);

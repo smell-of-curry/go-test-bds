@@ -1,5 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
 import {
   createServer,
   type IncomingMessage,
@@ -287,7 +289,10 @@ function delta(tick: number): JsonlFrame {
   };
 }
 
-function spawnHarness(stream: string): ChildProcessWithoutNullStreams {
+function spawnHarness(
+  stream: string,
+  videoOut?: string,
+): ChildProcessWithoutNullStreams {
   return spawn(
     process.execPath,
     [
@@ -304,6 +309,7 @@ function spawnHarness(stream: string): ChildProcessWithoutNullStreams {
       "60",
       "--log-level",
       "info",
+      ...(videoOut ? ["--video-out", videoOut] : []),
     ],
     {
       cwd: viewerRoot,
@@ -463,5 +469,51 @@ test("capture harness: stills + one run video against fake bot", async () => {
       child.kill("SIGTERM");
     }
     await bot.close();
+  }
+});
+
+// --video-out is the path production uses: the bot's upload endpoint is gone by
+// the time a run video is finalised. It broke twice in a row on the live server
+// while the POST path stayed green, which is what this covers.
+test("capture harness: --video-out writes a whole webm", async () => {
+  await buildCaptureCli();
+
+  const bot = await startFakeBot();
+  const dir = mkdtempSync(join(tmpdir(), "gotestbds-videoout-"));
+  const videoOut = join(dir, "run.webm");
+  let child: ChildProcessWithoutNullStreams | undefined;
+  try {
+    child = spawnHarness(bot.url, videoOut);
+    const exited = new Promise<number>((resolve, reject) => {
+      child!.on("error", reject);
+      child!.on("exit", (code) => resolve(code ?? 1));
+    });
+    let stderr = "";
+    child.stdout.on("data", (c: Buffer) => (stderr += c.toString()));
+    child.stderr.on("data", (c: Buffer) => (stderr += c.toString()));
+
+    await waitFor(() => bot.stream.attached >= 2);
+    bot.stream.broadcast(mark("runStart", { runId: "run-cap" }));
+    bot.stream.broadcast(delta(110));
+    bot.stream.broadcast(delta(120));
+    bot.stream.broadcast(
+      mark("runEnd", { runId: "run-cap", status: "passed", tick: 120 }),
+    );
+    bot.stream.closeAll();
+
+    const code = await exited;
+    expect(code, stderr).toBe(0);
+
+    const bytes = statSync(videoOut).size;
+    expect(bytes).toBeGreaterThan(1_000);
+    // WebM/Matroska magic. A truncated or unfinalised file fails here.
+    const head = readFileSync(videoOut).subarray(0, 4).toString("hex");
+    expect(head).toBe("1a45dfa3");
+    expect(stderr).not.toContain("video upload failed");
+    expect(bot.artifacts.filter((a) => a.kind === "video")).toHaveLength(0);
+  } finally {
+    child?.kill();
+    await bot.close();
+    rmSync(dir, { recursive: true, force: true });
   }
 });
