@@ -30,6 +30,8 @@ type Bot struct {
 
 	packets chan packet.Packet
 	logger  *slog.Logger
+
+	chunks chunkHealth
 }
 
 // NewBot ...
@@ -84,7 +86,9 @@ func (b *Bot) StartTickLoop() {
 
 	var health tickHealth
 	for {
-		health.report(b.logger, time.Now())
+		now := time.Now()
+		health.report(b.logger, now)
+		b.chunks.report(b.logger, b.a, now)
 
 		select {
 		case <-b.closed:

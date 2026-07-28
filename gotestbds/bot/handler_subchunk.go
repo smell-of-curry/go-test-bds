@@ -22,6 +22,11 @@ type SubChunkHandler struct{}
 // Handle ...
 func (*SubChunkHandler) Handle(p packet.Packet, b *Bot, a *actor.Actor) error {
 	subChunk := p.(*packet.SubChunk)
+	if b != nil {
+		for _, entry := range subChunk.SubChunkEntries {
+			b.chunks.subChunkResult(entry.Result)
+		}
+	}
 	pos := subChunk.Position
 	dim, _ := w.DimensionByID(int(subChunk.Dimension))
 

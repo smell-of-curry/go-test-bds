@@ -696,6 +696,13 @@ func (a *Actor) SetChunkLoadCenter(pos cube.Pos) {
 	a.loadingCenter = pos
 }
 
+// ChunkLoadCenter returns the position columns are kept around.
+//
+// @returns the block position the unload window is centred on.
+func (a *Actor) ChunkLoadCenter() cube.Pos {
+	return a.loadingCenter
+}
+
 // RequestRenderDistance requests new chunk radius.
 func (a *Actor) RequestRenderDistance(chunkRadius int) {
 	_ = a.conn.WritePacket(&packet.RequestChunkRadius{ChunkRadius: int32(chunkRadius)})
