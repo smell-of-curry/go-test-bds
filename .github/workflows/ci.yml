@@ -28,6 +28,50 @@ jobs:
       - name: Test
         run: go test ./...
 
+  viewer:
+    name: Viewer
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: viewer/package-lock.json
+
+      - name: Install viewer dependencies
+        working-directory: viewer
+        run: npm ci
+
+      - name: Install Chromium
+        working-directory: viewer
+        run: npx playwright install --with-deps chromium
+
+      - name: Typecheck
+        working-directory: viewer
+        run: npm run typecheck
+
+      - name: Build
+        working-directory: viewer
+        run: npx vite build
+
+      - name: Test
+        working-directory: viewer
+        run: npm test
+
+      # The suites render, screenshot and record; when one fails, the picture is
+      # the evidence and the log rarely is.
+      - name: Upload viewer test output
+        if: always() && hashFiles('viewer/test-results/**') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: viewer-test-results
+          path: viewer/test-results
+          retention-days: 14
+
   e2e:
     name: E2E (BDS)
     runs-on: ubuntu-latest
@@ -52,6 +96,16 @@ jobs:
 
       - name: Bundle e2e fixture pack
         run: npm run build:e2e-pack
+
+      # The viewer rides along on this job rather than getting its own: it needs
+      # a real server and a real bot, and both are already standing up here.
+      - name: Build viewer app and capture harness
+        working-directory: viewer
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+          npx vite build
+          npm run build:capture
 
       - name: Verify bundle keeps @minecraft modules external
         run: |
@@ -173,6 +227,16 @@ jobs:
 
           cleanup() {
             set +e
+            # The harness writes the run video on its way out, so let it finish
+            # before the bot it streams from goes away.
+            if [ -f capture.pid ]; then
+              kill "$(cat capture.pid)" 2>/dev/null
+              for i in $(seq 1 30); do
+                kill -0 "$(cat capture.pid)" 2>/dev/null || break
+                sleep 1
+              done
+              kill -9 "$(cat capture.pid)" 2>/dev/null || true
+            fi
             if [ -f bot.pid ]; then
               kill "$(cat bot.pid)" 2>/dev/null || true
               kill -9 "$(cat bot.pid)" 2>/dev/null || true
@@ -217,7 +281,10 @@ jobs:
           fi
 
           RUN_ID="ci-${GITHUB_RUN_ID:-local}-${GITHUB_RUN_ATTEMPT:-1}"
+          mkdir -p artefacts
           ./bin/gotestbds --address 127.0.0.1:19132 --name TestBot --bots 1 --log-level info \
+            --viewer --viewer-address 127.0.0.1:19140 \
+            --viewer-artifacts "$PWD/artefacts" --viewer-app "$PWD/viewer/dist" \
             > bot.log 2>&1 &
           echo $! > bot.pid
 
@@ -234,6 +301,15 @@ jobs:
             sleep 1
           done
           sleep 2
+
+          # Capture is best effort by contract: it must never decide the verdict,
+          # so a harness that fails to start is a warning and nothing more.
+          node viewer/dist-capture/cli.cjs --stream http://127.0.0.1:19140 \
+            --bot TestBot --video-out "$PWD/artefacts/run.webm" --log-level info \
+            > capture.log 2>&1 &
+          echo $! > capture.pid
+          sleep 3
+          kill -0 "$(cat capture.pid)" 2>/dev/null || echo "::warning::capture harness did not start"
 
           echo "scriptevent gotestbds:run {\"runId\":\"${RUN_ID}\",\"bots\":1}" > bds/bds.in
 
@@ -274,5 +350,16 @@ jobs:
             bds.log
             bds-boot.log
             bot.log
+            capture.log
           if-no-files-found: warn
+          retention-days: 14
+
+      # Stills and the run video from a deterministic world: the reference the
+      # viewer's own changes are judged against.
+      - name: Upload viewer artefacts
+        if: always() && hashFiles('artefacts/**') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-viewer-artefacts
+          path: artefacts
           retention-days: 14

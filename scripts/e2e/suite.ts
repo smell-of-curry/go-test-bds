@@ -97,6 +97,9 @@ export const protocolSuite: TestSuite = defineSuite({
         const response = await shown;
         assert(!response.canceled, "form response should not be canceled");
         assertEquals(response.selection, 0, "Confirm is button index 0");
+
+        // No-op without a viewer, which is how this suite usually runs.
+        await ctx.screenshot("form-answered");
       },
     },
     {
@@ -123,6 +126,11 @@ export const protocolSuite: TestSuite = defineSuite({
             description: "the placed gold block to reach the bot",
           },
         );
+
+        // Aim at the subject first: a still of a bot looking the other way
+        // proves nothing about the block the test just placed.
+        await ctx.bot.lookAt(pos);
+        await ctx.screenshot("gold-block");
       },
     },
     {
