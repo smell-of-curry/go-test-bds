@@ -110,7 +110,7 @@ export class AssetClient {
         const buf = await this.fetchBytes(key);
         if (!buf) return null;
         const text = new TextDecoder().decode(buf);
-        return JSON.parse(text) as T;
+        return parsePackJson<T>(text, key);
       })();
       this.json.set(key, p);
     }
@@ -161,4 +161,71 @@ export class AssetClient {
  */
 export function normalizePath(path: string): string {
   return path.replace(/\\/g, "/").replace(/^\/+/, "").toLowerCase();
+}
+
+/**
+ * Parse pack JSON the way the client accepts it.
+ *
+ * Bedrock pack files are not strict JSON: Mojang's own `blocks.json` opens with
+ * a `//` comment, and pack authors leave trailing commas. The client reads them
+ * regardless, so a viewer that insists on strict JSON refuses the vanilla
+ * baseline and renders placeholders forever.
+ *
+ * @param text - Raw file text.
+ * @param path - Path used in the error message.
+ * @returns the parsed value.
+ * @throws when the text is not JSON even after comments are removed.
+ */
+export function parsePackJson<T = unknown>(text: string, path = ""): T {
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    const stripped = stripJsonComments(text).replace(/,(\s*[}\]])/g, "$1");
+    try {
+      return JSON.parse(stripped) as T;
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      throw new Error(`${path || "json"}: ${reason}`);
+    }
+  }
+}
+
+/**
+ * Remove `//` and block comments while leaving string contents intact.
+ *
+ * @param text - Raw file text.
+ * @returns text with comments replaced by nothing.
+ */
+function stripJsonComments(text: string): string {
+  let out = "";
+  let inString = false;
+  let escaped = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i]!;
+    if (inString) {
+      out += c;
+      if (escaped) escaped = false;
+      else if (c === "\\") escaped = true;
+      else if (c === '"') inString = false;
+      continue;
+    }
+    if (c === '"') {
+      inString = true;
+      out += c;
+      continue;
+    }
+    if (c === "/" && text[i + 1] === "/") {
+      while (i < text.length && text[i] !== "\n") i++;
+      out += "\n";
+      continue;
+    }
+    if (c === "/" && text[i + 1] === "*") {
+      i += 2;
+      while (i < text.length && !(text[i] === "*" && text[i + 1] === "/")) i++;
+      i++;
+      continue;
+    }
+    out += c;
+  }
+  return out;
 }

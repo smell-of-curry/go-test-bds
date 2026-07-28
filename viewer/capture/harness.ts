@@ -3,8 +3,8 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  statSync,
   unlinkSync,
-  writeFileSync,
 } from "node:fs";
 import http from "node:http";
 import https from "node:https";
@@ -132,27 +132,30 @@ export async function runHarness(opts: HarnessOptions): Promise<void> {
         log.warn("capture: no video handle after run");
         return;
       }
-      const path = await video.path();
-      const body = readFileSync(path);
       const durationMs = Date.now() - videoStartedAt;
 
       // Writing the file beats posting it when we have somewhere to put it: the
       // bot hosts the upload endpoint and exits as soon as the run finishes, so
       // a recording finalised at shutdown has nothing left to POST to. The
       // runner reconciles the artefact directory once everything is down.
+      //
+      // saveAs, not a read of video.path(): the path exists as soon as recording
+      // starts and ffmpeg is still writing it, so reading it directly hands back
+      // whatever has been flushed — a recording that stopped on a block boundary
+      // (exactly 512 KiB, in the run that found this).
       if (opts.videoOut) {
         mkdirSync(dirname(opts.videoOut), { recursive: true });
-        writeFileSync(opts.videoOut, body);
+        await video.saveAs(opts.videoOut);
+        const bytes = statSync(opts.videoOut).size;
         log.info(
-          `capture: wrote video ${opts.videoOut} bytes=${body.length} ms=${durationMs}`,
+          `capture: wrote video ${opts.videoOut} bytes=${bytes} ms=${durationMs}`,
         );
-        try {
-          unlinkSync(path);
-        } catch {
-          /* ignore */
-        }
+        await video.delete().catch(() => undefined);
         return;
       }
+
+      const path = await video.path();
+      const body = readFileSync(path);
 
       await postArtifact(opts.stream, {
         kind: "video",
