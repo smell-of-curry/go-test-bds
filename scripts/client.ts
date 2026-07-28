@@ -123,11 +123,18 @@ function ensureSubscribed(): void {
       if (!part) return;
       // Keep fragments out of the server's chat even while incomplete.
       event.cancel = true;
+      if (part.index === 1)
+        console.warn(
+          `[GOTESTBDS-SDK] receiving chunked status id=${part.id} parts=${part.total}`,
+        );
       const payload = bufferStatusPart(event.sender.id, part);
       if (payload === undefined) return;
       try {
         envelope = JSON.parse(payload) as StatusEnvelope;
-      } catch {
+      } catch (error) {
+        console.warn(
+          `[GOTESTBDS-SDK] chunked status id=${part.id} reassembly failed: ${String(error)}`,
+        );
         return;
       }
     }

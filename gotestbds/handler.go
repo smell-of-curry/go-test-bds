@@ -201,14 +201,31 @@ func MarshalStatusEnvelope(id, status, message string, data any) ([]byte, error)
 	})
 }
 
+// statusFragmentInterval spaces out the fragments of a chunked status
+// envelope. BDS drops chat that arrives faster than a real client could type,
+// so back-to-back Text packets from one tick never all survive.
+const statusFragmentInterval = 60 * time.Millisecond
+
 // broadcastStatus broadcasts status. Large envelopes (e.g. a form snapshot
 // with dozens of buttons) are split into chat-sized fragments because BDS
-// silently drops oversized inbound chat.
+// silently drops oversized inbound chat; fragments are paced one per
+// statusFragmentInterval for the same reason.
 func broadcastStatus(id, status, message string, data any, b *bot.Bot) {
 	b.Execute(func(a *actor.Actor) {
 		payload, _ := MarshalStatusEnvelope(id, status, message, data)
-		for _, msg := range EncodeStatusMessages(id, string(payload)) {
-			a.Chat(msg)
+		msgs := EncodeStatusMessages(id, string(payload))
+		a.Chat(msgs[0])
+		if len(msgs) == 1 {
+			return
 		}
+		slog.Info("chunked status", "id", id, "fragments", len(msgs), "bytes", len(payload))
+		go func() {
+			for _, msg := range msgs[1:] {
+				time.Sleep(statusFragmentInterval)
+				b.Execute(func(a *actor.Actor) {
+					a.Chat(msg)
+				})
+			}
+		}()
 	})
 }
