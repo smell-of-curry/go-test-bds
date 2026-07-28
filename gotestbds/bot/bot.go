@@ -85,6 +85,7 @@ func (b *Bot) StartTickLoop() {
 	go b.handlePackets()
 
 	var health tickHealth
+	health.watchStalls(b.logger, b.closed)
 	for {
 		now := time.Now()
 		health.report(b.logger, now)

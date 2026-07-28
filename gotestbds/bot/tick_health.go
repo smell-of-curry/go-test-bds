@@ -3,6 +3,8 @@ package bot
 import (
 	"fmt"
 	"log/slog"
+	"runtime"
+	"sync/atomic"
 	"time"
 
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
@@ -36,11 +38,68 @@ type tickHealth struct {
 	packets     int
 	slowestName string
 	slowest     time.Duration
+
+	// Written by the bot goroutine, read by the stall watchdog.
+	lastTickUnixNano atomic.Int64
+}
+
+// tickStallTimeout is how long without a tick counts as stalled.
+//
+// Well past a slow chunk decode, well short of a run's patience.
+const tickStallTimeout = 3 * time.Second
+
+// watchStalls reports when the tick loop stops ticking altogether, with the
+// stack of every goroutine at that moment.
+//
+// A loop that ticks slowly reports itself; a loop that stops cannot — the report
+// runs inside it. Everything downstream then freezes with no explanation: the
+// world stops updating, the viewer's tick sticks, marks stop arriving, and the
+// only symptom is a recording where nothing changes. The stack says which call
+// is blocking instead of leaving it to be guessed at.
+//
+// @param log Where to report; nil disables the watchdog.
+// @param done Closed when the loop exits.
+func (h *tickHealth) watchStalls(log *slog.Logger, done <-chan struct{}) {
+	if log == nil {
+		return
+	}
+	go func() {
+		ticker := time.NewTicker(time.Second)
+		defer ticker.Stop()
+		reported := false
+		for {
+			select {
+			case <-done:
+				return
+			case <-ticker.C:
+			}
+			last := h.lastTickUnixNano.Load()
+			if last == 0 {
+				continue
+			}
+			stalled := time.Since(time.Unix(0, last))
+			if stalled < tickStallTimeout {
+				reported = false
+				continue
+			}
+			if reported {
+				continue
+			}
+			reported = true
+			buf := make([]byte, 16<<10)
+			n := runtime.Stack(buf, true)
+			log.Warn("bot tick loop has stalled",
+				"stalledMs", stalled.Milliseconds(),
+				"goroutines", string(buf[:n]),
+			)
+		}
+	}()
 }
 
 // tick records one simulated tick.
 func (h *tickHealth) tick() {
 	h.ticks++
+	h.lastTickUnixNano.Store(time.Now().UnixNano())
 }
 
 // packet records the cost of handling one packet.

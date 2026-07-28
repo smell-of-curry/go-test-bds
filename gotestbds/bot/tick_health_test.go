@@ -44,7 +44,8 @@ func TestTickHealthReportsStarvation(t *testing.T) {
 		t.Fatalf("warning does not carry the cost: %q", out)
 	}
 	if h.ticks != 0 || h.packets != 0 || h.slowest != 0 {
-		t.Fatalf("window not reset: %+v", h)
+		t.Fatalf("window not reset: ticks=%d packets=%d slowest=%s",
+			h.ticks, h.packets, h.slowest)
 	}
 }
 
