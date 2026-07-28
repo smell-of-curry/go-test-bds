@@ -112,6 +112,21 @@ export async function runHarness(opts: HarnessOptions): Promise<void> {
   });
   let stillsPage: Page = await stillsCtx.newPage();
 
+  // A browser that dies mid-run explains every later failure at once — captures
+  // that time out, a video that cannot be saved — and says nothing by itself.
+  let browserDown = "";
+  browser.on("disconnected", () => {
+    browserDown = "browser disconnected";
+    log.error("capture: browser disconnected");
+  });
+  stillsPage.on("crash", () => {
+    browserDown = "page crashed";
+    log.error("capture: page crashed (out of memory under software GL?)");
+  });
+  stillsPage.on("pageerror", (err) => {
+    log.warn(`capture: page error: ${err.message}`);
+  });
+
   // Subscribe before the page so marks/captures cannot race past us while the
   // stills page is still loading. Queue until stillsReady.
   let stillsReady = false;
@@ -184,7 +199,10 @@ export async function runHarness(opts: HarnessOptions): Promise<void> {
         /* ignore */
       }
     } catch (err) {
-      log.warn(`capture: video upload failed: ${String(err)}`);
+      log.warn(
+        `capture: video upload failed: ${String(err)}` +
+          (browserDown ? ` (${browserDown} earlier in the run)` : ""),
+      );
     } finally {
       try {
         rmSync(videoDir, { recursive: true, force: true });

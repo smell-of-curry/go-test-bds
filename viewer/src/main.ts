@@ -124,7 +124,27 @@ const stream = new SnapshotStream(streamUrl, {
 });
 stream.start();
 
+/**
+ * Minimum gap between renders, in milliseconds.
+ *
+ * The simulation ticks at 20 Hz, so painting faster than that shows nothing
+ * new, and capture runs on software GL where each frame is expensive enough to
+ * matter. Interpolation still runs per paint, so motion stays smooth.
+ */
+const PAINT_INTERVAL_MS = 50;
+// Negative infinity, not 0: `performance.now()` is already tens of milliseconds
+// at load, so a zero start would skip the very first paint and leave the camera
+// at the origin for a frame — which a screenshot taken immediately would catch.
+let lastPaintAt = Number.NEGATIVE_INFINITY;
+
 function frame(): void {
+  const now = performance.now();
+  if (now - lastPaintAt < PAINT_INTERVAL_MS) {
+    requestAnimationFrame(frame);
+    return;
+  }
+  lastPaintAt = now;
+
   const state = store.getState();
   if (state.schemaOk) {
     if (scene.pendingRemeshCount > 0) {
