@@ -534,12 +534,51 @@ stage 1 only has to carry it.
   "sign": { "front": ["a", "b", "c", "d"], "back": [] },
   "dialogue": { "npcName": "Oak", "text": "...", "buttons": ["Yes"] },
   "messages": ["§aWelcome"],
-  "title": "", "subtitle": "", "actionBar": ""
+  "title": "Level Up!",
+  "subtitle": "Charizard",
+  "actionBar": "Press F",
+  "fadeInTicks": 10,
+  "stayTicks": 70,
+  "fadeOutTicks": 20
 }
 ```
 
 Every key is nullable and absent when there is nothing open. `messages` is the
-most recent 20 chat lines, oldest first.
+most recent 20 player-facing chat lines, oldest first. Internal bot protocol
+lines (`[RUN_ACTION]`, `[STATUS]`, `[GOTESTBDS]`) are never included.
+
+`title` / `subtitle` / `actionBar` come from `packet.SetTitle`. Fade timings are
+in Bedrock ticks (20ths of a second); when absent the client uses 10 / 70 / 20.
+
+Actor already carries hotbar (slots 0–8), `heldSlot`, `health`, `maxHealth`, and
+`food` for the HUD — those ride the world frames, not this object.
+
+### `chat` (event lane)
+
+One player-facing chat/system line. Queued like `mark` / `capture` — never
+dropped for world-frame backpressure.
+
+```json
+{ "v": 1, "type": "chat", "bot": "TestBot", "tick": 1025, "text": "§aWelcome" }
+```
+
+Protocol noise prefixes are filtered on the Go side before emit.
+
+### `title` (event lane)
+
+Title / subtitle / action-bar snapshot after a `SetTitle` mutation. Same
+never-drop queue as `chat`.
+
+```json
+{
+  "v": 1, "type": "title", "bot": "TestBot", "tick": 1025,
+  "title": "Level Up!", "subtitle": "Charizard", "actionBar": "Press F",
+  "fadeInTicks": 10, "stayTicks": 70, "fadeOutTicks": 20,
+  "clear": false
+}
+```
+
+`clear` is true when the packet cleared/reset every title surface.
 
 ---
 
@@ -551,8 +590,8 @@ never reach it.
 - World state is projected once per tick on the bot goroutine. Each subscriber
   then gets its own paced frame (column bookkeeping differs per connection).
 - Each subscriber keeps at most one pending world frame: a newer frame replaces
-  an unread one. Events (mark/capture) queue separately and never drop for world
-  backpressure.
+  an unread one. Events (`mark` / `capture` / `chat` / `title`) queue separately
+  and never drop for world backpressure.
 - Superseding an unsent catch-up `delta` re-queues only that frame's columns
   (its `columnsAdded` batch plus any columns it patched in place). The client
   keeps every column already delivered — a full keyframe restart here is what

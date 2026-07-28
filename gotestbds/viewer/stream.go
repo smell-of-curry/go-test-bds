@@ -40,6 +40,11 @@ type Stream struct {
 	lastTick atomic.Uint64
 	healthAt time.Time
 	lastDim  atomic.Int32
+
+	// Hud event cursors — bot goroutine only. Chat/title ride the event lane
+	// so a slow world subscriber cannot lose a line that a recording needs.
+	lastMsgSeq   uint64
+	lastTitleSeq uint64
 }
 
 // Resync reasons appear on the stream-health warning so a thrash loop names
@@ -368,6 +373,8 @@ func (s *Stream) Tick(a *actor.Actor) {
 		}
 		sub.pushWorld(frame, keyframe)
 	}
+
+	s.emitHudEvents(a)
 }
 
 // frameFor builds one subscriber's paced world frame from the shared projection.
@@ -726,4 +733,53 @@ func (s *Stream) emitMark(m Mark) {
 	}
 	data, _ := json.Marshal(mf)
 	s.emitRaw("mark", data)
+}
+
+// emitHudEvents fans chat/title changes on the event lane (never dropped for
+// world backpressure). Protocol noise is filtered here and in encodeUI.
+//
+// @param a Live actor on the bot goroutine.
+func (s *Stream) emitHudEvents(a *actor.Actor) {
+	tick := a.CurrentTick()
+
+	msgs := a.MessagesFromSeq(s.lastMsgSeq)
+	if seq := a.MessageSeq(); seq > s.lastMsgSeq {
+		s.lastMsgSeq = seq
+	}
+	for _, m := range msgs {
+		if isProtocolChatNoise(m.Text) {
+			continue
+		}
+		cf := ChatFrame{
+			V:    SchemaVersion,
+			Type: "chat",
+			Bot:  s.name,
+			Tick: tick,
+			Text: m.Text,
+		}
+		data, _ := json.Marshal(cf)
+		s.emitRaw("chat", data)
+	}
+
+	titleSeq := a.TitleSeq()
+	if titleSeq == 0 || titleSeq == s.lastTitleSeq {
+		return
+	}
+	s.lastTitleSeq = titleSeq
+	st := a.ScreenTitle()
+	tf := TitleFrame{
+		V:            SchemaVersion,
+		Type:         "title",
+		Bot:          s.name,
+		Tick:         tick,
+		Title:        st.Title,
+		Subtitle:     st.Subtitle,
+		ActionBar:    st.ActionBar,
+		FadeInTicks:  st.FadeInTicks,
+		StayTicks:    st.StayTicks,
+		FadeOutTicks: st.FadeOutTicks,
+		Clear:        st.Title == "" && st.Subtitle == "" && st.ActionBar == "",
+	}
+	data, _ := json.Marshal(tf)
+	s.emitRaw("title", data)
 }

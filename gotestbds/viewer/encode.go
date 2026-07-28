@@ -777,7 +777,21 @@ func (e *encoder) encodeUI(a *actor.Actor) UI {
 		}
 	}
 	for _, m := range a.RecentMessages(20) {
+		if isProtocolChatNoise(m.Text) {
+			continue
+		}
 		ui.Messages = append(ui.Messages, m.Text)
+	}
+	st := a.ScreenTitle()
+	ui.Title = st.Title
+	ui.Subtitle = st.Subtitle
+	ui.ActionBar = st.ActionBar
+	// Omit default fade timings when nothing is on screen — keeps empty UI `{}`
+	// on the wire instead of always shipping 10/70/20.
+	if st.Title != "" || st.Subtitle != "" || st.ActionBar != "" {
+		ui.FadeInTicks = st.FadeInTicks
+		ui.StayTicks = st.StayTicks
+		ui.FadeOutTicks = st.FadeOutTicks
 	}
 	return ui
 }

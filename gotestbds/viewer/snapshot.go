@@ -342,7 +342,7 @@ type Effect struct {
 	DurationMs int64  `json:"durationMs"`
 }
 
-// UI is open forms/containers and recent chat.
+// UI is open forms/containers and recent chat / title state.
 type UI struct {
 	Form      *UIForm      `json:"form,omitempty"`
 	Container *UIContainer `json:"container,omitempty"`
@@ -352,6 +352,36 @@ type UI struct {
 	Title     string       `json:"title,omitempty"`
 	Subtitle  string       `json:"subtitle,omitempty"`
 	ActionBar string       `json:"actionBar,omitempty"`
+	// Fade timings for title/subtitle (ticks). Absent → client defaults.
+	FadeInTicks  int32 `json:"fadeInTicks,omitempty"`
+	StayTicks    int32 `json:"stayTicks,omitempty"`
+	FadeOutTicks int32 `json:"fadeOutTicks,omitempty"`
+}
+
+// ChatFrame is one player-facing chat/system line on the event lane.
+// Protocol noise ([RUN_ACTION]/[STATUS]/[GOTESTBDS]) is never emitted.
+type ChatFrame struct {
+	V    int    `json:"v"`
+	Type string `json:"type"`
+	Bot  string `json:"bot"`
+	Tick uint64 `json:"tick"`
+	Text string `json:"text"`
+}
+
+// TitleFrame is a title / subtitle / action-bar update on the event lane.
+type TitleFrame struct {
+	V            int    `json:"v"`
+	Type         string `json:"type"`
+	Bot          string `json:"bot"`
+	Tick         uint64 `json:"tick"`
+	Title        string `json:"title,omitempty"`
+	Subtitle     string `json:"subtitle,omitempty"`
+	ActionBar    string `json:"actionBar,omitempty"`
+	FadeInTicks  int32  `json:"fadeInTicks,omitempty"`
+	StayTicks    int32  `json:"stayTicks,omitempty"`
+	FadeOutTicks int32  `json:"fadeOutTicks,omitempty"`
+	// Clear is true when the packet cleared/reset the title surfaces.
+	Clear bool `json:"clear,omitempty"`
 }
 
 // UIForm is an open server form.

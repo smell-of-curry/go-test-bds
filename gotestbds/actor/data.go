@@ -32,6 +32,7 @@ type actorData struct {
 	lastSign     *Sign
 	lastDialogue *Dialogue
 	messages     *messageRing
+	title        *titleState
 
 	container *Container
 

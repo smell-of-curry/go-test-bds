@@ -190,6 +190,7 @@ func (b *Bot) registerHandlers() {
 		packet.IDNetworkChunkPublisherUpdate: &NetworkChunkPublisherUpdateHandler{},
 		packet.IDModalFormRequest:            &ModalFormRequestHandler{},
 		packet.IDText:                        &TextHandler{},
+		packet.IDSetTitle:                    &SetTitleHandler{},
 		packet.IDMobArmourEquipment:          &MobArmourEquipmentHandler{},
 		packet.IDMobEquipment:                &MobEquipmentHandler{},
 		packet.IDBlockActorData:              &BlockActorDataHandler{},
