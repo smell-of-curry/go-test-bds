@@ -107,6 +107,13 @@ test("follow camera frames the actor from behind and above", async ({
     const appUrl = `${h.base}?stream=${encodeURIComponent(h.streamUrl)}&camera=follow`;
     await openViewer(page, appUrl);
 
+    // The camera is placed by a paint, and paints are capped to one per tick,
+    // so readiness of the data does not imply the camera has moved yet.
+    await page.waitForFunction(() => {
+      const d = window.__viewer?.diag();
+      return !!d && d.actorEye !== null && d.cam[1] !== 0;
+    });
+
     const got = await page.evaluate(() => {
       const v = window.__viewer!;
       const d = v.diag();
