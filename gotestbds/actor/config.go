@@ -1,12 +1,14 @@
 package actor
 
 import (
+	"github.com/df-mc/dragonfly/server/block/cube"
 	dfworld "github.com/df-mc/dragonfly/server/world"
 	"github.com/google/uuid"
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/entity"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/inventory"
+	"github.com/smell-of-curry/go-test-bds/gotestbds/mcmath"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/mcmath/physics"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/world"
 )
@@ -46,6 +48,9 @@ func (c Config) New() (actor *Actor) {
 		ui:            c.Ui,
 		effectManager: entity.NewEffectManager(),
 		chunkRadius:   int(gameData.ChunkRadius),
+		// Until the first NetworkChunkPublisherUpdate, unload against spawn —
+		// leaving this at {0,0,0} would prune a spawn far from the origin.
+		loadingCenter: cube.PosFromVec3(mcmath.Vec32To64(gameData.PlayerPosition)),
 	}
 
 	data.movementBitset = protocol.NewBitset(packet.PlayerAuthInputBitsetSize)

@@ -115,7 +115,7 @@ func TestGoStreamGolden(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read golden %s: %v (re-run with -update-fixture)", path, err)
 	}
-	if bytes.Equal(got, want) {
+	if bytes.Equal(got, bytes.ReplaceAll(want, []byte("\r\n"), []byte("\n"))) {
 		return
 	}
 
@@ -210,6 +210,9 @@ func byteLines(lines []string) [][]byte {
 }
 
 func splitLines(b []byte) []string {
+	// The golden file is committed, so git decides its line endings on checkout:
+	// on Windows the same bytes come back CRLF and every line "differs".
+	b = bytes.ReplaceAll(b, []byte("\r\n"), []byte("\n"))
 	b = bytes.TrimSuffix(b, []byte("\n"))
 	if len(b) == 0 {
 		return nil

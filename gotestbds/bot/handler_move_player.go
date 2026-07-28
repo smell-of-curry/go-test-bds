@@ -19,6 +19,18 @@ const eyeOffset = 1.62
 // simulating from where it last thought it was, so it reports a position the
 // server left behind and every later assertion about where it stands is
 // answered from that fiction.
+//
+// After applying the move the bot must also:
+//   - re-centre its own chunk unload window on the new position (the next
+//     NetworkChunkPublisherUpdate usually follows, but LevelChunks for the
+//     destination can arrive first — and unloadChunks would discard them as
+//     too far from the old centre), and
+//   - send a PlayerAuthInput at the new position immediately. Servers (BDS
+//     included) gate post-teleport chunk streaming on the client reporting
+//     itself there; waiting for the next Tick leaves a window where the
+//     server keeps publishing around the old position while the bot's prune
+//     window already moved — exactly the "columns → 0, never recovers"
+//     failure after a long-distance teleport.
 type MovePlayerHandler struct{}
 
 // Handle ...
@@ -34,10 +46,13 @@ func (*MovePlayerHandler) Handle(p packet.Packet, _ *Bot, a *actor.Actor) error 
 		return nil
 	}
 
-	a.Move(pos.Sub(mgl64.Vec3{0, eyeOffset}), rot)
+	feet := pos.Sub(mgl64.Vec3{0, eyeOffset})
+	a.Move(feet, rot)
 	// Whatever the bot was doing when the server moved it no longer applies:
 	// keeping the velocity makes it carry a fall into its new position and drift
 	// straight back out of wherever it was put.
 	a.SetVelocity(mgl64.Vec3{})
+	a.SetChunkLoadCenter(cube.PosFromVec3(feet))
+	a.SendMovement()
 	return nil
 }
