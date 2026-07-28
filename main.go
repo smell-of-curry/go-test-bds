@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"sync"
 	"syscall"
 
@@ -20,6 +21,7 @@ import (
 	"github.com/sandertv/gophertunnel/minecraft"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/login"
 	"github.com/smell-of-curry/go-test-bds/gotestbds"
+	"github.com/smell-of-curry/go-test-bds/gotestbds/assets"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/viewer"
 )
 
@@ -51,13 +53,42 @@ func main() {
 
 	var hub *viewer.Hub
 	if config.Viewer.Enabled {
-		var err error
+		cacheDir := config.Viewer.CacheDir
+		if cacheDir == "" {
+			cacheDir = filepath.Join(config.Viewer.ArtifactDir, ".cache")
+		}
+		baselineTag := config.Viewer.BaselineTag
+		if baselineTag == "" {
+			if pin, err := assets.ReadPinFile(filepath.Join("viewer", "baseline.tag")); err == nil {
+				baselineTag = pin
+			} else {
+				baselineTag = assets.DefaultBaselineTag
+			}
+		}
+		// Assets are what make the render faithful, not what makes the run
+		// valid: a missing baseline or a blocked network must cost textures,
+		// never a verdict. The viewer carries on with placeholder geometry and
+		// says so, loudly enough to act on.
+		assetM, err := assets.New(ctx, assets.Options{
+			CacheDir:              cacheDir,
+			BaselineTag:           baselineTag,
+			AcceptServerPacks:     config.Viewer.AcceptServerPacks,
+			Offline:               config.Viewer.Offline,
+			MemoryPerformanceTier: config.Viewer.MemoryPerformanceTier,
+			Logger:                logger.With("src", "assets"),
+		})
+		if err != nil {
+			logger.Error("viewer assets unavailable; rendering placeholders",
+				"error", err, "cache", cacheDir, "baseline", baselineTag)
+			assetM = nil
+		}
 		hub, err = viewer.New(viewer.Options{
 			Address:       config.Viewer.Address,
 			Radius:        config.Viewer.Radius,
 			SectionRadius: config.Viewer.SectionRadius,
 			ArtifactDir:   config.Viewer.ArtifactDir,
 			AppDir:        config.Viewer.AppDir,
+			Assets:        assetM,
 			Logger:        logger.With("src", "viewer"),
 		})
 		if err != nil {
@@ -65,7 +96,7 @@ func main() {
 			os.Exit(1)
 		}
 		defer hub.Close()
-		logger.Info("viewer listening", "address", hub.Addr())
+		logger.Info("viewer listening", "address", hub.Addr(), "cache", cacheDir, "baseline", baselineTag)
 	}
 
 	logger.Info("starting bots",
@@ -109,15 +140,24 @@ func main() {
 // @param logger Logger, tagged with the bot's name for this bot's records.
 // @returns nil once the bot disconnects cleanly, or the error that stopped it.
 func runBot(ctx context.Context, config Config, name string, logger *slog.Logger, hub *viewer.Hub) error {
-	test := &gotestbds.Test{
-		Dialer: minecraft.Dialer{
-			// No TokenSource: these are offline identities. The server must
-			// accept unauthenticated clients (BDS `online-mode=false`).
-			IdentityData: login.IdentityData{
-				DisplayName: name,
-				Identity:    uuid.NewSHA1(botIdentityNamespace, []byte(name)).String(),
-			},
+	dialer := minecraft.Dialer{
+		// No TokenSource: these are offline identities. The server must
+		// accept unauthenticated clients (BDS `online-mode=false`).
+		IdentityData: login.IdentityData{
+			DisplayName: name,
+			Identity:    uuid.NewSHA1(botIdentityNamespace, []byte(name)).String(),
 		},
+	}
+	// Pack download is gated on the asset manager: nil manager (viewer off)
+	// refuses every pack so a normal test run never pulls hundreds of MB.
+	var assetM *assets.Manager
+	if hub != nil {
+		assetM = hub.Assets()
+	}
+	assets.WireDialer(&dialer, assetM)
+
+	test := &gotestbds.Test{
+		Dialer:        dialer,
 		RemoteAddress: config.Network.ServerAddress,
 		Logger:        logger.With("bot", name),
 		Viewer:        hub,

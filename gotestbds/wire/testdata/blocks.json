@@ -1,0 +1,11 @@
+{
+  "format_version": [1, 1, 0],
+  "fixture:custom_crate": {
+    "sound": "wood",
+    "textures": "blocks_json_wrong_texture"
+  },
+  "minecraft:stone": {
+    "textures": "stone",
+    "sound": "stone"
+  }
+}

@@ -96,7 +96,9 @@ export async function runHarness(opts: HarnessOptions): Promise<void> {
     args: GL_ARGS,
   });
 
-  const appUrl = `${opts.stream}/?bot=${encodeURIComponent(opts.bot)}`;
+  // Follow camera is the capture default so the bot body and its surroundings
+  // are in frame; override with ?camera=first|orbit on a human URL.
+  const appUrl = `${opts.stream}/?bot=${encodeURIComponent(opts.bot)}&camera=follow`;
   const mark: MarkState = {};
   const videoDir = mkdtempSync(join(tmpdir(), "gotestbds-capture-"));
   const videoStartedAt = Date.now();

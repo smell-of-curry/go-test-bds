@@ -14,6 +14,10 @@ func (h *Hub) routes() http.Handler {
 	mux.HandleFunc("GET /stream", h.handleStream)
 	mux.HandleFunc("GET /bots", h.handleBots)
 	mux.HandleFunc("GET /health", h.handleHealth)
+	mux.HandleFunc("GET /packs", h.handlePacks)
+	mux.HandleFunc("GET /packs/index", h.handlePacksIndex)
+	mux.HandleFunc("GET /pack/{packId}/{path...}", h.handlePackFile)
+	mux.HandleFunc("GET /asset/{path...}", h.handleAsset)
 	mux.HandleFunc("GET /", h.handleRoot)
 	mux.HandleFunc("POST /artifact", h.handleArtifact)
 	mux.HandleFunc("POST /capture/{id}/error", h.handleCaptureError)
@@ -65,18 +69,25 @@ func (h *Hub) handleStream(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 	for {
+		// Drain everything queued before waiting again: one wake can cover
+		// several frames, and a world frame that arrived while an event was
+		// being written is still worth sending.
+		for {
+			frame, ok := sub.next()
+			if !ok {
+				break
+			}
+			writeSSE(w, frame.event, frame.data)
+			flusher.Flush()
+		}
+
 		select {
 		case <-ctx.Done():
 			return
 		case <-keepalive.C:
 			_, _ = io.WriteString(w, ": keepalive\n\n")
 			flusher.Flush()
-		case frame, ok := <-sub.ch:
-			if !ok {
-				return
-			}
-			writeSSE(w, frame.event, frame.data)
-			flusher.Flush()
+		case <-sub.wake:
 		}
 	}
 }

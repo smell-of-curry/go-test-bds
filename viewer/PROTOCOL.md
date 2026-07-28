@@ -43,7 +43,7 @@ event: hello
 data: {"v":1,"type":"hello","bot":"TestBot","schema":1,"tickRate":20,"radius":4}
 
 event: keyframe
-data: {...}
+data: {...}   // includes registries (join-static)
 
 event: delta
 data: {...}
@@ -53,6 +53,10 @@ data: {...}
   required and a missing or unknown name is a `404`.
 - Every connection starts with `hello` then exactly one `keyframe`. A client
   that reconnects therefore resyncs for free.
+- Join-static registries (custom blocks, component items, entity property
+  defs) ride on the keyframe as `registries` — same timing as a one-shot
+  registry frame after hello, without a third SSE event type. Deltas omit
+  them; they do not change during a run.
 - The server writes a comment line (`: keepalive`) every 15 s so idle
   connections survive proxies.
 - Frames are flushed per event. The server never blocks the bot's tick loop to
@@ -132,6 +136,21 @@ capture harness can distinguish "app never loaded" from "stream stuck":
 A harness that times out waiting for readiness should log these fields rather
 than only the Playwright timeout string.
 
+## Viewer page query parameters
+
+The app is opened as `GET /?bot=<name>` (or `?stream=<sse-url>` against a Vite
+dev server). Extra query parameters select client-only view options — they never
+reach the bot and do not change the stream.
+
+| Param | Values | Default | Notes |
+| --- | --- | --- | --- |
+| `bot` | bot name | (required when not using `stream`) | Selects which bot's `/stream` to open |
+| `stream` | absolute SSE URL | derived from `bot` | Used by the Vite dev server / tests |
+| `camera` | `follow` \| `first` \| `firstPerson` \| `orbit` | `firstPerson` | Initial camera mode. Capture harness opens with `camera=follow` so the bot body and surroundings are in frame; press **C** to cycle first-person → follow → orbit |
+
+Follow mode sits behind and slightly above the observed actor (over-the-shoulder).
+First-person stays locked to `eyePos`/`rot`. Orbit is the free inspection camera.
+
 ---
 
 ## Frames
@@ -166,7 +185,8 @@ Everything the stream knows, in one frame.
   "actor": { "...": "see Actor" },
   "columns": [ { "...": "see Column" } ],
   "entities": [ { "...": "see Entity" } ],
-  "ui": { "...": "see UI" }
+  "ui": { "...": "see UI" },
+  "registries": { "...": "see Registries" }
 }
 ```
 
@@ -264,6 +284,21 @@ for, and silently cap every caller's `timeoutMs`.
 - A block the registry cannot name has `"name": ""` and a non-zero `rid`. The
   renderer's fallback chain keys on that.
 
+#### Fallback classification
+
+A consumer distinguishes three unresolved cases from Block fields +
+`registries.blocks` + pack resolution (see `wire.ClassifyFallback`):
+
+| Case | How to tell | Draw as |
+| --- | --- | --- |
+| **absent** | `name` is `minecraft:air`, or empty name with `rid == 0`; or the column `state` is not `complete` / section missing for "not loaded" | nothing (or column outline for unloaded) |
+| **unnamed_but_present** | `name == ""` and `rid != 0` | distinct debug mesh (not grey cube) |
+| **named_but_unknown** | non-empty `name`, not air, and neither `registries.blocks[name]` nor the pack stack produced an appearance | distinct debug mesh (different from unnamed) |
+
+Resolved custom blocks: `name` matches an entry in `registries.blocks` whose
+components carry geometry / material_instances (network palette wins over any
+`blocks.json` row for the same name — `viewer/FINDINGS-wire.md`).
+
 ### Column
 
 ```json
@@ -333,6 +368,76 @@ for, and silently cap every caller's `timeoutMs`.
 ```
 
 `damage` and `customName` are omitted when zero and empty.
+
+### Registries
+
+Join-sequence definitions. Names only — never runtime IDs as identity. Present
+on keyframes; absent on deltas.
+
+```json
+{
+  "blocks": [
+    {
+      "name": "fixture:custom_crate",
+      "molangVersion": 10,
+      "properties": [{ "name": "fixture:open", "enum": [false, true] }],
+      "components": {
+        "geometry": "geometry.fixture.custom_crate",
+        "materialInstances": {
+          "*": {
+            "texture": "palette_right_texture",
+            "renderMethod": "opaque",
+            "faceDimming": true,
+            "ambientOcclusion": true
+          }
+        },
+        "transformation": { "rx": 0, "ry": 90, "rz": 0, "sx": 1, "sy": 1, "sz": 1, "tx": 0, "ty": 0, "tz": 0 },
+        "lightEmission": 0.4,
+        "collisionBox": { "enabled": true, "minX": 0, "minY": 0, "minZ": 0, "maxX": 16, "maxY": 16, "maxZ": 16 },
+        "selectionBox": { "enabled": true, "origin": [-8, 0, -8], "size": [16, 16, 16] }
+      },
+      "permutations": [
+        {
+          "condition": "query.block_state('fixture:open') == true",
+          "components": { "geometry": "geometry.fixture.custom_crate_open" }
+        }
+      ]
+    }
+  ],
+  "items": [
+    {
+      "name": "fixture:custom_widget",
+      "componentBased": true,
+      "icon": "fixture_custom_widget",
+      "components": { "...": "decoded item component NBT" }
+    }
+  ],
+  "actors": [
+    {
+      "type": "minecraft:armadillo",
+      "properties": [
+        {
+          "name": "minecraft:armadillo_state",
+          "type": "enum",
+          "default": "unrolled",
+          "enum": ["unrolled", "rolled_up", "rolled_up_peeking", "rolled_up_relaxing", "rolled_up_unrolling"]
+        }
+      ]
+    }
+  ]
+}
+```
+
+- `blocks` is `GameData.CustomBlocks` decoded — the network palette. Geometry
+  and material short-names resolve against the resource pack stack; the
+  behaviour pack is never an input.
+- `items` lists component-based (custom) items only. `icon` is the
+  `minecraft:icon` / `textures.default` short-name for `item_texture.json`.
+- `actors` lists entity property definitions from `SyncActorProperty` /
+  `GameData.PropertyData`. `type` is bool/int/float/enum so snapshot entity
+  `props` can be typed against ranges and defaults.
+- Precedence vs resource-pack `blocks.json`: palette components win for
+  geometry and materials (`viewer/FINDINGS-wire.md`).
 
 ### Actor
 
@@ -418,6 +523,53 @@ events for `bds-manager` to pick up.
 test that asks for a frame and gets a 20 s timeout instead of an error is a test
 whose verdict the viewer changed.
 
+## Assets
+
+Resource packs are the appearance source of truth. Go never decodes images or
+evaluates Molang; it only resolves paths and serves bytes. Behaviour packs are
+never an input. The vanilla baseline is `Mojang/bedrock-samples` at the tag in
+`viewer/baseline.tag`, fetched into a gitignored cache — never committed.
+
+Endpoints (available when the viewer was started with an asset manager):
+
+### `GET /packs`
+
+Resolved stack, lowest priority first:
+
+```json
+[
+  {"id":"vanilla","uuid":"…","version":"1.26.30.5","name":"…","priority":0,"fileCount":12345},
+  {"id":"22222222-2222-2222-2222-222222222222","uuid":"22222222-…","version":"1.2.3","name":"…","priority":1,"fileCount":40}
+]
+```
+
+`vanilla` is always present at priority 0. Server packs follow in
+`packet.ResourcePackStack` apply order (first applied first).
+
+### `GET /packs/index`
+
+Merged file index mapping every pack-relative path to the winning pack id:
+
+```json
+{"textures/blocks/stone.png":"22222222-2222-2222-2222-222222222222","texts/en_us.lang":"vanilla"}
+```
+
+Paths are pack-relative, POSIX, lower-cased. Later packs in the stack win.
+Within a pack, the selected subpack overrides the pack root
+(`memory_performance_tier` / `memory_tier` rule; see Microsoft Learn —
+Building Sub-Packs). An explicit `SubPackName` on the stack entry wins over
+auto-select.
+
+### `GET /pack/<packId>/<path…>`
+
+Raw bytes from that pack, with a sensible `Content-Type`. `404` when absent.
+Path traversal (`..`, absolute paths) is rejected with `400`.
+
+### `GET /asset/<path…>`
+
+Winning bytes for that path after stack resolution. `404` when no pack has it.
+Same traversal rules as `/pack/…`.
+
 ## Configuration
 
 Following the existing precedence in `config.go` — defaults, then
@@ -430,9 +582,18 @@ Following the existing precedence in `config.go` — defaults, then
 | `Viewer.Radius` | `GOTESTBDS_VIEWER_RADIUS` | `-viewer-radius` | `4` |
 | `Viewer.ArtifactDir` | `GOTESTBDS_VIEWER_ARTIFACTS` | `-viewer-artifacts` | `artifacts` |
 | `Viewer.AppDir` | `GOTESTBDS_VIEWER_APP` | `-viewer-app` | `""` |
+| `Viewer.CacheDir` | `GOTESTBDS_VIEWER_CACHE` | `-viewer-cache` | `<ArtifactDir>/.cache` |
+| `Viewer.BaselineTag` | `GOTESTBDS_VIEWER_BASELINE` | `-viewer-baseline` | `v1.26.30.5` (or `viewer/baseline.tag`) |
+| `Viewer.AcceptServerPacks` | `GOTESTBDS_VIEWER_PACKS` | `-viewer-packs` | `true` |
+| `Viewer.Offline` | `GOTESTBDS_VIEWER_OFFLINE` | `-viewer-offline` | `false` |
+| `Viewer.MemoryPerformanceTier` | `GOTESTBDS_VIEWER_MEMORY_TIER` | `-viewer-memory-tier` | `5` |
 
 `GOTESTBDS_VIEWER` accepts `1`/`true` to enable on the default address, or a
 `host:port`, which both enables it and sets the address.
+
+Server pack download is gated on the viewer being enabled: with the viewer
+off, `DownloadResourcePack` always returns false so a normal test run does
+not pull pack archives.
 
 ---
 
@@ -455,8 +616,10 @@ node viewer/dist-capture/cli.cjs \
 ```
 
 - `--stream` is the bot process's viewer address. The harness opens
-  `<stream>/?bot=<bot>` — the bot process serves the built app at `/`, so the
-  harness needs no filesystem path to it.
+  `<stream>/?bot=<bot>&camera=follow` — the bot process serves the built app at
+  `/`, so the harness needs no filesystem path to it. `camera=follow` is the
+  capture default (over-the-shoulder); a human can override with `first` or
+  `orbit` on the same URL.
 - The harness exits `0` when the stream closes cleanly, non-zero only on a
   failure to start. It never fails a test run: a harness that dies mid-run
   leaves the bot untouched and the run continues without artefacts.

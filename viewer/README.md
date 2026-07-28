@@ -1,7 +1,8 @@
 # go-test-bds viewer
 
 Read-only web renderer for the bot snapshot stream defined in [`PROTOCOL.md`](./PROTOCOL.md).
-Stage 2 shell: coloured cubes, entity wire boxes, first-person + orbit camera, diagnostic overlay.
+Stage 2 shell: coloured cubes, entity wire boxes, first-person / follow / orbit
+camera, diagnostic overlay, caption band, block-change highlights, open-UI panel.
 
 This package is **private** and is not part of the published `go-test-bds` SDK.
 Install and run it only from this directory.
@@ -25,9 +26,16 @@ Or, when the page is served from the bot process itself (`GET /` with `--viewer-
 
 ```
 http://127.0.0.1:24680/?bot=TestBot
+http://127.0.0.1:24680/?bot=TestBot&camera=follow
 ```
 
-Keys: **C** toggles first-person (locked to actor `eyePos`/`rot`) ↔ orbit (drag to look, scroll to zoom). Actor body is drawn only in orbit mode.
+| Query | Values | Default |
+| --- | --- | --- |
+| `camera` | `follow` \| `first` / `firstPerson` \| `orbit` | `firstPerson` |
+
+Capture harness always opens with `camera=follow`. Keys: **C** cycles
+first-person (locked to actor `eyePos`/`rot`) → follow (over-the-shoulder) →
+orbit (drag to look, scroll to zoom). Actor body is drawn in follow and orbit.
 
 ## Scripts
 
@@ -54,7 +62,7 @@ node dist-capture/cli.cjs --stream http://127.0.0.1:24680 --bot TestBot
 
 | Flag | Default | Notes |
 | --- | --- | --- |
-| `--stream` | required | Bot viewer base URL; opens `<stream>/?bot=<bot>` |
+| `--stream` | required | Bot viewer base URL; opens `<stream>/?bot=<bot>&camera=follow` |
 | `--bot` | required | Bot name |
 | `--width` / `--height` | `1280` / `720` | Viewport + `recordVideo` size |
 | `--max-segment-seconds` | `120` | Caps the whole-run recording; closes the stream and uploads |
@@ -67,10 +75,11 @@ Video uses Playwright `recordVideo` on the **same** long-lived context as stills
 when the stream closes — not per test. Mark phases stay burnt into the overlay
 so a viewer can tell which test is on screen.
 
-The recording is a time lapse: the app paints when a snapshot arrives, and the
-webm is written at 25 fps regardless, so a 50 s run plays back in a few seconds.
-Read the overlay's `tick` and `mark` for real timing. Painting on a fixed clock
-instead would cost CPU on the dev box for frames nothing changed in.
+The app paints on `requestAnimationFrame` and interpolates actor/entity poses
+between snapshots (block meshes still update only when data changes, under the
+remesh budget). Playwright writes the webm at 25 fps, so a quiet stretch of a
+run can still look short — read the caption's elapsed time and the overlay
+`tick` for real timing.
 
 ## Frame budget and chunk update strategy
 
@@ -120,10 +129,11 @@ src/protocol.ts   frame/object types (PROTOCOL.md)
 src/stream.ts     EventSource client
 src/store.ts      keyframe/delta world model
 src/scene.ts      three.js + PlaceholderMesher
-src/camera.ts     first-person + orbit
-src/overlay.ts    diagnostic HUD
+src/camera.ts     first-person + follow + orbit
+src/motion.ts     pose interpolation between snapshots
+src/overlay.ts    diagnostic HUD + caption band + UI panel
 src/debug.ts      window.__viewer
-src/main.ts       wiring
+src/main.ts       wiring (rAF paint loop)
 capture/          headless capture CLI (bundled to dist-capture/cli.cjs)
 testdata/         recorded JSONL + expected counts + smoke.png
 tests/            Playwright smoke + Go golden stream + capture harness + fixture SSE server

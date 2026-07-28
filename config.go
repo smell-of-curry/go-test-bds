@@ -40,6 +40,18 @@ type Config struct {
 		SectionRadius int
 		ArtifactDir   string
 		AppDir        string
+		// CacheDir holds the gitignored pack/baseline cache. Empty defaults to
+		// <ArtifactDir>/.cache so artefacts and packs share one root.
+		CacheDir string
+		// BaselineTag pins Mojang/bedrock-samples (e.g. v1.26.30.5).
+		BaselineTag string
+		// AcceptServerPacks downloads the server's resource pack stack when
+		// the viewer is enabled. Ignored when the viewer is off.
+		AcceptServerPacks bool
+		// Offline refuses network fetches; only the existing cache is used.
+		Offline bool
+		// MemoryPerformanceTier selects resource-pack subpacks (1–5). Default 5.
+		MemoryPerformanceTier int
 	}
 }
 
@@ -57,6 +69,11 @@ func DefaultConfig() Config {
 	c.Viewer.SectionRadius = 4
 	c.Viewer.ArtifactDir = "artifacts"
 	c.Viewer.AppDir = ""
+	c.Viewer.CacheDir = ""
+	c.Viewer.BaselineTag = "v1.26.30.5"
+	c.Viewer.AcceptServerPacks = true
+	c.Viewer.Offline = false
+	c.Viewer.MemoryPerformanceTier = 5
 	return c
 }
 
@@ -100,6 +117,19 @@ func ReadConfig() (Config, error) {
 	}
 	if c.Viewer.ArtifactDir == "" {
 		c.Viewer.ArtifactDir = def.Viewer.ArtifactDir
+	}
+	// Older config.toml files omit the stage-5 fields. A missing bool is
+	// indistinguishable from false, so treat "all asset knobs zeroed" as
+	// absent and apply DefaultConfig for AcceptServerPacks.
+	assetsFieldsAbsent := c.Viewer.CacheDir == "" && c.Viewer.BaselineTag == "" && c.Viewer.MemoryPerformanceTier <= 0
+	if c.Viewer.BaselineTag == "" {
+		c.Viewer.BaselineTag = def.Viewer.BaselineTag
+	}
+	if c.Viewer.MemoryPerformanceTier <= 0 {
+		c.Viewer.MemoryPerformanceTier = def.Viewer.MemoryPerformanceTier
+	}
+	if assetsFieldsAbsent {
+		c.Viewer.AcceptServerPacks = def.Viewer.AcceptServerPacks
 	}
 
 	applyEnv(&c)
@@ -158,6 +188,33 @@ func applyEnv(c *Config) {
 	if v := os.Getenv("GOTESTBDS_VIEWER_APP"); v != "" {
 		c.Viewer.AppDir = v
 	}
+	if v := os.Getenv("GOTESTBDS_VIEWER_CACHE"); v != "" {
+		c.Viewer.CacheDir = v
+	}
+	if v := os.Getenv("GOTESTBDS_VIEWER_BASELINE"); v != "" {
+		c.Viewer.BaselineTag = v
+	}
+	if v := os.Getenv("GOTESTBDS_VIEWER_PACKS"); v != "" {
+		switch strings.ToLower(v) {
+		case "1", "true", "yes", "on":
+			c.Viewer.AcceptServerPacks = true
+		case "0", "false", "no", "off":
+			c.Viewer.AcceptServerPacks = false
+		}
+	}
+	if v := os.Getenv("GOTESTBDS_VIEWER_OFFLINE"); v != "" {
+		switch strings.ToLower(v) {
+		case "1", "true", "yes", "on":
+			c.Viewer.Offline = true
+		case "0", "false", "no", "off":
+			c.Viewer.Offline = false
+		}
+	}
+	if v := os.Getenv("GOTESTBDS_VIEWER_MEMORY_TIER"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			c.Viewer.MemoryPerformanceTier = n
+		}
+	}
 }
 
 // applyFlags overlays command line flags onto a configuration.
@@ -177,6 +234,11 @@ func applyFlags(c *Config) error {
 	viewerSectionRadius := set.Int("viewer-section-radius", c.Viewer.SectionRadius, "vertical section window (±N) around the actor")
 	viewerArtifacts := set.String("viewer-artifacts", c.Viewer.ArtifactDir, "directory for viewer artefacts")
 	viewerApp := set.String("viewer-app", c.Viewer.AppDir, "optional built viewer app directory to serve at /")
+	viewerCache := set.String("viewer-cache", c.Viewer.CacheDir, "gitignored cache for vanilla baseline and server packs")
+	viewerBaseline := set.String("viewer-baseline", c.Viewer.BaselineTag, "pinned Mojang/bedrock-samples tag")
+	viewerPacks := set.Bool("viewer-packs", c.Viewer.AcceptServerPacks, "download server resource packs when the viewer is enabled")
+	viewerOffline := set.Bool("viewer-offline", c.Viewer.Offline, "use only the existing pack cache; never fetch")
+	viewerMemoryTier := set.Int("viewer-memory-tier", c.Viewer.MemoryPerformanceTier, "memory_performance_tier for subpack selection (1-5)")
 
 	if err := set.Parse(os.Args[1:]); err != nil {
 		return err
@@ -198,6 +260,11 @@ func applyFlags(c *Config) error {
 	c.Viewer.SectionRadius = *viewerSectionRadius
 	c.Viewer.ArtifactDir = *viewerArtifacts
 	c.Viewer.AppDir = *viewerApp
+	c.Viewer.CacheDir = *viewerCache
+	c.Viewer.BaselineTag = *viewerBaseline
+	c.Viewer.AcceptServerPacks = *viewerPacks
+	c.Viewer.Offline = *viewerOffline
+	c.Viewer.MemoryPerformanceTier = *viewerMemoryTier
 	return nil
 }
 

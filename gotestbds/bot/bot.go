@@ -196,6 +196,8 @@ func (b *Bot) registerHandlers() {
 		packet.IDNPCDialogue:                 &NpcDialogueHandler{},
 		packet.IDContainerOpen:               &ContainerOpenHandler{},
 		packet.IDCommandOutput:               &CommandOutputHandler{},
+		packet.IDItemRegistry:                &ItemRegistryHandler{},
+		packet.IDSyncActorProperty:           &SyncActorPropertyHandler{},
 	}
 }
 

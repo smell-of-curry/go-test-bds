@@ -1,7 +1,30 @@
 import * as THREE from "three";
 import type { Actor } from "./protocol";
 
-export type CameraMode = "firstPerson" | "orbit";
+export type CameraMode = "firstPerson" | "follow" | "orbit";
+
+const MODE_CYCLE: readonly CameraMode[] = ["firstPerson", "follow", "orbit"];
+
+/**
+ * Parse `?camera=` from the page query string.
+ *
+ * Accepts `follow`, `orbit`, `first`, or `firstPerson`. Unknown / absent values
+ * leave the default (`firstPerson`) so interactive smoke stays aimed at the
+ * fixture wall; the capture harness passes `camera=follow` explicitly.
+ *
+ * @param search - `location.search` (including leading `?`).
+ * @returns resolved mode.
+ */
+export function cameraModeFromSearch(search: string): CameraMode {
+  const params = new URLSearchParams(
+    search.startsWith("?") ? search.slice(1) : search,
+  );
+  const raw = (params.get("camera") ?? "").toLowerCase();
+  if (raw === "follow") return "follow";
+  if (raw === "orbit") return "orbit";
+  if (raw === "first" || raw === "firstperson") return "firstPerson";
+  return "firstPerson";
+}
 
 /**
  * Bedrock `rot: [yaw, pitch]` (degrees) → Three.js camera orientation.
@@ -27,9 +50,38 @@ export function applyActorEye(
   camera.rotation.z = 0;
 }
 
+/** Over-the-shoulder: metres behind the actor along facing, and above feet. */
+const FOLLOW_BACK = 4;
+const FOLLOW_UP = 2.5;
+const FOLLOW_LOOK_Y = 1.4;
+
+/**
+ * Place the camera behind and above the actor, looking at its torso.
+ *
+ * @param camera - Perspective camera to position.
+ * @param actor - Observed bot pose (uses `pos` + yaw).
+ */
+export function applyFollowCamera(
+  camera: THREE.PerspectiveCamera,
+  actor: Actor,
+): void {
+  const yaw = THREE.MathUtils.degToRad(actor.rot[0]);
+  // Bedrock forward on XZ: yaw 0 = +Z, yaw 90 = −X.
+  const fx = -Math.sin(yaw);
+  const fz = Math.cos(yaw);
+  const [ax, ay, az] = actor.pos;
+  camera.position.set(
+    ax - fx * FOLLOW_BACK,
+    ay + FOLLOW_UP,
+    az - fz * FOLLOW_BACK,
+  );
+  camera.up.set(0, 1, 0);
+  camera.lookAt(ax, ay + FOLLOW_LOOK_Y, az);
+}
+
 export class CameraController {
   readonly perspective: THREE.PerspectiveCamera;
-  mode: CameraMode = "firstPerson";
+  mode: CameraMode;
 
   private readonly orbitTarget = new THREE.Vector3();
   private orbitYaw = 0;
@@ -39,16 +91,23 @@ export class CameraController {
   private lastX = 0;
   private lastY = 0;
 
-  constructor(aspect: number) {
+  constructor(aspect: number, mode: CameraMode = "firstPerson") {
     this.perspective = new THREE.PerspectiveCamera(70, aspect, 0.05, 2000);
+    this.mode = mode;
   }
 
   setMode(mode: CameraMode): void {
     this.mode = mode;
   }
 
+  /**
+   * Cycle first-person → follow → orbit → first-person.
+   *
+   * @returns the mode after the toggle.
+   */
   toggleMode(): CameraMode {
-    this.mode = this.mode === "firstPerson" ? "orbit" : "firstPerson";
+    const i = MODE_CYCLE.indexOf(this.mode);
+    this.mode = MODE_CYCLE[(i + 1) % MODE_CYCLE.length]!;
     return this.mode;
   }
 
@@ -58,8 +117,7 @@ export class CameraController {
   }
 
   /**
-   * Attach orbit-drag listeners. First-person ignores pointer input — the
-   * camera is locked to the actor's eye.
+   * Attach orbit-drag listeners. First-person and follow ignore pointer input.
    *
    * @param el - Element that receives pointer events (usually the canvas).
    * @returns disposer.
@@ -111,9 +169,16 @@ export class CameraController {
     };
   }
 
+  /**
+   * @param actor - Pose to frame (interpolated pose from the render loop).
+   */
   update(actor: Actor | null): void {
     if (this.mode === "firstPerson") {
       if (actor) applyActorEye(this.perspective, actor);
+      return;
+    }
+    if (this.mode === "follow") {
+      if (actor) applyFollowCamera(this.perspective, actor);
       return;
     }
     if (actor) {

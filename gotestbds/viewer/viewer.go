@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"sync"
 	"time"
+
+	"github.com/smell-of-curry/go-test-bds/gotestbds/assets"
 )
 
 // Options configures the viewer Hub.
@@ -18,6 +20,7 @@ type Options struct {
 	SectionRadius int    // vertical section window around the actor (§Y ± N)
 	ArtifactDir   string // where artefacts are written
 	AppDir        string // built viewer app to serve at "/", optional
+	Assets        *assets.Manager
 	Logger        *slog.Logger
 }
 
@@ -35,7 +38,8 @@ type Hub struct {
 	streams map[string]*Stream
 	meta    map[string]botMeta
 
-	arts *artifactStore
+	arts   *artifactStore
+	assets *assets.Manager
 }
 
 type botMeta struct {
@@ -81,6 +85,7 @@ func New(opts Options) (*Hub, error) {
 		streams: make(map[string]*Stream),
 		meta:    make(map[string]botMeta),
 		arts:    arts,
+		assets:  opts.Assets,
 	}
 	h.srv = &http.Server{Handler: h.routes()}
 	go func() {
@@ -195,6 +200,14 @@ func (h *Hub) Capture(ctx context.Context, botName, label string, minTick uint64
 // PullArtifacts drains artefacts written since the last pull.
 func (h *Hub) PullArtifacts() []Artifact {
 	return h.arts.pull()
+}
+
+// Assets returns the optional pack manager attached to this hub.
+func (h *Hub) Assets() *assets.Manager {
+	if h == nil {
+		return nil
+	}
+	return h.assets
 }
 
 func (h *Hub) stream(name string) *Stream {

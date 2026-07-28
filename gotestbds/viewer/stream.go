@@ -4,22 +4,17 @@ import (
 	"encoding/json"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"github.com/smell-of-curry/go-test-bds/gotestbds/actor"
 )
 
-// subscriberBuf is the per-subscriber frame buffer capacity.
+// eventQueueCap bounds the per-subscriber event backlog.
 //
-// A send that would block is dropped and the subscriber flagged for resync so
-// the bot tick loop never waits on a slow client. Capacity 8 is enough for a
-// brief hitch without buffering unbounded memory.
-const subscriberBuf = 8
-
-// eventDeliveryTimeout bounds how long emitRaw waits for a subscriber that is
-// not draining. Shorter than the default capture timeout, so a wedged viewer
-// surfaces as a clean capture failure rather than an instruction that hangs.
-const eventDeliveryTimeout = time.Second
+// Marks and captures are rare and cannot be repaired by a later frame — a lost
+// mark is a caption that never updates, a lost capture is a screenshot that
+// times out — so they queue rather than drop. The cap only exists so a
+// subscriber that has stopped reading for good cannot grow memory without end.
+const eventQueueCap = 256
 
 // Stream is the per-bot snapshot stream.
 //
@@ -40,15 +35,101 @@ type Stream struct {
 	lastDim  atomic.Int32
 }
 
+// subscriber holds what one SSE connection has yet to be sent.
+//
+// Two lanes, because the two kinds of frame fail differently. Events queue and
+// never drop. World frames keep only the newest: a viewer that has fallen behind
+// wants the current world, not a backlog of stale ones it will render and throw
+// away. Skipping a delta invalidates the client's state, so any replacement
+// flags a resync and the next frame it receives is a fresh keyframe.
 type subscriber struct {
-	ch     chan encodedFrame
-	resync bool
+	mu      sync.Mutex
+	events  []encodedFrame
+	pending *encodedFrame
+	dropped int
+	resync  bool
+
+	// wake carries no data; it only tells the writer there is something to send.
+	wake chan struct{}
 }
 
 // encodedFrame is an already-marshaled SSE event shared across subscribers.
 type encodedFrame struct {
 	event string
 	data  []byte
+}
+
+// signal wakes the writer without blocking a producer.
+func (sub *subscriber) signal() {
+	select {
+	case sub.wake <- struct{}{}:
+	default:
+	}
+}
+
+// pushEvent queues a mark or capture frame.
+//
+// @param f The frame to deliver.
+// @returns the number of events discarded because the subscriber stopped
+// reading entirely, or 0 in the normal case.
+func (sub *subscriber) pushEvent(f encodedFrame) int {
+	sub.mu.Lock()
+	discarded := 0
+	if len(sub.events) >= eventQueueCap {
+		sub.events = sub.events[1:]
+		discarded = 1
+		sub.dropped++
+	}
+	sub.events = append(sub.events, f)
+	sub.mu.Unlock()
+	sub.signal()
+	return discarded
+}
+
+// pushWorld replaces the pending world frame with a newer one.
+//
+// @param f The frame to deliver.
+// @param keyframe Whether f is a keyframe rather than a delta.
+func (sub *subscriber) pushWorld(f encodedFrame, keyframe bool) {
+	sub.mu.Lock()
+	if sub.pending != nil && !keyframe {
+		// The frame being replaced was never sent, so the client cannot apply
+		// what builds on it.
+		sub.resync = true
+	}
+	frame := f
+	sub.pending = &frame
+	if keyframe {
+		sub.resync = false
+	}
+	sub.mu.Unlock()
+	sub.signal()
+}
+
+// next takes the frame to send, events first.
+//
+// @returns the frame and true, or false when there is nothing to send.
+func (sub *subscriber) next() (encodedFrame, bool) {
+	sub.mu.Lock()
+	defer sub.mu.Unlock()
+	if len(sub.events) > 0 {
+		f := sub.events[0]
+		sub.events = sub.events[1:]
+		return f, true
+	}
+	if sub.pending != nil {
+		f := *sub.pending
+		sub.pending = nil
+		return f, true
+	}
+	return encodedFrame{}, false
+}
+
+// needsResync reports whether the next world frame must be a keyframe.
+func (sub *subscriber) needsResync() bool {
+	sub.mu.Lock()
+	defer sub.mu.Unlock()
+	return sub.resync
 }
 
 func newStream(h *Hub, name string, radius, sectionRadius int) *Stream {
@@ -73,7 +154,7 @@ func (s *Stream) Tick(a *actor.Actor) {
 	s.mu.Lock()
 	needKey := s.enc.prev == nil || s.enc.forceKey
 	for sub := range s.subs {
-		if sub.resync {
+		if sub.needsResync() {
 			needKey = true
 			break
 		}
@@ -103,20 +184,11 @@ func (s *Stream) Tick(a *actor.Actor) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for sub := range s.subs {
-		if sub.resync && event != "keyframe" {
+		if sub.needsResync() && event != "keyframe" {
 			// Should not happen when needKey forced a keyframe; belt and braces.
-			sub.resync = true
 			continue
 		}
-		select {
-		case sub.ch <- frame:
-			if event == "keyframe" {
-				sub.resync = false
-			}
-		default:
-			// Drop rather than stall the tick loop; next frame is a keyframe.
-			sub.resync = true
-		}
+		sub.pushWorld(frame, event == "keyframe")
 	}
 }
 
@@ -131,7 +203,7 @@ func (s *Stream) DimensionChanged(from, to int32) {
 // sees resync delivers a keyframe.
 func (s *Stream) attach() *subscriber {
 	sub := &subscriber{
-		ch:     make(chan encodedFrame, subscriberBuf),
+		wake:   make(chan struct{}, 1),
 		resync: true,
 	}
 	s.mu.Lock()
@@ -157,14 +229,12 @@ func (s *Stream) Attached() int {
 }
 
 // emitRaw fans an already-encoded non-world frame (mark/capture) to every
-// subscriber. Safe from any goroutine — it never reads World, and it is never
-// called from the bot goroutine, so waiting here cannot stall ticks.
+// subscriber. Safe from any goroutine — it never reads World.
 //
-// Unlike a world frame, a dropped mark or capture is not repaired by the next
-// keyframe: it is an event, and losing it means a video segment that never
-// closes or a screenshot that times out. So a full buffer is waited on briefly
-// rather than dropped. The subscriber list is copied first — blocking while
-// holding the lock would stall Tick, which is the thing this must never do.
+// Never blocks and never drops: events queue per subscriber. Losing one is not
+// repaired by the next keyframe — it is a caption that never updates or a
+// screenshot that times out — so the only discard is at the sanity cap, and that
+// says so.
 func (s *Stream) emitRaw(event string, data []byte) {
 	frame := encodedFrame{event: event, data: data}
 
@@ -176,13 +246,9 @@ func (s *Stream) emitRaw(event string, data []byte) {
 	s.mu.Unlock()
 
 	for _, sub := range subs {
-		select {
-		case sub.ch <- frame:
-		case <-time.After(eventDeliveryTimeout):
-			if s.hub.log != nil {
-				s.hub.log.Warn("viewer dropped event frame",
-					"bot", s.name, "event", event)
-			}
+		if discarded := sub.pushEvent(frame); discarded > 0 && s.hub.log != nil {
+			s.hub.log.Warn("viewer subscriber is not reading; dropped oldest events",
+				"bot", s.name, "event", event, "queue", eventQueueCap)
 		}
 	}
 }

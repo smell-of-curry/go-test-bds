@@ -28,6 +28,10 @@ type Keyframe struct {
 	Columns  []Column `json:"columns"`
 	Entities []Entity `json:"entities"`
 	UI       UI       `json:"ui"`
+	// Registries is join-static wire content (custom blocks, items, entity
+	// property defs). Present on every keyframe (including after hello); omitted
+	// on deltas because it does not change during a run.
+	Registries *Registries `json:"registries,omitempty"`
 }
 
 // Delta carries only keys that changed since the previous frame.
@@ -103,6 +107,111 @@ type Block struct {
 	Name   string         `json:"name"`
 	States map[string]any `json:"states"`
 	RID    uint32         `json:"rid"`
+}
+
+// Registries is the projection of join-sequence definitions (schema "registry"
+// content). Delivered as keyframe.registries after hello — see PROTOCOL.md.
+type Registries struct {
+	Blocks []RegistryBlock `json:"blocks"`
+	Items  []RegistryItem  `json:"items"`
+	Actors []RegistryActor `json:"actors"`
+}
+
+// RegistryBlock is one custom block from GameData.CustomBlocks.
+type RegistryBlock struct {
+	Name          string             `json:"name"`
+	MolangVersion int32              `json:"molangVersion,omitempty"`
+	Properties    []RegistryProp     `json:"properties,omitempty"`
+	Components    RegistryComponents `json:"components"`
+	Permutations  []RegistryPerm     `json:"permutations,omitempty"`
+}
+
+// RegistryProp is a block state property declaration.
+type RegistryProp struct {
+	Name string `json:"name"`
+	Enum []any  `json:"enum,omitempty"`
+}
+
+// RegistryPerm is a permutation condition + component overrides.
+type RegistryPerm struct {
+	Condition  string             `json:"condition"`
+	Components RegistryComponents `json:"components"`
+}
+
+// RegistryComponents are render-relevant block components.
+type RegistryComponents struct {
+	Geometry          string                      `json:"geometry,omitempty"`
+	UnitCube          bool                        `json:"unitCube,omitempty"`
+	MaterialInstances map[string]RegistryMaterial `json:"materialInstances,omitempty"`
+	Transformation    *RegistryTransform          `json:"transformation,omitempty"`
+	LightEmission     *float32                    `json:"lightEmission,omitempty"`
+	CollisionBox      *RegistryBox                `json:"collisionBox,omitempty"`
+	SelectionBox      *RegistrySelectionBox       `json:"selectionBox,omitempty"`
+	BoneVisibility    map[string]any              `json:"boneVisibility,omitempty"`
+}
+
+// RegistryMaterial is one material_instances face entry.
+type RegistryMaterial struct {
+	Texture          string `json:"texture,omitempty"`
+	RenderMethod     string `json:"renderMethod,omitempty"`
+	FaceDimming      bool   `json:"faceDimming,omitempty"`
+	AmbientOcclusion bool   `json:"ambientOcclusion,omitempty"`
+}
+
+// RegistryTransform is minecraft:transformation.
+type RegistryTransform struct {
+	RX int32   `json:"rx"`
+	RY int32   `json:"ry"`
+	RZ int32   `json:"rz"`
+	SX float32 `json:"sx"`
+	SY float32 `json:"sy"`
+	SZ float32 `json:"sz"`
+	TX float32 `json:"tx"`
+	TY float32 `json:"ty"`
+	TZ float32 `json:"tz"`
+}
+
+// RegistryBox is a collision box in pixels.
+type RegistryBox struct {
+	Enabled bool    `json:"enabled"`
+	MinX    float32 `json:"minX"`
+	MinY    float32 `json:"minY"`
+	MinZ    float32 `json:"minZ"`
+	MaxX    float32 `json:"maxX"`
+	MaxY    float32 `json:"maxY"`
+	MaxZ    float32 `json:"maxZ"`
+}
+
+// RegistrySelectionBox is origin+size selection box in pixels.
+type RegistrySelectionBox struct {
+	Enabled bool       `json:"enabled"`
+	Origin  [3]float32 `json:"origin"`
+	Size    [3]float32 `json:"size"`
+}
+
+// RegistryItem is one component-based item from ItemRegistry.
+type RegistryItem struct {
+	Name           string         `json:"name"`
+	ComponentBased bool           `json:"componentBased"`
+	Version        int32          `json:"version,omitempty"`
+	Icon           string         `json:"icon,omitempty"`
+	Components     map[string]any `json:"components,omitempty"`
+}
+
+// RegistryActor is entity property definitions for one type (SyncActorProperty).
+type RegistryActor struct {
+	Type       string              `json:"type"`
+	Properties []RegistryActorProp `json:"properties"`
+}
+
+// RegistryActorProp is a typed entity property for query.property.
+type RegistryActorProp struct {
+	Name    string   `json:"name"`
+	Type    string   `json:"type"`
+	Default any      `json:"default,omitempty"`
+	Min     *float64 `json:"min,omitempty"`
+	Max     *float64 `json:"max,omitempty"`
+	Enum    []string `json:"enum,omitempty"`
 }
 
 // BlockChange is a single-block update in a delta.

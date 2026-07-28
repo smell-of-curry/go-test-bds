@@ -1,0 +1,29 @@
+{
+  "format_version": 2,
+  "header": {
+    "name": "Fixture Server",
+    "description": "test server resource pack",
+    "uuid": "22222222-2222-2222-2222-222222222222",
+    "version": [1, 2, 3],
+    "min_engine_version": [1, 20, 0]
+  },
+  "modules": [
+    {
+      "type": "resources",
+      "uuid": "22222222-2222-2222-2222-222222222223",
+      "version": [1, 2, 3]
+    }
+  ],
+  "subpacks": [
+    {
+      "folder_name": "lite",
+      "name": "Lite",
+      "memory_performance_tier": 1
+    },
+    {
+      "folder_name": "full",
+      "name": "Full",
+      "memory_performance_tier": 5
+    }
+  ]
+}

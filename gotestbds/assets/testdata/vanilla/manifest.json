@@ -1,0 +1,17 @@
+{
+  "format_version": 2,
+  "header": {
+    "name": "Fixture Vanilla",
+    "description": "test baseline resource pack",
+    "uuid": "11111111-1111-1111-1111-111111111111",
+    "version": [1, 0, 0],
+    "min_engine_version": [1, 20, 0]
+  },
+  "modules": [
+    {
+      "type": "resources",
+      "uuid": "11111111-1111-1111-1111-111111111112",
+      "version": [1, 0, 0]
+    }
+  ]
+}

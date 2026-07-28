@@ -65,6 +65,17 @@ func (t *Test) RunCtx(ctx context.Context) error {
 	}
 	t.Logger.Debug("spawned", "address", t.RemoteAddress)
 
+	// Ingest the server's resource pack stack into the viewer asset manager.
+	// DownloadResourcePack already gated acceptance; ResourcePacks() holds
+	// what arrived, and the stack order was captured via PacketFunc.
+	if t.Viewer != nil {
+		if mgr := t.Viewer.Assets(); mgr != nil {
+			if err := mgr.IngestServerPacks(conn.ResourcePacks()); err != nil {
+				t.Logger.Error("ingest resource packs", "error", err)
+			}
+		}
+	}
+
 	b := bot.NewBot(conn, t.Logger.With("src", "bot"))
 	if t.Viewer != nil {
 		name := t.Dialer.IdentityData.DisplayName

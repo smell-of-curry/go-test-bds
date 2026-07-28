@@ -15,6 +15,7 @@ import (
 	dfworld "github.com/df-mc/dragonfly/server/world"
 	"github.com/df-mc/dragonfly/server/world/chunk"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/actor"
+	"github.com/smell-of-curry/go-test-bds/gotestbds/wire"
 	gw "github.com/smell-of-curry/go-test-bds/gotestbds/world"
 )
 
@@ -94,15 +95,16 @@ func (e *encoder) frame(a *actor.Actor) (event string, payload []byte, err error
 		e.forceKey = false
 		e.prev = cur
 		kf := Keyframe{
-			V:        SchemaVersion,
-			Type:     "keyframe",
-			Bot:      e.botName,
-			Tick:     cur.tick,
-			World:    cur.world,
-			Actor:    cur.actor,
-			Columns:  columnsSlice(cur.columns),
-			Entities: entitiesSlice(cur.entities),
-			UI:       mustDecodeUI(cur.uiBytes),
+			V:          SchemaVersion,
+			Type:       "keyframe",
+			Bot:        e.botName,
+			Tick:       cur.tick,
+			World:      cur.world,
+			Actor:      cur.actor,
+			Columns:    columnsSlice(cur.columns),
+			Entities:   entitiesSlice(cur.entities),
+			UI:         mustDecodeUI(cur.uiBytes),
+			Registries: encodeRegistries(a.WireRegistries()),
 		}
 		b, err := json.Marshal(kf)
 		return "keyframe", b, err
@@ -884,4 +886,107 @@ func entityEqual(a, b Entity) bool {
 func encodeSectionForTest(w *gw.World, sub *chunk.SubChunk, secY int) (Section, bool) {
 	e := newEncoder("test", 4, 4)
 	return e.encodeSection(w, sub, secY)
+}
+
+// encodeRegistries projects wire.Registries into the snapshot shape.
+// Returns nil when registries were never enabled (viewer path unused).
+func encodeRegistries(r *wire.Registries) *Registries {
+	if r == nil {
+		return nil
+	}
+	out := &Registries{
+		Blocks: make([]RegistryBlock, 0, len(r.Blocks)),
+		Items:  make([]RegistryItem, 0, len(r.Items)),
+		Actors: make([]RegistryActor, 0, len(r.Actors)),
+	}
+	for _, def := range r.Blocks {
+		out.Blocks = append(out.Blocks, encodeRegistryBlock(def))
+	}
+	for _, def := range r.Items {
+		out.Items = append(out.Items, RegistryItem{
+			Name:           def.Name,
+			ComponentBased: def.ComponentBased,
+			Version:        def.Version,
+			Icon:           def.Icon,
+			Components:     def.Components,
+		})
+	}
+	for _, def := range r.Actors {
+		actor := RegistryActor{Type: def.Type}
+		for _, p := range def.Properties {
+			actor.Properties = append(actor.Properties, RegistryActorProp{
+				Name:    p.Name,
+				Type:    p.Type,
+				Default: p.Default,
+				Min:     p.Min,
+				Max:     p.Max,
+				Enum:    p.Enum,
+			})
+		}
+		out.Actors = append(out.Actors, actor)
+	}
+	return out
+}
+
+func encodeRegistryBlock(def wire.BlockDef) RegistryBlock {
+	rb := RegistryBlock{
+		Name:          def.Name,
+		MolangVersion: def.MolangVersion,
+		Components:    encodeRegistryComponents(def.Components),
+	}
+	for _, p := range def.Properties {
+		rb.Properties = append(rb.Properties, RegistryProp{Name: p.Name, Enum: p.Enum})
+	}
+	for _, p := range def.Permutations {
+		rb.Permutations = append(rb.Permutations, RegistryPerm{
+			Condition:  p.Condition,
+			Components: encodeRegistryComponents(p.Components),
+		})
+	}
+	return rb
+}
+
+func encodeRegistryComponents(c wire.BlockComponents) RegistryComponents {
+	out := RegistryComponents{
+		Geometry:       c.Geometry,
+		UnitCube:       c.UnitCube,
+		BoneVisibility: c.BoneVisibility,
+		LightEmission:  c.LightEmission,
+	}
+	if len(c.MaterialInstances) > 0 {
+		out.MaterialInstances = make(map[string]RegistryMaterial, len(c.MaterialInstances))
+		for face, m := range c.MaterialInstances {
+			out.MaterialInstances[face] = RegistryMaterial{
+				Texture:          m.Texture,
+				RenderMethod:     m.RenderMethod,
+				FaceDimming:      m.FaceDimming,
+				AmbientOcclusion: m.AmbientOcclusion,
+			}
+		}
+	}
+	if c.Transformation != nil {
+		t := c.Transformation
+		out.Transformation = &RegistryTransform{
+			RX: t.RX, RY: t.RY, RZ: t.RZ,
+			SX: t.SX, SY: t.SY, SZ: t.SZ,
+			TX: t.TX, TY: t.TY, TZ: t.TZ,
+		}
+	}
+	if c.CollisionBox != nil {
+		b := c.CollisionBox
+		out.CollisionBox = &RegistryBox{
+			Enabled: b.Enabled,
+			MinX:    b.MinX, MinY: b.MinY, MinZ: b.MinZ,
+			MaxX: b.MaxX, MaxY: b.MaxY, MaxZ: b.MaxZ,
+		}
+	}
+	if c.SelectionBox != nil {
+		b := c.SelectionBox
+		out.SelectionBox = &RegistrySelectionBox{
+			Enabled: b.Enabled,
+			Origin:  b.Origin,
+			Size:    b.Size,
+		}
+	}
+	return out
 }

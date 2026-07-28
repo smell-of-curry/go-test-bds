@@ -1,4 +1,5 @@
-import type { CameraController } from "./camera";
+import type { CameraController, CameraMode } from "./camera";
+import type { Overlay } from "./overlay";
 import type { ViewerScene } from "./scene";
 import type { Store } from "./store";
 
@@ -8,6 +9,7 @@ export interface ViewerHandle {
   readonly sectionMeshCount: number;
   readonly columnCount: number;
   readonly entityCount: number;
+  readonly highlightCount: number;
   readonly tick: number;
   readonly dimension: number;
   readonly schemaOk: boolean;
@@ -16,10 +18,16 @@ export interface ViewerHandle {
   readonly framesReceived: number;
   /** Schema mismatch or latest stream/parse error; null when healthy. */
   readonly lastError: string | null;
+  /** Active camera mode (`firstPerson` / `follow` / `orbit`). */
+  readonly cameraMode: CameraMode;
+  /** Burnt-in caption band text (suite · test · elapsed · status / message). */
+  readonly captionText: string;
   /** True once the remesh queue is empty after the latest frames. */
   settled: boolean;
   /** Force-drain the remesh queue (test helper). */
   flush: () => void;
+  /** Advance highlight fade clock (test helper; real time still drives opacity). */
+  tickHighlights: (nowMs: number) => void;
   /** Diagnostic snapshot for smoke failures (not asserted). */
   diag: () => {
     sceneChildren: number;
@@ -46,8 +54,9 @@ declare global {
  * @param store - World model.
  * @param scene - Rendered scene.
  * @param getSettled - Returns whether the remesh queue is empty.
- * @param camera - Live camera (for `diag`).
+ * @param camera - Live camera (for `diag` / mode).
  * @param getStreamError - Latest EventSource/parse error from the stream layer.
+ * @param overlay - Caption / HUD (for `captionText`).
  */
 export function installViewerHandle(
   store: Store,
@@ -55,6 +64,7 @@ export function installViewerHandle(
   getSettled: () => boolean,
   camera: CameraController,
   getStreamError: () => string = () => "",
+  overlay?: Overlay,
 ): void {
   window.__viewer = {
     get blockInstanceCount() {
@@ -68,6 +78,9 @@ export function installViewerHandle(
     },
     get entityCount() {
       return scene.entityCount;
+    },
+    get highlightCount() {
+      return scene.highlightCount;
     },
     get tick() {
       return store.getState().tick;
@@ -90,6 +103,12 @@ export function installViewerHandle(
       const stream = getStreamError();
       return stream.length > 0 ? stream : null;
     },
+    get cameraMode() {
+      return camera.mode;
+    },
+    get captionText() {
+      return overlay?.captionText ?? "";
+    },
     get settled() {
       return getSettled();
     },
@@ -99,6 +118,9 @@ export function installViewerHandle(
     flush: () => {
       scene.flush(store.getState());
       store.clearDirty();
+    },
+    tickHighlights: (nowMs: number) => {
+      scene.tickHighlights(nowMs);
     },
     diag: () => {
       const cam = camera.perspective;

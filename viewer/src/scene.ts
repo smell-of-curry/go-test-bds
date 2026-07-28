@@ -10,6 +10,12 @@ export const REMESH_BUDGET_MS = 4;
 /** Soft cap on sections remeshed in a single frame, even if budget remains. */
 export const REMESH_MAX_SECTIONS_PER_FRAME = 8;
 
+/** How long a block-change outline stays visible (ms). */
+export const HIGHLIGHT_FADE_MS = 1000;
+
+/** Cap live block outlines so a bulk delta cannot swamp the frame. */
+export const HIGHLIGHT_MAX = 48;
+
 export interface Mesher {
   /**
    * Build placeholder geometry for one section.
@@ -309,21 +315,30 @@ interface EntityNode {
   label: HTMLDivElement;
 }
 
+interface HighlightNode {
+  lines: THREE.LineSegments;
+  bornMs: number;
+}
+
 /**
  * three.js scene: section InstancedMeshes + entity wire boxes + column bounds.
  */
 export class ViewerScene {
   readonly scene = new THREE.Scene();
   readonly renderer: THREE.WebGLRenderer;
-  private readonly mesher: Mesher;
+  private mesher: Mesher;
   private readonly labelsRoot: HTMLElement;
   private readonly sections = new Map<string, SectionNode>();
   private readonly entities = new Map<number, EntityNode>();
   private readonly columnBounds = new Map<string, THREE.LineSegments>();
+  private readonly highlights: HighlightNode[] = [];
   private readonly actorGroup: THREE.Group;
   private readonly pendingSections: string[] = [];
   private pendingSet = new Set<string>();
   private storeRef: WorldState | null = null;
+  private static readonly highlightGeo = new THREE.EdgesGeometry(
+    new THREE.BoxGeometry(1.02, 1.02, 1.02),
+  );
 
   blockInstanceCount = 0;
   sectionMeshCount = 0;
@@ -378,11 +393,14 @@ export class ViewerScene {
    * Sync scene to store dirty sets. Remeshes at most a budgeted number of
    * sections per call; leftover keys stay queued.
    *
+   * Entity / actor *poses* are applied from the render loop (interpolated);
+   * this only upserts/removes entity nodes and queues remeshes.
+   *
    * @param state - Current world state (read-only for meshing).
-   * @param orbitMode - Actor body is shown only in orbit mode.
+   * @param showActor - Actor body wireframe (follow / orbit; hidden in first-person).
    * @returns true when the dirty queue is empty.
    */
-  sync(state: WorldState, orbitMode: boolean): boolean {
+  sync(state: WorldState, showActor: boolean): boolean {
     this.storeRef = state;
 
     if (state.fullReset) {
@@ -429,16 +447,11 @@ export class ViewerScene {
       if (ent) this.upsertEntity(ent.rid, ent);
     }
 
-    if (state.actor) {
-      this.actorGroup.position.set(
-        state.actor.pos[0],
-        state.actor.pos[1],
-        state.actor.pos[2],
-      );
-      this.actorGroup.visible = orbitMode;
-    } else {
-      this.actorGroup.visible = false;
+    for (const pos of state.dirtyBlocks) {
+      this.addBlockHighlight(pos);
     }
+
+    this.actorGroup.visible = showActor && !!state.actor;
 
     this.recomputeCounts();
     return this.pendingSections.length === 0;
@@ -453,9 +466,14 @@ export class ViewerScene {
     this.recomputeCounts();
   }
 
-  /** Show the observed bot's body only in orbit mode. */
-  setOrbitMode(
-    orbit: boolean,
+  /**
+   * Place / show the observed bot body (follow and orbit; hidden in first-person).
+   *
+   * @param show - Whether the body wireframe is visible.
+   * @param actorPos - Feet position, or null when no actor.
+   */
+  setActorVisible(
+    show: boolean,
     actorPos: [number, number, number] | null,
   ): void {
     if (!actorPos) {
@@ -463,7 +481,20 @@ export class ViewerScene {
       return;
     }
     this.actorGroup.position.set(actorPos[0], actorPos[1], actorPos[2]);
-    this.actorGroup.visible = orbit;
+    this.actorGroup.visible = show;
+  }
+
+  /**
+   * Move an existing entity node to an interpolated pose. Missing rids are ignored
+   * (structure still comes from {@link sync}).
+   *
+   * @param rid - Entity runtime ID.
+   * @param pos - World position.
+   */
+  setEntityPos(rid: number, pos: [number, number, number]): void {
+    const node = this.entities.get(rid);
+    if (!node) return;
+    node.group.position.set(pos[0], pos[1], pos[2]);
   }
 
   /** Continue draining the remesh queue under the per-frame budget. */
@@ -474,9 +505,51 @@ export class ViewerScene {
     return this.pendingSections.length === 0;
   }
 
+  /**
+   * Fade block-change outlines; drop expired ones.
+   *
+   * @param nowMs - `performance.now()` from the render loop.
+   */
+  tickHighlights(nowMs: number): void {
+    for (let i = this.highlights.length - 1; i >= 0; i--) {
+      const h = this.highlights[i]!;
+      const age = nowMs - h.bornMs;
+      if (age >= HIGHLIGHT_FADE_MS) {
+        this.disposeHighlight(h);
+        this.highlights.splice(i, 1);
+        continue;
+      }
+      const mat = h.lines.material as THREE.LineBasicMaterial;
+      mat.opacity = 1 - age / HIGHLIGHT_FADE_MS;
+    }
+  }
+
   render(camera: CameraController): void {
     this.renderer.render(this.scene, camera.perspective);
     this.updateLabels(camera);
+  }
+
+  /**
+   * Outline a block that just changed. Oldest highlights are evicted past the cap.
+   *
+   * @param pos - Block coordinates (integer cell).
+   */
+  addBlockHighlight(pos: [number, number, number]): void {
+    while (this.highlights.length >= HIGHLIGHT_MAX) {
+      const old = this.highlights.shift();
+      if (old) this.disposeHighlight(old);
+    }
+    const mat = new THREE.LineBasicMaterial({
+      color: 0xffee55,
+      transparent: true,
+      opacity: 1,
+      depthTest: true,
+    });
+    const lines = new THREE.LineSegments(ViewerScene.highlightGeo, mat);
+    lines.position.set(pos[0] + 0.5, pos[1] + 0.5, pos[2] + 0.5);
+    lines.name = `highlight:${pos.join(",")}`;
+    this.scene.add(lines);
+    this.highlights.push({ lines, bornMs: performance.now() });
   }
 
   private enqueueSection(key: string): void {
@@ -652,8 +725,16 @@ export class ViewerScene {
     for (const key of [...this.columnBounds.keys()])
       this.removeColumnBounds(key);
     for (const rid of [...this.entities.keys()]) this.removeEntity(rid);
+    for (const h of this.highlights) this.disposeHighlight(h);
+    this.highlights.length = 0;
     this.pendingSections.length = 0;
     this.pendingSet.clear();
+  }
+
+  private disposeHighlight(h: HighlightNode): void {
+    this.scene.remove(h.lines);
+    // Shared geometry — only dispose the material.
+    (h.lines.material as THREE.Material).dispose();
   }
 
   private recomputeCounts(): void {
@@ -692,6 +773,28 @@ export class ViewerScene {
 
   get columnBoundCount(): number {
     return this.columnBounds.size;
+  }
+
+  /** Live block-change outlines (for tests). */
+  get highlightCount(): number {
+    return this.highlights.length;
+  }
+
+  /**
+   * Swap the mesher and rebuild what is already on screen.
+   *
+   * Textures arrive from the pack stack after the scene is up, so the first
+   * columns are meshed by whatever was available at the time. Without the
+   * rebuild they would keep their placeholder geometry for the rest of the run.
+   *
+   * @param mesher The mesher to use from now on.
+   */
+  setMesher(mesher: Mesher): void {
+    this.mesher = mesher;
+    for (const key of [...this.sections.keys()]) {
+      this.removeSection(key);
+      this.enqueueSection(key);
+    }
   }
 
   /** Re-queue every live section (unused today; handy if mesher settings change). */

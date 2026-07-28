@@ -24,6 +24,7 @@ import (
 	"github.com/smell-of-curry/go-test-bds/gotestbds/entity"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/inventory"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/mcmath"
+	"github.com/smell-of-curry/go-test-bds/gotestbds/wire"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/world"
 )
 
@@ -37,6 +38,10 @@ type Actor struct {
 	actorData
 
 	conn Conn
+
+	// wireReg is nil until a viewer asks for join-sequence definitions.
+	// Written only on the bot goroutine.
+	wireReg *wire.Registries
 }
 
 // Handler returns Actor's handler.

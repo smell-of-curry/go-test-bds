@@ -165,11 +165,13 @@ func (h *TestingHandler) HandleReceiveDialogue(ctx *actor.Context, _ *actor.Dial
 //
 // Encoding and fan-out happen here because World is only safe to read from the
 // bot goroutine that calls Actor.Tick. A nil stream is a no-op so runs without
-// a viewer pay only this one nil check.
+// a viewer pay only this one nil check. Wire registries are decoded on the
+// first viewer tick so headless runs never touch GameData.CustomBlocks/Items.
 func (h *TestingHandler) HandleTick(a *actor.Actor, _ uint64) {
 	if h.stream == nil {
 		return
 	}
+	a.EnsureWireRegistries()
 	h.stream.Tick(a)
 }
 

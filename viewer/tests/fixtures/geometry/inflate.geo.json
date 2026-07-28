@@ -1,0 +1,26 @@
+{
+  "format_version": "1.21.0",
+  "minecraft:geometry": [
+    {
+      "description": {
+        "identifier": "geometry.test.inflate",
+        "texture_width": 16,
+        "texture_height": 16
+      },
+      "bones": [
+        {
+          "name": "body",
+          "pivot": [0, 0, 0],
+          "cubes": [
+            {
+              "origin": [0, 0, 0],
+              "size": [16, 16, 16],
+              "inflate": 1,
+              "uv": [0, 0]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

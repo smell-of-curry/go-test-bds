@@ -3,17 +3,17 @@ package viewer
 import (
 	"encoding/json"
 	"testing"
-	"time"
 
 	"github.com/df-mc/dragonfly/server/block"
 	"github.com/df-mc/dragonfly/server/block/cube"
 	dfworld "github.com/df-mc/dragonfly/server/world"
 )
 
-// TestBackpressureDropsThenKeyframes covers a slow subscriber: full buffer
-// drops frames, and the next successful delivery is a keyframe rather than a
-// corrupt delta against a missed frame.
-func TestBackpressureDropsThenKeyframes(t *testing.T) {
+// TestSlowSubscriberGetsLatestWorldThenKeyframe covers a subscriber that has
+// fallen behind: it must not accumulate stale world frames, and once one has
+// been skipped the next frame it receives has to be a keyframe rather than a
+// delta against something it never saw.
+func TestSlowSubscriberGetsLatestWorldThenKeyframe(t *testing.T) {
 	hub, err := New(Options{Address: "127.0.0.1:0", ArtifactDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
@@ -30,59 +30,106 @@ func TestBackpressureDropsThenKeyframes(t *testing.T) {
 
 	// First tick → keyframe.
 	s.Tick(a)
-	select {
-	case fr := <-sub.ch:
-		if fr.event != "keyframe" {
-			t.Fatalf("first event=%s", fr.event)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("timeout waiting for keyframe")
+	fr, ok := sub.next()
+	if !ok {
+		t.Fatal("no frame after the first tick")
+	}
+	if fr.event != "keyframe" {
+		t.Fatalf("first event=%s", fr.event)
 	}
 
-	// Fill the buffer without reading so further sends drop.
-	for i := 0; i < subscriberBuf+2; i++ {
+	// Several ticks without reading: only the newest world frame is kept.
+	for i := 0; i < 5; i++ {
 		a.World().SetBlock(cube.Pos{1, 70, 1}, block.Dirt{})
 		if i%2 == 1 {
 			a.World().SetBlock(cube.Pos{1, 70, 1}, block.Gold{})
 		}
 		s.Tick(a)
 	}
-	if !sub.resync {
-		t.Fatal("subscriber should be flagged for resync after drops")
+	sub.mu.Lock()
+	queued := len(sub.events)
+	sub.mu.Unlock()
+	if queued != 0 {
+		t.Fatalf("world frames queued as events: %d", queued)
 	}
 
-	// Drain whatever is buffered so the next send can land.
-	drained := 0
+	// Exactly one world frame is kept, and because a delta was skipped it is a
+	// keyframe: a delta against a frame the subscriber never saw is unusable.
+	fr, ok = sub.next()
+	if !ok {
+		t.Fatal("no world frame pending after five unread ticks")
+	}
+	if fr.event != "keyframe" {
+		t.Fatalf("pending event=%s want keyframe after a skipped delta", fr.event)
+	}
+	var kf Keyframe
+	if err := json.Unmarshal(fr.data, &kf); err != nil {
+		t.Fatal(err)
+	}
+	if kf.Type != "keyframe" {
+		t.Fatalf("type=%s", kf.Type)
+	}
+	if _, ok := sub.next(); ok {
+		t.Fatal("more than one world frame kept for a subscriber that is behind")
+	}
+	if sub.needsResync() {
+		t.Fatal("resync flag should clear once the keyframe is delivered")
+	}
+}
+
+// TestEventsAreNeverDroppedForWorldFrames covers the other half of the split: a
+// mark or capture cannot be repaired by a later keyframe, so a subscriber that
+// is behind on world frames must still receive every event, in order.
+func TestEventsAreNeverDroppedForWorldFrames(t *testing.T) {
+	hub, err := New(Options{Address: "127.0.0.1:0", ArtifactDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer hub.Close()
+
+	s := hub.Register("TestBot")
+	sub := s.attach()
+	defer s.detach(sub)
+
+	a := testActor(t, "TestBot")
+	addColumn(a.World(), dfworld.ChunkPos{0, 0})
+
+	for i := 0; i < eventQueueCap/4; i++ {
+		s.emitMark(Mark{Phase: "testStart", Suite: "s", Test: "t"})
+		a.World().SetBlock(cube.Pos{1, 70, 1}, block.Dirt{})
+		s.Tick(a)
+	}
+
+	marks := 0
 	for {
-		select {
-		case <-sub.ch:
-			drained++
-		default:
-			goto drained
+		fr, ok := sub.next()
+		if !ok {
+			break
+		}
+		if fr.event == "mark" {
+			marks++
 		}
 	}
-drained:
-	_ = drained
+	if marks != eventQueueCap/4 {
+		t.Fatalf("marks delivered=%d want %d", marks, eventQueueCap/4)
+	}
+}
 
-	// Next tick must be a keyframe (resync), not a delta.
-	a.World().SetBlock(cube.Pos{2, 70, 2}, block.Stone{})
-	s.Tick(a)
-	select {
-	case fr := <-sub.ch:
-		if fr.event != "keyframe" {
-			t.Fatalf("after drop event=%s want keyframe", fr.event)
+// TestEventQueueCapDiscardsOldest guards the sanity valve: a subscriber that has
+// stopped reading for good must not grow memory without end.
+func TestEventQueueCapDiscardsOldest(t *testing.T) {
+	sub := &subscriber{wake: make(chan struct{}, 1)}
+	for i := 0; i < eventQueueCap; i++ {
+		if discarded := sub.pushEvent(encodedFrame{event: "mark"}); discarded != 0 {
+			t.Fatalf("discarded at %d, below the cap", i)
 		}
-		var kf Keyframe
-		if err := json.Unmarshal(fr.data, &kf); err != nil {
-			t.Fatal(err)
-		}
-		if kf.Type != "keyframe" {
-			t.Fatalf("type=%s", kf.Type)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("timeout waiting for resync keyframe")
 	}
-	if sub.resync {
-		t.Fatal("resync flag should clear after a delivered keyframe")
+	if discarded := sub.pushEvent(encodedFrame{event: "mark"}); discarded != 1 {
+		t.Fatalf("discarded=%d at the cap, want 1", discarded)
+	}
+	sub.mu.Lock()
+	defer sub.mu.Unlock()
+	if len(sub.events) != eventQueueCap {
+		t.Fatalf("queue length=%d want %d", len(sub.events), eventQueueCap)
 	}
 }

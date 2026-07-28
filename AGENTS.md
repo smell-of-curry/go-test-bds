@@ -8,6 +8,11 @@
   project-specific fixtures stay downstream.
 - Commit straight to `main` here; consumers get changes via
   `npm i github:smell-of-curry/go-test-bds`.
+- Judge a capture by decoding it, not by the run reporting green: pull evenly
+  spaced frames out of the webm and read the burnt-in overlay, then say plainly
+  what the recording is worth. Every real bug in the viewer path — an empty
+  world after a teleport, columns stuck `partial`, a recording covering ten
+  seconds of a minute-long run — was found that way and was invisible otherwise.
 
 ## Learned Workspace Facts
 
@@ -24,6 +29,14 @@
   deliberately **solid** (`world.UnknownBlock`): read as air, a floor of custom
   blocks is one the bot falls through, and it never lands because everything
   below is air too.
+- A sub-chunk request answered `SubChunkResultSuccessAllAir` carries **no
+  payload**, so a decode loop that skips every non-`Success` entry never retires
+  it, the column's pending count never reaches zero, and every column with sky
+  above it stays `partial` forever. Call `ReceiveSubChunk()` for it and leave
+  only genuine failures (`ChunkNotFound`, index out of bounds) pending. Bedrock
+  also never sends light — the client computes it, and dragonfly already
+  implements the propagation — so anything that needs light fills it locally
+  instead of reading it off the wire.
 - **BDS never syncs a Script API inventory write to the client.**
   `Container.setItem`/`addItem`/`swapItems` and
   `EntityEquippable.setEquipment` all leave the client's copy stale, and no
@@ -40,7 +53,15 @@
 - A `MovePlayer` handler is what applies server-side teleports (`Player.teleport`,
   `/tp`, portals). Physics is also frozen while the bot's own chunk is missing —
   simulating against an absent world reads it as air and walks the bot out
-  through the bottom in the second before its first chunk arrives.
+  through the bottom in the second before its first chunk arrives. Moving the
+  actor is not enough on a teleport: `unloadChunks` prunes against
+  `loadingCenter` rather than the actor position, so destination columns are
+  discarded as they arrive unless the handler also calls `SetChunkLoadCenter`,
+  and the server keeps streaming around the old position until the bot
+  acknowledges with a `PlayerAuthInput` at the destination (`SendMovement()`)
+  instead of waiting for the next tick. `NetworkChunkPublisherUpdate.Radius` is
+  in **blocks** (`chunkRadius << 4`), so it decodes with `>> 4` — shifting it the
+  other way turns an 8-chunk view into 2048 and disables pruning entirely.
 - Custom `UnmarshalJSON` must never unmarshal into its own receiver: `Pos` did,
   which recursed until the stack overflowed and killed the bot on the first
   instruction carrying a position (`getBlock`). Decode through a plain
@@ -99,3 +120,34 @@
   it for the status channel.
 - Target lib is pre-ES2022: `Array.prototype.at` is unavailable, use
   `arr[arr.length - 1]`.
+- `viewer/` is an optional in-repo web app — its own `package.json`, Vite and
+  Playwright, excluded from the root `tsconfig.json` and `eslint.config.mjs` so
+  the published SDK stays light — fed by the Go hub in `gotestbds/viewer` over
+  SSE, not a WebSocket: the viewer only listens and `EventSource` reconnects
+  itself. `viewer/PROTOCOL.md` is the normative wire contract and
+  `viewer/PLAN.md` the staged roadmap. Rendering never needs a behaviour pack:
+  `GameData.CustomBlocks` (`[]protocol.BlockEntry` — name plus the definition NBT
+  holding `minecraft:geometry` and `material_instances`) and
+  `packet.ItemRegistry` carry the custom definitions, and
+  `packet.ResourcePackStack` states outright that behaviour packs are never
+  downloaded. The vanilla baseline is Mojang's `bedrock-samples` pinned by tag
+  and fetched into a gitignored cache — depending on it is fine, vendoring it is
+  not (Minecraft EULA); it ships no `materials/`, no shaders and no font glyph
+  atlas, but `metadata/vanilladata_modules/mojang-blocks.json` is the complete
+  vanilla block-and-state list. Pack precedence follows `ResourcePackStack`
+  order with later winning, and a subpack is the highest
+  `memory_performance_tier` at or below the device tier.
+- Headless capture runs Chromium on software SwiftShader, which sets the real
+  limits. Drawing every block as an instance (~536k) made `page.screenshot()`
+  exceed 30 s; emitting only air-exposed faces (~95k) brings it to ~70 ms, so
+  the mesher has to cull. A PNG cannot ride the `[STATUS]` chat channel, so the
+  `screenshot` instruction writes into the artifact directory and returns path,
+  dimensions, bytes and tick. Playwright's `recordVideo` takes no frame rate and
+  Chromium emits a video frame only when the page paints, so an app that paints
+  on snapshot arrival records a time lapse; per-test segments were built and
+  reverted (short tests end before a fresh page paints, leaving blank files), so
+  it is one `run.webm` per run written with `--video-out` into the artifact
+  directory — POSTing it to the bot loses the race against the bot's own exit at
+  run end (`ECONNREFUSED`). When the hub serves the built app, hand `AppDir` to
+  `http.FileServer`: a root handler that 404s anything but `/` never serves
+  `/assets/*`, and a blank page reads as a stream failure.

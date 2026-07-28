@@ -9,6 +9,7 @@ import {
   type HelloFrame,
   type KeyframeFrame,
   type MarkFrame,
+  type UI,
   type WorldMeta,
   SCHEMA_VERSION,
   columnKey,
@@ -46,6 +47,7 @@ export interface WorldState {
   actor: Actor | null;
   columns: Map<string, StoredColumn>;
   entities: Map<number, Entity>;
+  ui: UI | null;
   mark: MarkFrame | null;
   pendingCapture: CaptureFrame | null;
   /** Increments on every keyframe after the first successful one (server resync). */
@@ -62,6 +64,8 @@ export interface WorldState {
   /** Entity runtime IDs added/updated/removed since last drain. */
   dirtyEntities: Set<number>;
   removedEntities: Set<number>;
+  /** Block positions changed since last drain (layer 0); for highlight outlines. */
+  dirtyBlocks: Array<[number, number, number]>;
   /** True after a wholesale wipe (keyframe or dimension change). */
   fullReset: boolean;
 }
@@ -79,6 +83,7 @@ function emptyState(): WorldState {
     actor: null,
     columns: new Map(),
     entities: new Map(),
+    ui: null,
     mark: null,
     pendingCapture: null,
     resyncCount: 0,
@@ -89,6 +94,7 @@ function emptyState(): WorldState {
     dirtyColumns: new Set(),
     dirtyEntities: new Set(),
     removedEntities: new Set(),
+    dirtyBlocks: [],
     fullReset: false,
   };
 }
@@ -217,6 +223,7 @@ export class Store {
     this.state.dirtyColumns.clear();
     this.state.dirtyEntities.clear();
     this.state.removedEntities.clear();
+    this.state.dirtyBlocks.length = 0;
     this.state.fullReset = false;
   }
 
@@ -255,12 +262,14 @@ export class Store {
     this.state.dirtyColumns.clear();
     this.state.dirtyEntities.clear();
     this.state.removedEntities.clear();
+    this.state.dirtyBlocks.length = 0;
     this.state.fullReset = true;
 
     this.state.bot = frame.bot;
     this.state.tick = frame.tick;
     this.state.world = frame.world;
     this.state.actor = frame.actor;
+    this.state.ui = frame.ui ?? null;
 
     for (const col of frame.columns) {
       const stored = decodeColumn(col);
@@ -299,6 +308,7 @@ export class Store {
     }
 
     if (frame.actor) this.state.actor = frame.actor;
+    if (frame.ui !== undefined) this.state.ui = frame.ui ?? null;
 
     if (frame.columnsRemoved) {
       for (const [x, z] of frame.columnsRemoved) {
@@ -398,6 +408,7 @@ export class Store {
     }
     sec.indices[sectionIndex(lx, ly, lz)] = paletteIndex;
     this.state.dirtySections.add(sectionDirtyKey(cx, cz, sy));
+    this.state.dirtyBlocks.push([wx, wy, wz]);
     // Edge cells change the neighbour section's exposure too.
     if (lx === 0) dirtySectionIfPresent(this.state, cx - 1, cz, sy);
     if (lx === 15) dirtySectionIfPresent(this.state, cx + 1, cz, sy);

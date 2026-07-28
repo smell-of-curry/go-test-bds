@@ -74,6 +74,99 @@
         font-size: 11px;
         white-space: nowrap;
       }
+      /* Burnt-in caption for 1280×720 capture — large enough to read in a montage. */
+      #caption {
+        display: none;
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        padding: 14px 20px 16px;
+        background: linear-gradient(
+          transparent,
+          rgba(0, 0, 0, 0.82) 30%,
+          rgba(0, 0, 0, 0.9)
+        );
+        pointer-events: none;
+        z-index: 3;
+        font-family: ui-sans-serif, system-ui, Segoe UI, sans-serif;
+      }
+      #caption.visible {
+        display: block;
+      }
+      #caption .caption-line {
+        font-size: 28px;
+        font-weight: 700;
+        line-height: 1.25;
+        color: #f0f3f6;
+        text-shadow: 0 1px 2px #000;
+      }
+      #caption.failed .caption-line {
+        color: #ffb4b4;
+      }
+      #caption .caption-message {
+        margin-top: 6px;
+        font-size: 22px;
+        font-weight: 600;
+        line-height: 1.3;
+        color: #ffdddd;
+        text-shadow: 0 1px 2px #000;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+      #ui-panel {
+        display: none;
+        position: fixed;
+        top: 8px;
+        right: 8px;
+        width: min(360px, 42vw);
+        max-height: min(420px, 55vh);
+        overflow: auto;
+        padding: 10px 12px;
+        background: rgba(8, 10, 16, 0.82);
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        pointer-events: none;
+        z-index: 3;
+        font: 13px/1.35 ui-sans-serif, system-ui, Segoe UI, sans-serif;
+      }
+      #ui-panel.visible {
+        display: block;
+      }
+      #ui-panel .ui-block + .ui-block {
+        margin-top: 10px;
+        padding-top: 10px;
+        border-top: 1px solid rgba(255, 255, 255, 0.12);
+      }
+      #ui-panel .ui-kind {
+        font-size: 11px;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: #9aa7b5;
+      }
+      #ui-panel .ui-title {
+        margin-top: 2px;
+        font-size: 16px;
+        font-weight: 700;
+        color: #eef2f6;
+      }
+      #ui-panel .ui-body {
+        margin-top: 4px;
+        color: #c5ced8;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+      #ui-panel .ui-buttons {
+        margin-top: 8px;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+      #ui-panel .ui-button {
+        padding: 6px 8px;
+        background: rgba(255, 255, 255, 0.08);
+        border: 1px solid rgba(255, 255, 255, 0.16);
+        color: #e6edf3;
+      }
     </style>
   </head>
   <body>
@@ -81,6 +174,8 @@
     <div id="crosshair"></div>
     <div id="labels"></div>
     <div id="overlay">connecting…</div>
+    <div id="caption"></div>
+    <div id="ui-panel"></div>
     <div id="schema-error"></div>
     <script type="module" src="/src/main.ts"></script>
   </body>

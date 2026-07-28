@@ -31,21 +31,24 @@ months of work before anyone outside this directory benefits.
 
 Stages 0–4 are shipped and running in CI. `pokebedrock-beh`'s `addon-tests` job
 asks the dev-server manager for capture, and each run publishes its stills and
-run video as the `addon-test-viewer` workflow artefact. Stages 5 and up are
-untouched.
+run video as the `addon-test-viewer` workflow artefact. Stage 5 (Go-side pack
+acquisition, cache, baseline, stack resolver, asset HTTP) is implemented;
+renderer consumption of those assets starts at stage 6.
 
 Four things shipped differently from what the boxes below predicted, each noted
 where it applies: the stream is Server-Sent Events rather than a WebSocket,
 there is one video per run rather than a segment per test, frame rate is not a
 knob (the recording is a time lapse of whatever the software renderer painted),
-and the caption burnt into the frame names the phase, suite, test and verdict
-but not yet the elapsed time or the assertion text.
+and the caption burnt into the frame names the suite, test, elapsed time and
+verdict (assertion text on failure).
 
 Written down along the way, and normative from here on:
 
 - [`PROTOCOL.md`](PROTOCOL.md) — stream schema, endpoints, harness contract.
 - [`PACKETS.md`](PACKETS.md) — the unhandled-packet audit stage 0 asked for.
 - [`FINDINGS-capture.md`](FINDINGS-capture.md) — capture-mechanism research.
+- [`FINDINGS-wire.md`](FINDINGS-wire.md) — network palette NBT, blocks.json
+  precedence, BP-only gaps (stage 8 Go side).
 - [`README.md`](README.md) — the app, the harness flags, the frame budget.
 
 ## Invariants
@@ -231,18 +234,18 @@ suites are waiting on.
       **One recording per run, not per suite or test:** segmenting was built and
       reverted — short tests ended before a fresh page had painted, leaving blank
       files and a context that kept closing under the next test.
-- [ ] Burn in a caption track: suite, test, elapsed time, and the assertion text
-      when one fails. **Partial:** phase, suite, test and verdict are burnt into
-      every frame through the overlay. `elapsedMs` and the assertion `message`
-      already ride in the mark frame; the overlay does not draw them yet.
+- [x] Burn in a caption track: suite, test, elapsed time, and the assertion text
+      when one fails. Bottom caption band draws suite · test · elapsed · status,
+      plus the assertion `message` on `failed`; the small diagnostic HUD stays.
 - [x] Write per-test artefacts: a still at the moment of failure plus any the
       test asked for, named so they correlate with the run record by `runId` —
       `<suite>/<test>/<label>.png` under the run's artefact directory, with the
       run video beside them.
 - [x] Bound artefact size: resolution and recording length are harness flags,
       retention and a byte cap are the manager's. **Frame rate is not a knob:**
-      Playwright's recorder does not take one, and the app paints on snapshot
-      arrival, so the video is a time lapse — read the overlay's tick for timing.
+      Playwright's recorder does not take one; the app paints on rAF with pose
+      interpolation, so quiet stretches still compress in the webm — read the
+      caption elapsed time and overlay tick for real timing.
 
 **Check:** `viewer/tests/capture.spec.ts` runs the harness against a fake bot
 server and asserts a PNG (magic bytes and all) of the requested size at a tick at
@@ -284,21 +287,21 @@ with two failing tests carried a still of each failure.
 
 Two sources, no third. What the server sends, and a pinned vanilla baseline.
 
-- [ ] Implement resource pack acquisition over the wire.
+- [x] Implement resource pack acquisition over the wire.
       `minecraft.Dialer.DownloadResourcePack` decides per pack whether to accept
       it and `Conn.ResourcePacks()` returns the ones received, so a bot that
       accepts them holds exactly the pack stack the real client would. Neither is
       used today. This is the mechanism that makes the viewer self-maintaining
       for addon content.
-- [ ] Cache downloaded packs by UUID and version so a repeat run against the
+- [x] Cache downloaded packs by UUID and version so a repeat run against the
       same server does not re-download a multi-hundred-megabyte pack.
-- [ ] Depend on `Mojang/bedrock-samples` for the vanilla baseline. It ships the
+- [x] Depend on `Mojang/bedrock-samples` for the vanilla baseline. It ships the
       full vanilla resource pack — real textures, `blocks.json`,
       `terrain_texture.json`, `item_texture.json`, `flipbook_textures.json`,
       `biomes_client.json`, entity definitions, models, render controllers,
       animations, attachables, particles and fogs — which is the entire vanilla
       half of what the renderer resolves.
-- [ ] Pin it by tag in a version file, fetch into a gitignored cache, verify what
+- [x] Pin it by tag in a version file, fetch into a gitignored cache, verify what
       was fetched, and fail startup with an actionable message when it is
       missing. Never commit the assets: the licence is all rights reserved under
       the Minecraft EULA.
@@ -322,7 +325,7 @@ Two sources, no third. What the server sends, and a pinned vanilla baseline.
       `minecraft-linux` tooling reads the Android package, though it hosts no
       assets itself — and the viewer must treat that as an optional overlay, not
       a requirement.
-- [ ] Build the pack stack resolver: vanilla baseline lowest, server packs in the
+- [x] Build the pack stack resolver: vanilla baseline lowest, server packs in the
       order `packet.ResourcePackStack` gives (first applied first), with correct
       override precedence and subpack selection including the
       `memory_performance_tier` rule.
@@ -330,6 +333,8 @@ Two sources, no third. What the server sends, and a pinned vanilla baseline.
 **Check:** resolve a texture path through a two-pack stack and assert the server
 pack wins; assert a missing baseline fails loudly at startup rather than
 rendering grey; assert the fetched baseline matches the pinned version.
+Covered by `gotestbds/assets` tests plus `gotestbds/viewer/assets_http_test.go`
+path-traversal coverage. Endpoints documented in [`PROTOCOL.md`](PROTOCOL.md).
 
 ---
 
@@ -398,35 +403,41 @@ Custom blocks are not in `blocks.json` and never will be. They arrive in the
 join sequence, which is exactly how a real client learns to draw them without
 ever seeing a behaviour pack.
 
-- [ ] Read the network block palette. `GameData.CustomBlocks` is
+- [x] Read the network block palette. `GameData.CustomBlocks` is
       `[]protocol.BlockEntry` — a name plus the block's definition NBT — and it
       carries the components the renderer needs, `minecraft:geometry` and
       `minecraft:material_instances` among them. Decode components, properties,
-      permutations and the Molang version.
-- [ ] Establish precedence between the network palette and `blocks.json`, and
-      assert it with a fixture rather than assuming it.
+      permutations and the Molang version. (`gotestbds/wire`, keyframe
+      `registries`)
+- [x] Establish precedence between the network palette and `blocks.json`, and
+      assert it with a fixture rather than assuming it. (`FINDINGS-wire.md`,
+      `TestPaletteWinsOverBlocksJSON`)
 - [ ] Resolve the geometry and texture names the palette references against the
       resource pack stack from stage 5. The palette says what to draw with; the
-      pack holds the thing itself.
+      pack holds the thing itself. *(renderer / stage 6+)*
 - [ ] Support custom block geometry with per-instance materials, including
-      `render_method`, face-dimming and ambient-occlusion flags.
+      `render_method`, face-dimming and ambient-occlusion flags. *(renderer)*
 - [ ] Support permutations: evaluate permutation conditions against the state
       properties carried in the snapshot and select the resulting components.
+      *(renderer; conditions + components are on the wire)*
 - [ ] Support transformation components (rotation, scale, translation), bone
       visibility, and `minecraft:light_emission` where it affects appearance.
-- [ ] Read custom item components from `packet.ItemRegistry`, whose entries carry
+      *(renderer; decoded on the wire)*
+- [x] Read custom item components from `packet.ItemRegistry`, whose entries carry
       them for exactly the same reason, and resolve item icons through the pack
-      stack's `item_texture.json`.
-- [ ] Read entity property definitions from `packet.SyncActorProperty` so
+      stack's `item_texture.json`. *(decode + icon short-name on wire; pack
+      resolve is renderer)*
+- [x] Read entity property definitions from `packet.SyncActorProperty` so
       `query.property` has something to resolve against.
-- [ ] Establish the fallback chain for a block the palette and pack stack cannot
+- [x] Establish the fallback chain for a block the palette and pack stack cannot
       resolve: named-but-unknown, unnamed-but-present, and absent, each visually
       distinct so a missing asset is never silently a solid grey cube.
+      *(classification + PROTOCOL; distinct meshes are renderer)*
 
-**Check:** a fixture resource pack plus a recorded join sequence under
-`viewer/testdata`, asserting a custom block resolves its geometry and materials
-from palette NBT alone. There is no behaviour pack in the fixtures at all, which
-is the test: if the renderer needs one, it cannot pass.
+**Check (Go):** fixture join sequence under `gotestbds/wire/testdata` — custom
+block resolves geometry and materials from palette NBT alone; no behaviour pack
+in the fixtures. Palette-vs-`blocks.json` precedence and three-way fallback
+asserted. Renderer pack resolution remains for later stage boxes.
 
 ---
 
@@ -535,13 +546,16 @@ directory, a fixture, or a test — before the stage that depends on it is built
 - Exactly what the block palette NBT contains per version, and whether every
   component the renderer needs is present for a block authored today. This is
   the load-bearing assumption behind the no-behaviour-pack rule and deserves a
-  recorded palette in `testdata` as evidence.
+  recorded palette in `testdata` as evidence. **Answered:**
+  [`FINDINGS-wire.md`](FINDINGS-wire.md) + `gotestbds/wire/testdata`.
 - Whether the palette's component set and `blocks.json` ever describe the same
-  block, and which wins if so.
+  block, and which wins if so. **Answered:** same name can appear in both;
+  palette wins for geometry/materials (`TestPaletteWinsOverBlocksJSON`).
 - Which registries beyond blocks and items cross the wire, and whether any
   render-relevant data is only ever in a behaviour pack. If something is, the
   finding is what the viewer approximates instead — not a behaviour-pack
-  dependency.
+  dependency. **Answered:** SyncActorProperty; BP-only gaps listed in
+  FINDINGS-wire.
 
 **Geometry and animation**
 
