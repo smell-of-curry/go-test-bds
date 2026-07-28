@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/smell-of-curry/go-test-bds/gotestbds/actor"
 )
@@ -15,6 +16,9 @@ import (
 // times out — so they queue rather than drop. The cap only exists so a
 // subscriber that has stopped reading for good cannot grow memory without end.
 const eventQueueCap = 256
+
+// streamHealthWindow is how often subscriber delivery is worth a look.
+const streamHealthWindow = 2 * time.Second
 
 // Stream is the per-bot snapshot stream.
 //
@@ -32,6 +36,7 @@ type Stream struct {
 	// Written by Tick on the bot goroutine, read by emitMark on whichever
 	// goroutine ran the instruction — atomic, not plain fields.
 	lastTick atomic.Uint64
+	healthAt time.Time
 	lastDim  atomic.Int32
 }
 
@@ -47,7 +52,15 @@ type subscriber struct {
 	events  []encodedFrame
 	pending *encodedFrame
 	dropped int
-	resync  bool
+	// replaced counts world frames superseded before the writer sent them, and
+	// sent counts what reached the socket. A subscriber that cannot keep up shows
+	// as replaced climbing while sent stands still — which is what a frozen
+	// viewer looks like from this side, and it used to say nothing at all.
+	replaced             int
+	sent                 int
+	resync               bool
+	lastReportedSent     int
+	lastReportedReplaced int
 
 	// wake carries no data; it only tells the writer there is something to send.
 	wake chan struct{}
@@ -88,21 +101,31 @@ func (sub *subscriber) pushEvent(f encodedFrame) int {
 
 // pushWorld replaces the pending world frame with a newer one.
 //
+// A delta never replaces a keyframe that has not been sent yet: the client needs
+// the keyframe to have anything to apply the delta to, and dropping it left a
+// subscriber that had fallen behind receiving deltas against a world it had
+// never been given. A keyframe replaces anything, because it is the whole world.
+//
 // @param f The frame to deliver.
 // @param keyframe Whether f is a keyframe rather than a delta.
 func (sub *subscriber) pushWorld(f encodedFrame, keyframe bool) {
 	sub.mu.Lock()
+	defer sub.mu.Unlock()
+
 	if sub.pending != nil && !keyframe {
-		// The frame being replaced was never sent, so the client cannot apply
-		// what builds on it.
+		// Something is being skipped either way, so the client must resync.
 		sub.resync = true
+		if sub.pending.event == "keyframe" {
+			sub.replaced++
+			return
+		}
+		sub.replaced++
 	}
 	frame := f
 	sub.pending = &frame
 	if keyframe {
 		sub.resync = false
 	}
-	sub.mu.Unlock()
 	sub.signal()
 }
 
@@ -120,9 +143,19 @@ func (sub *subscriber) next() (encodedFrame, bool) {
 	if sub.pending != nil {
 		f := *sub.pending
 		sub.pending = nil
+		sub.sent++
 		return f, true
 	}
 	return encodedFrame{}, false
+}
+
+// stats reports delivery counters for the health log.
+//
+// @returns frames sent, frames superseded before sending, queued events.
+func (sub *subscriber) stats() (sent, replaced, queued int) {
+	sub.mu.Lock()
+	defer sub.mu.Unlock()
+	return sub.sent, sub.replaced, len(sub.events)
 }
 
 // needsResync reports whether the next world frame must be a keyframe.
@@ -147,6 +180,7 @@ func newStream(h *Hub, name string, radius, sectionRadius int) *Stream {
 // receives the same byte slice. A subscriber whose buffer is full drops the
 // frame and is flagged so its next delivery is a fresh keyframe.
 func (s *Stream) Tick(a *actor.Actor) {
+	s.reportHealth(time.Now())
 	s.lastTick.Store(a.CurrentTick())
 	s.lastDim.Store(a.Dimension())
 	s.hub.setBotMeta(s.name, s.lastTick.Load(), s.lastDim.Load())
@@ -189,6 +223,55 @@ func (s *Stream) Tick(a *actor.Actor) {
 			continue
 		}
 		sub.pushWorld(frame, event == "keyframe")
+	}
+}
+
+// reportHealth logs once per window while a subscriber is losing world frames.
+//
+// Called from Tick on the bot goroutine.
+//
+// @param now The current time, passed in so tests need no clock.
+func (s *Stream) reportHealth(now time.Time) {
+	if s.hub.log == nil {
+		return
+	}
+	if s.healthAt.IsZero() {
+		s.healthAt = now
+		return
+	}
+	if now.Sub(s.healthAt) < streamHealthWindow {
+		return
+	}
+	elapsed := now.Sub(s.healthAt)
+	s.healthAt = now
+
+	s.mu.Lock()
+	subs := make([]*subscriber, 0, len(s.subs))
+	for sub := range s.subs {
+		subs = append(subs, sub)
+	}
+	s.mu.Unlock()
+
+	for i, sub := range subs {
+		sent, replaced, queued := sub.stats()
+		delta := sent - sub.lastReportedSent
+		sub.lastReportedSent = sent
+		droppedNow := replaced - sub.lastReportedReplaced
+		sub.lastReportedReplaced = replaced
+		// Losing the odd frame to a hitch is normal. Sending nothing at all
+		// while frames pile up is a viewer that has stopped, and the only other
+		// symptom is a recording where the tick never changes.
+		if delta > 0 || droppedNow == 0 {
+			continue
+		}
+		s.hub.log.Warn("viewer subscriber is not keeping up",
+			"bot", s.name,
+			"subscriber", i,
+			"sentInWindow", delta,
+			"supersededInWindow", droppedNow,
+			"queuedEvents", queued,
+			"windowMs", elapsed.Milliseconds(),
+		)
 	}
 }
 

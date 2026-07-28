@@ -66,7 +66,7 @@ func DefaultConfig() Config {
 	c.Viewer.Enabled = false
 	c.Viewer.Address = "127.0.0.1:24680"
 	c.Viewer.Radius = 4
-	c.Viewer.SectionRadius = 4
+	c.Viewer.SectionRadius = 8
 	c.Viewer.ArtifactDir = "artifacts"
 	c.Viewer.AppDir = ""
 	c.Viewer.CacheDir = ""

@@ -133,3 +133,28 @@ func TestEventQueueCapDiscardsOldest(t *testing.T) {
 		t.Fatalf("queue length=%d want %d", len(sub.events), eventQueueCap)
 	}
 }
+
+// TestDeltaDoesNotReplaceUnsentKeyframe covers the rule that keeps a subscriber
+// which has fallen behind able to render at all: a delta applies to a world the
+// client must already have, so it must never supersede a keyframe still waiting
+// to be sent.
+func TestDeltaDoesNotReplaceUnsentKeyframe(t *testing.T) {
+	sub := &subscriber{wake: make(chan struct{}, 1)}
+
+	sub.pushWorld(encodedFrame{event: "keyframe", data: []byte(`{"k":1}`)}, true)
+	sub.pushWorld(encodedFrame{event: "delta", data: []byte(`{"d":1}`)}, false)
+
+	f, ok := sub.next()
+	if !ok {
+		t.Fatal("nothing pending")
+	}
+	if f.event != "keyframe" {
+		t.Fatalf("pending event=%s want keyframe", f.event)
+	}
+	if !sub.needsResync() {
+		t.Fatal("skipping the delta must flag a resync")
+	}
+	if _, ok := sub.next(); ok {
+		t.Fatal("the delta should have been dropped, not queued")
+	}
+}
