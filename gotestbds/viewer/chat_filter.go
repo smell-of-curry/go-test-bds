@@ -1,6 +1,9 @@
 package viewer
 
-import "strings"
+import (
+	"encoding/json"
+	"strings"
+)
 
 // protocolChatPrefixes are bot↔addon wire lines that must never appear in a
 // recording's chat HUD. Filtered at encode/emit time so a handler that forgot
@@ -27,6 +30,80 @@ func isProtocolChatNoise(text string) bool {
 		}
 	}
 	return false
+}
+
+// rawtextPart is one element of a Bedrock rawtext message.
+type rawtextPart struct {
+	Text      string          `json:"text"`
+	Translate string          `json:"translate"`
+	With      json.RawMessage `json:"with"`
+}
+
+// rawtextMessage is the {"rawtext":[…]} envelope addons send through
+// sendMessage/SetTitle.
+type rawtextMessage struct {
+	RawText []rawtextPart `json:"rawtext"`
+}
+
+// flattenRawtext renders Bedrock rawtext JSON as readable text: "text" parts
+// verbatim, "translate" parts as their key (the bot has no .lang table to
+// resolve them), and "with" substitution args appended space-separated after
+// their key. Anything that is not a rawtext envelope passes through untouched.
+// Without this, a title like the battle sidebar renders as a wall of JSON in
+// the recording.
+//
+// @param text Raw title/chat text from the wire.
+// @returns The flattened text, or the input unchanged.
+func flattenRawtext(text string) string {
+	trimmed := strings.TrimSpace(text)
+	if !strings.HasPrefix(trimmed, "{") || !strings.Contains(trimmed, `"rawtext"`) {
+		return text
+	}
+	var msg rawtextMessage
+	if err := json.Unmarshal([]byte(trimmed), &msg); err != nil || len(msg.RawText) == 0 {
+		return text
+	}
+	var b strings.Builder
+	for _, part := range msg.RawText {
+		b.WriteString(part.Text)
+		if part.Translate == "" {
+			continue
+		}
+		b.WriteString(part.Translate)
+		for _, arg := range rawtextWithArgs(part.With) {
+			if arg == "" {
+				continue
+			}
+			b.WriteString(" ")
+			b.WriteString(arg)
+		}
+	}
+	return b.String()
+}
+
+// rawtextWithArgs extracts substitution arguments from a rawtext "with"
+// field, which the protocol allows as either a plain string array or a nested
+// rawtext object.
+//
+// @param raw The raw JSON of the "with" field, possibly empty.
+// @returns The argument strings, or nil when there are none.
+func rawtextWithArgs(raw json.RawMessage) []string {
+	if len(raw) == 0 {
+		return nil
+	}
+	var plain []string
+	if json.Unmarshal(raw, &plain) == nil {
+		return plain
+	}
+	var nested rawtextMessage
+	if json.Unmarshal(raw, &nested) != nil {
+		return nil
+	}
+	args := make([]string, 0, len(nested.RawText))
+	for _, p := range nested.RawText {
+		args = append(args, p.Text+p.Translate)
+	}
+	return args
 }
 
 // filterHudControlText blanks title/subtitle/actionbar text that is a JSON-UI

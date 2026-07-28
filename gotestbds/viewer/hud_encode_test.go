@@ -24,6 +24,28 @@ func TestEncodeUIFiltersProtocolChatNoise(t *testing.T) {
 	}
 }
 
+func TestFlattenRawtext(t *testing.T) {
+	// The battle sidebar title as PokeBedrock actually sends it: translate
+	// keys with nested-rawtext "with" args, mixed with plain text parts.
+	battle := `{"rawtext":[{"translate":"models.player.battleSide.turn","with":{"rawtext":[{"text":"18"}]}},{"text":"\n\n"},{"translate":"models.player.battleSide.noTerrain"}]}`
+	got := flattenRawtext(battle)
+	want := "models.player.battleSide.turn 18\n\nmodels.player.battleSide.noTerrain"
+	if got != want {
+		t.Fatalf("flattenRawtext=%q want %q", got, want)
+	}
+
+	if got := flattenRawtext(`{"rawtext":[{"translate":"a.key","with":["x","y"]}]}`); got != "a.key x y" {
+		t.Fatalf("plain with args=%q", got)
+	}
+
+	// Non-rawtext input must pass through untouched, including plain JSON.
+	for _, passthrough := range []string{"plain title", `{"not":"rawtext"}`, ""} {
+		if got := flattenRawtext(passthrough); got != passthrough {
+			t.Fatalf("flattenRawtext(%q)=%q want unchanged", passthrough, got)
+		}
+	}
+}
+
 func TestEncodeUICarriesTitleAndHotbar(t *testing.T) {
 	a := testActor(t, "HudBot")
 	a.ApplyTitleAction(packet.TitleActionSetDurations, "", 8, 60, 12)

@@ -800,12 +800,12 @@ func (e *encoder) encodeUI(a *actor.Actor) UI {
 		if isProtocolChatNoise(m.Text) {
 			continue
 		}
-		ui.Messages = append(ui.Messages, m.Text)
+		ui.Messages = append(ui.Messages, flattenRawtext(m.Text))
 	}
 	st := a.ScreenTitle()
-	ui.Title = filterHudControlText(st.Title)
-	ui.Subtitle = filterHudControlText(st.Subtitle)
-	ui.ActionBar = filterHudControlText(st.ActionBar)
+	ui.Title = filterHudControlText(flattenRawtext(st.Title))
+	ui.Subtitle = filterHudControlText(flattenRawtext(st.Subtitle))
+	ui.ActionBar = filterHudControlText(flattenRawtext(st.ActionBar))
 	// Omit default fade timings when nothing is on screen — keeps empty UI `{}`
 	// on the wire instead of always shipping 10/70/20.
 	if st.Title != "" || st.Subtitle != "" || st.ActionBar != "" {

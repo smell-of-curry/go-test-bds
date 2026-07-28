@@ -104,6 +104,13 @@ const GL_ARGS = [
   "--use-gl=angle",
   "--use-angle=swiftshader",
   "--enable-unsafe-swiftshader",
+  // The stills page lives behind the video page. Chromium throttles rAF and
+  // timers in backgrounded pages, which froze the stills page's tick and made
+  // every still time out with "no canvas frame reached tick N" while the
+  // video page rendered those same ticks fine.
+  "--disable-renderer-backgrounding",
+  "--disable-background-timer-throttling",
+  "--disable-backgrounding-occluded-windows",
 ];
 
 /**
@@ -436,7 +443,9 @@ async function handleCapture(
         return !!v && v.schemaOk && v.tick >= need && v.assetsSettled;
       },
       minTick,
-      { timeout: timeoutMs },
+      // Timer polling, not the default rAF: a backgrounded page may never
+      // grant an animation frame, and the predicate has to keep running.
+      { timeout: timeoutMs, polling: 250 },
     );
     await stillsPage.evaluate(() => {
       (
@@ -447,6 +456,8 @@ async function handleCapture(
       () =>
         (window as unknown as { __viewer?: { settled: boolean } }).__viewer
           ?.settled === true,
+      undefined,
+      { polling: 250 },
     );
 
     const tick = await stillsPage.evaluate(
