@@ -68,13 +68,24 @@ func (b *Bot) Close() error {
 	return nil
 }
 
+// maxPriorityTicks bounds how many due ticks are taken back-to-back before the
+// loop must offer packets and tasks a turn. When a tick itself runs longer than
+// the tick interval, the ticker is due again the moment it returns; an
+// unbounded priority path then degenerates into ticking forever — the tick
+// counters look perfectly healthy while every inbound packet (and with them
+// every test instruction) starves without a single warning. Seen live as a bot
+// that answers forms all run and then goes permanently silent the moment the
+// world grows expensive enough to push a tick past 50ms.
+const maxPriorityTicks = 3
+
 // StartTickLoop starts handling loop.
 //
 // The tick is what makes the bot a client: physics, navigation and every timeout
 // expressed in ticks run off it. A due tick is therefore taken before anything
 // else — `select` picks at random between ready cases, and `time.Ticker` drops
 // ticks rather than queueing them, so a busy packet queue would otherwise cost
-// simulated time with nothing to show it happened.
+// simulated time with nothing to show it happened. The priority is bounded by
+// maxPriorityTicks so an over-budget tick cannot starve I/O forever.
 func (b *Bot) StartTickLoop() {
 	ticker := time.NewTicker(tickInterval)
 	defer ticker.Stop()
@@ -86,20 +97,25 @@ func (b *Bot) StartTickLoop() {
 
 	var health tickHealth
 	health.watchStalls(b.logger, b.closed)
+	priorityTicks := 0
 	for {
 		now := time.Now()
 		health.report(b.logger, now)
 		b.chunks.report(b.logger, b.a, now)
 
-		select {
-		case <-b.closed:
-			return
-		case <-ticker.C:
-			b.a.Tick()
-			health.tick()
-			continue
-		default:
+		if priorityTicks < maxPriorityTicks {
+			select {
+			case <-b.closed:
+				return
+			case <-ticker.C:
+				b.a.Tick()
+				health.tick()
+				priorityTicks++
+				continue
+			default:
+			}
 		}
+		priorityTicks = 0
 
 		select {
 		case <-b.closed:
