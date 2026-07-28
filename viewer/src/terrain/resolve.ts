@@ -1,10 +1,15 @@
-import { FALLBACK_TEXTURE } from "./atlas";
+import { FALLBACK_TEXTURE, NEUTRAL_TEXTURE } from "./atlas";
 import {
   canonicalizeBlockId,
   expandTexturesField,
   parseBlocksJson,
   type BlocksJson,
 } from "./parse";
+import {
+  facesFromMaterialInstances,
+  indexRegistryBlocks,
+  textureNamesFromRegistries,
+} from "./palette";
 import type {
   BlockDef,
   CubeModel,
@@ -12,7 +17,7 @@ import type {
   LiquidModel,
   RenderClass,
 } from "./types";
-import type { Block } from "../protocol";
+import type { Block, Registries, RegistryBlock } from "../protocol";
 
 type Cardinal = "up" | "down" | "north" | "south" | "east" | "west";
 
@@ -62,16 +67,19 @@ const FOLIAGE_NAMES = new Set([
 ]);
 
 /**
- * Registry: blocks.json → cube / liquid models with state remapping.
+ * Registry: blocks.json (+ optional network palette) → cube / liquid models.
  */
 export class BlockModelResolver {
   private readonly blocks: BlocksJson;
+  private registryByName = new Map<string, RegistryBlock>();
 
   /**
    * @param blocks - Parsed blocks.json.
+   * @param registries - Optional keyframe registries (network palette).
    */
-  constructor(blocks: BlocksJson) {
+  constructor(blocks: BlocksJson, registries?: Registries | null) {
     this.blocks = blocks;
+    if (registries) this.setRegistries(registries);
   }
 
   /**
@@ -83,7 +91,16 @@ export class BlockModelResolver {
   }
 
   /**
-   * Collect every terrain short-name referenced by known block defs.
+   * Replace the network palette index (join-static; call when keyframe arrives).
+   *
+   * @param registries - Keyframe registries or null to clear.
+   */
+  setRegistries(registries: Registries | null | undefined): void {
+    this.registryByName = indexRegistryBlocks(registries ?? null);
+  }
+
+  /**
+   * Collect every terrain short-name referenced by known block defs + palette.
    *
    * @returns short-name set for atlas packing.
    */
@@ -95,6 +112,14 @@ export class BlockModelResolver {
         for (const v of Object.values(faces)) if (v) out.add(v);
       }
     }
+    for (const n of textureNamesFromRegistries({
+      blocks: [...this.registryByName.values()],
+      items: [],
+      actors: [],
+    })) {
+      out.add(n);
+    }
+    out.add(NEUTRAL_TEXTURE);
     // Liquids always need these keys when present in terrain_texture.
     for (const n of [
       "water_still",
@@ -144,6 +169,17 @@ export class BlockModelResolver {
     if (TRANSLUCENT_NAMES.has(n) || n.includes("stained_glass"))
       return "translucent";
     if (CUTOUT_NAMES.has(n) || n.endsWith("_leaves")) return "cutout";
+
+    // Palette render_method (alpha_test → cutout) when pack has no textures.
+    if (!this.hasPackTextures(block.name)) {
+      const reg = this.registryByName.get(n);
+      const mats = reg?.components?.materialInstances;
+      if (mats) {
+        const cube = facesFromMaterialInstances(mats);
+        if (cube) return cube.renderClass;
+      }
+    }
+
     if (n === "" && block.rid !== 0) return "opaque";
     return "opaque";
   }
@@ -174,19 +210,75 @@ export class BlockModelResolver {
     void x;
     void y;
     void z;
-    const rc = this.renderClassOf(block);
-    if (rc === "air" || rc === "liquid") return null;
+    if (isAir(block)) return null;
+    if (this.renderClassOf(block) === "liquid") return null;
 
-    const def = this.defOf(block.name);
-    const faces = this.baseFaces(def, block);
-    this.applyStateRemap(faces, block);
+    // Unnamed rid → magenta (bug marker).
+    if (block.name === "" && block.rid !== 0) {
+      return this.solidCube(FALLBACK_TEXTURE, "opaque");
+    }
 
-    return {
-      faces,
-      renderClass: rc,
-      // Stage-8 seam: custom blocks / block-entities can set this later.
-      customGeometryKey: undefined,
-    };
+    // Pack textures win when present; palette covers gaps (custom blocks).
+    if (this.hasPackTextures(block.name)) {
+      const def = this.defOf(block.name)!;
+      const faces = this.baseFaces(def, block);
+      this.applyStateRemap(faces, block);
+      return {
+        faces,
+        renderClass: this.renderClassOf(block),
+        customGeometryKey: undefined,
+      };
+    }
+
+    const reg = this.registryByName.get(block.name);
+    if (reg) {
+      const fromMats = facesFromMaterialInstances(
+        reg.components?.materialInstances,
+      );
+      if (fromMats) {
+        // ponytail: full custom geometry is stage 7's parser wired to terrain;
+        // ceiling = unit cube with material_instances textures. Upgrade: feed
+        // minecraft:geometry through the existing .geo.json parser.
+        void reg.components?.geometry;
+        return {
+          faces: fromMats.faces,
+          renderClass: fromMats.renderClass,
+          customGeometryKey: undefined,
+        };
+      }
+      // Palette entry without material_instances → neutral grey, not magenta.
+      return this.solidCube(NEUTRAL_TEXTURE, "opaque");
+    }
+
+    // Named but unknown to pack + palette → neutral (magenta reserved for bugs).
+    if (block.name !== "") {
+      return this.solidCube(NEUTRAL_TEXTURE, "opaque");
+    }
+
+    return this.solidCube(FALLBACK_TEXTURE, "opaque");
+  }
+
+  /**
+   * Whether blocks.json carries at least one texture short-name for this id.
+   *
+   * @param name - Block name.
+   * @returns true when the pack path can paint faces.
+   */
+  hasPackTextures(name: string): boolean {
+    const def = this.defOf(name);
+    if (!def) return false;
+    const faces = expandTexturesField(def.textures);
+    return Object.values(faces).some(
+      (v) => typeof v === "string" && v.length > 0,
+    );
+  }
+
+  private solidCube(texture: string, renderClass: RenderClass): CubeModel {
+    const faces = {} as Record<Cardinal, FaceAppearance>;
+    for (const f of CARDINALS) {
+      faces[f] = { texture, tint: "none", rotation: 0 };
+    }
+    return { faces, renderClass, customGeometryKey: undefined };
   }
 
   /**

@@ -34,7 +34,7 @@ func (s *Screenshot) Run(ctx context.Context, b *bot.Bot) error {
 
 	timeoutMs := s.TimeoutMs
 	if timeoutMs == 0 {
-		timeoutMs = 5000
+		timeoutMs = 30000
 	}
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(timeoutMs)*time.Millisecond)
 	defer cancel()

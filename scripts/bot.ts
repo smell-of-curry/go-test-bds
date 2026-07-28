@@ -625,7 +625,7 @@ export class Bot {
    * Asks the attached capture harness for a still of this bot's view.
    *
    * @param label Free-text label slugged into the artefact filename.
-   * @param options Timeout overrides. Defaults to 5 000 ms for the capture.
+   * @param options Timeout overrides. Defaults to 30 000 ms for the capture.
    * @returns The written screenshot artefact.
    * @throws {InstructionError} if no viewer is attached or the capture fails.
    */
@@ -633,7 +633,7 @@ export class Bot {
     label = "",
     options?: RunActionOptions,
   ): Promise<ScreenshotResult> {
-    const captureTimeoutMs = options?.timeoutMs ?? 5_000;
+    const captureTimeoutMs = options?.timeoutMs ?? 30_000;
     return runActionForData<"screenshot", ScreenshotResult>(
       this.player,
       "screenshot",

@@ -16,6 +16,20 @@ export const HIGHLIGHT_FADE_MS = 1000;
 /** Cap live block outlines so a bulk delta cannot swamp the frame. */
 export const HIGHLIGHT_MAX = 48;
 
+/**
+ * Clear colour while the pack atlas is still loading. Dark on purpose so a
+ * capture never looks like a half-meshed world of coloured placeholders.
+ */
+export const LOADING_CLEAR = 0x0b0e14;
+
+/**
+ * Flat overworld sky once the world is showing (textured or placeholder
+ * fallback). Stage 10 owns real sky/time-of-day; this is one line of "not void".
+ * Chosen as classic `#87CEEB` sky blue — sits in the `#79a6ff`–`#8cb8ff`
+ * horizon band from real screenshots without inventing a gradient.
+ */
+export const SKY_CLEAR = 0x87ceeb;
+
 export interface Mesher {
   /**
    * Build placeholder geometry for one section.
@@ -336,6 +350,9 @@ export class ViewerScene {
   private readonly pendingSections: string[] = [];
   private pendingSet = new Set<string>();
   private storeRef: WorldState | null = null;
+  /** When false, world geometry stays on scene but is not drawn (loading). */
+  private worldVisible = true;
+  private actorWantedVisible = false;
   private static readonly highlightGeo = new THREE.EdgesGeometry(
     new THREE.BoxGeometry(1.02, 1.02, 1.02),
   );
@@ -365,7 +382,8 @@ export class ViewerScene {
       canvas.clientHeight || window.innerHeight,
       false,
     );
-    this.scene.background = new THREE.Color(0x0b0e14);
+    // Start dark (loading). main.ts flips to SKY_CLEAR once assets settle.
+    this.scene.background = new THREE.Color(LOADING_CLEAR);
 
     const ambient = new THREE.AmbientLight(0xffffff, 0.55);
     const sun = new THREE.DirectionalLight(0xffffff, 0.85);
@@ -451,7 +469,8 @@ export class ViewerScene {
       this.addBlockHighlight(pos);
     }
 
-    this.actorGroup.visible = showActor && !!state.actor;
+    this.actorWantedVisible = showActor && !!state.actor;
+    this.actorGroup.visible = this.worldVisible && this.actorWantedVisible;
 
     this.recomputeCounts();
     return this.pendingSections.length === 0;
@@ -477,11 +496,42 @@ export class ViewerScene {
     actorPos: [number, number, number] | null,
   ): void {
     if (!actorPos) {
+      this.actorWantedVisible = false;
       this.actorGroup.visible = false;
       return;
     }
     this.actorGroup.position.set(actorPos[0], actorPos[1], actorPos[2]);
-    this.actorGroup.visible = show;
+    this.actorWantedVisible = show;
+    this.actorGroup.visible = this.worldVisible && show;
+  }
+
+  /**
+   * Set the WebGL clear / scene background colour.
+   *
+   * @param hex - RGB packed as `0xRRGGBB`.
+   */
+  setClearColor(hex: number): void {
+    this.scene.background = new THREE.Color(hex);
+  }
+
+  /**
+   * Show or hide all world geometry (sections, entities, bounds, actor,
+   * highlights). Used while the texture atlas is still loading so captures
+   * never see coloured placeholder cubes.
+   *
+   * @param visible - Whether the world should draw.
+   */
+  setWorldVisible(visible: boolean): void {
+    if (this.worldVisible === visible) return;
+    this.worldVisible = visible;
+    for (const node of this.sections.values()) node.group.visible = visible;
+    for (const node of this.entities.values()) node.group.visible = visible;
+    for (const lines of this.columnBounds.values()) lines.visible = visible;
+    for (const h of this.highlights) h.lines.visible = visible;
+    this.actorGroup.visible = visible && this.actorWantedVisible;
+    for (const node of this.entities.values()) {
+      node.label.style.visibility = visible ? "visible" : "hidden";
+    }
   }
 
   /**
@@ -548,6 +598,7 @@ export class ViewerScene {
     const lines = new THREE.LineSegments(ViewerScene.highlightGeo, mat);
     lines.position.set(pos[0] + 0.5, pos[1] + 0.5, pos[2] + 0.5);
     lines.name = `highlight:${pos.join(",")}`;
+    lines.visible = this.worldVisible;
     this.scene.add(lines);
     this.highlights.push({ lines, bornMs: performance.now() });
   }
@@ -606,6 +657,7 @@ export class ViewerScene {
     }
     const group = new THREE.Group();
     group.name = `section:${key}`;
+    group.visible = this.worldVisible;
     for (const m of meshes) group.add(m);
     this.scene.add(group);
     this.sections.set(key, {
@@ -652,6 +704,7 @@ export class ViewerScene {
     const lines = new THREE.LineSegments(geo, mat);
     lines.position.set(col.x * 16 + 8, minY + height / 2, col.z * 16 + 8);
     lines.name = `colbound:${key}`;
+    lines.visible = this.worldVisible;
     this.scene.add(lines);
     this.columnBounds.set(key, lines);
   }
@@ -687,10 +740,12 @@ export class ViewerScene {
       );
       line.position.y = h / 2;
       group.add(line);
+      group.visible = this.worldVisible;
       this.scene.add(group);
 
       const label = document.createElement("div");
       label.className = "entity-label";
+      label.style.visibility = this.worldVisible ? "visible" : "hidden";
       this.labelsRoot.appendChild(label);
 
       node = { rid, group, label };

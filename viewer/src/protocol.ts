@@ -126,6 +126,104 @@ export interface HelloFrame {
   radius: number;
 }
 
+/** One material_instances face entry (Go `RegistryMaterial` JSON). */
+export interface RegistryMaterial {
+  texture?: string;
+  renderMethod?: string;
+  faceDimming?: boolean;
+  ambientOcclusion?: boolean;
+}
+
+/** Render-relevant block components from the network palette. */
+export interface RegistryComponents {
+  geometry?: string;
+  unitCube?: boolean;
+  materialInstances?: Record<string, RegistryMaterial>;
+  transformation?: RegistryTransform;
+  lightEmission?: number;
+  collisionBox?: RegistryBox;
+  selectionBox?: RegistrySelectionBox;
+  boneVisibility?: Record<string, unknown>;
+}
+
+export interface RegistryTransform {
+  rx: number;
+  ry: number;
+  rz: number;
+  sx: number;
+  sy: number;
+  sz: number;
+  tx: number;
+  ty: number;
+  tz: number;
+}
+
+export interface RegistryBox {
+  enabled: boolean;
+  minX: number;
+  minY: number;
+  minZ: number;
+  maxX: number;
+  maxY: number;
+  maxZ: number;
+}
+
+export interface RegistrySelectionBox {
+  enabled: boolean;
+  origin: [number, number, number];
+  size: [number, number, number];
+}
+
+export interface RegistryProp {
+  name: string;
+  enum?: unknown[];
+}
+
+export interface RegistryPerm {
+  condition: string;
+  components: RegistryComponents;
+}
+
+/** One custom block from `GameData.CustomBlocks` (keyframe `registries.blocks`). */
+export interface RegistryBlock {
+  name: string;
+  molangVersion?: number;
+  properties?: RegistryProp[];
+  components: RegistryComponents;
+  permutations?: RegistryPerm[];
+}
+
+export interface RegistryItem {
+  name: string;
+  componentBased: boolean;
+  version?: number;
+  icon?: string;
+  components?: Record<string, unknown>;
+}
+
+export interface RegistryActorProp {
+  name: string;
+  type: string;
+  enum?: unknown[];
+  default?: unknown;
+  range?: [number, number];
+}
+
+export interface RegistryActor {
+  type: string;
+  properties: RegistryActorProp[];
+}
+
+/**
+ * Join-static registries on the keyframe (absent on deltas).
+ * Field casing matches `gotestbds/viewer` JSON tags.
+ */
+export interface Registries {
+  blocks: RegistryBlock[];
+  items: RegistryItem[];
+  actors: RegistryActor[];
+}
+
 export interface KeyframeFrame {
   v: number;
   type: "keyframe";
@@ -138,6 +236,8 @@ export interface KeyframeFrame {
   columnsPending?: number;
   entities: Entity[];
   ui?: UI;
+  /** Join-static custom blocks / items / actor props; omit on deltas. */
+  registries?: Registries;
 }
 
 export interface BlockChange {

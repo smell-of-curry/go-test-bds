@@ -246,6 +246,267 @@ func TestUnchangedColumnNotResent(t *testing.T) {
 	}
 }
 
+// countColumnPayloads sums keyframe.columns + delta.columnsAdded across frames.
+func countColumnPayloads(t *testing.T, frames []encodedFrame) int {
+	t.Helper()
+	n := 0
+	for _, fr := range frames {
+		switch fr.event {
+		case "keyframe":
+			var kf Keyframe
+			if err := json.Unmarshal(fr.data, &kf); err != nil {
+				t.Fatal(err)
+			}
+			n += len(kf.Columns)
+		case "delta":
+			var d Delta
+			if err := json.Unmarshal(fr.data, &d); err != nil {
+				t.Fatal(err)
+			}
+			n += len(d.ColumnsAdded)
+		}
+	}
+	return n
+}
+
+// TestSlowSubscriberColumnDeliveryConverges guards the thrash loop: a writer
+// that falls behind while the world keeps changing must not restart the whole
+// catch-up on every supersede. Delivered column payloads stay a small multiple
+// of the world size, not proportional to ticks elapsed.
+func TestSlowSubscriberColumnDeliveryConverges(t *testing.T) {
+	const (
+		budget     = 4
+		radius     = 4
+		ticks      = 500
+		drainEvery = 5 // consume one frame per N produced
+	)
+	wantCols := (2*radius + 1) * (2*radius + 1) // 81
+	drains := ticks / drainEvery
+	// Thrash baseline: every drained frame is a fresh paced keyframe of `budget`
+	// columns, so payloads grow with ticks/drainEvery — well above 3× world.
+	thrashFloor := drains * budget
+
+	hub, err := New(Options{
+		Address:      "127.0.0.1:0",
+		ArtifactDir:  t.TempDir(),
+		Radius:       radius,
+		ColumnBudget: budget,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer hub.Close()
+
+	s := hub.Register("PaceBot")
+	sub := s.attach()
+	defer s.detach(sub)
+
+	a := populatePacedWorld(t, radius)
+	var frames []encodedFrame
+	keyframes := 0
+	for i := 0; i < ticks; i++ {
+		// Keep the world moving so every unread tick produces a real supersede.
+		a.World().SetBlock(cube.Pos{1, 70, 1}, block.Dirt{})
+		if i%2 == 1 {
+			a.World().SetBlock(cube.Pos{1, 70, 1}, block.Gold{})
+		}
+		s.Tick(a)
+		if (i+1)%drainEvery != 0 {
+			continue
+		}
+		fr, ok := sub.next()
+		if !ok {
+			t.Fatalf("tick %d: expected a pending world frame", i)
+		}
+		if fr.event == "keyframe" {
+			keyframes++
+		}
+		frames = append(frames, fr)
+		if _, ok := sub.next(); ok {
+			t.Fatal("more than one world frame pending")
+		}
+	}
+
+	delivered := countColumnPayloads(t, frames)
+	t.Logf("delivered %d column payloads for %d-column world (%.2fx) over %d ticks; keyframes=%d; thrashFloor=%d",
+		delivered, wantCols, float64(delivered)/float64(wantCols), ticks, keyframes, thrashFloor)
+
+	// Healthy paced catch-up: one pass (~81) plus a little churn for the edited
+	// column and superseded in-flight batches. The thrash bug restarts the whole
+	// world on every supersede and lands near ticks/drainEvery * budget.
+	const maxMultiple = 3
+	if delivered > wantCols*maxMultiple {
+		t.Fatalf("delivered %d column payloads for a %d-column world over %d ticks (drain 1/%d); want <= %dx world size (thrash restarts catch-up)",
+			delivered, wantCols, ticks, drainEvery, maxMultiple)
+	}
+	if delivered >= thrashFloor {
+		t.Fatalf("delivered %d payloads looks like per-drain keyframe restarts (thrashFloor=%d)", delivered, thrashFloor)
+	}
+	// After the opening keyframe, supersedes must stay on the delta path.
+	if keyframes != 1 {
+		t.Fatalf("keyframes during slow drain=%d want 1 (full restart on every supersede)", keyframes)
+	}
+
+	// Drain whatever catch-up remains and confirm the client can finish.
+	for i := 0; i < 40; i++ {
+		s.Tick(a)
+		for {
+			fr, ok := sub.next()
+			if !ok {
+				break
+			}
+			frames = append(frames, fr)
+		}
+	}
+	model := applyStreamFrames(t, frames)
+	if len(model.columns) != wantCols {
+		t.Fatalf("after catch-up columns=%d want %d", len(model.columns), wantCols)
+	}
+}
+
+// TestSupersededCatchUpDeltaRequeuesOnlyItsColumns covers the cheap supersede
+// path: dropping an unsent catch-up delta must not clear already-delivered
+// columns or force a keyframe restart.
+func TestSupersededCatchUpDeltaRequeuesOnlyItsColumns(t *testing.T) {
+	const budget = 4
+	hub, err := New(Options{
+		Address:      "127.0.0.1:0",
+		ArtifactDir:  t.TempDir(),
+		Radius:       4,
+		ColumnBudget: budget,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer hub.Close()
+
+	s := hub.Register("PaceBot")
+	sub := s.attach()
+	defer s.detach(sub)
+
+	a := populatePacedWorld(t, 4)
+	// Deliver the paced keyframe + enough deltas to claim a solid prefix.
+	_ = collectStreamFrames(t, s, sub, a, 8)
+
+	sub.mu.Lock()
+	before := len(sub.sentColumns)
+	var sentBefore [][2]int32
+	for key := range sub.sentColumns {
+		sentBefore = append(sentBefore, key)
+	}
+	sub.mu.Unlock()
+	if before < budget*2 {
+		t.Fatalf("setup sentColumns=%d; need a delivered prefix", before)
+	}
+
+	// Leave one catch-up delta pending, then supersede it with a newer tick.
+	s.Tick(a)
+	sub.mu.Lock()
+	if sub.pending == nil || sub.pending.event != "delta" {
+		sub.mu.Unlock()
+		t.Fatal("expected a pending catch-up delta")
+	}
+	pendingBatch := append([][2]int32(nil), sub.pending.columnsDelivered...)
+	sub.mu.Unlock()
+	if len(pendingBatch) == 0 {
+		t.Fatal("pending delta carried no columns; cannot assert re-queue")
+	}
+
+	a.World().SetBlock(cube.Pos{1, 70, 1}, block.Stone{})
+	s.Tick(a) // supersedes the unread delta
+
+	if sub.needsResync() {
+		t.Fatal("superseding a catch-up delta must not flag a full keyframe resync")
+	}
+	sub.mu.Lock()
+	for _, key := range sentBefore {
+		if _, ok := sub.sentColumns[key]; !ok {
+			t.Fatalf("already-delivered column %v was cleared on supersede", key)
+		}
+	}
+	sub.mu.Unlock()
+
+	fr, ok := sub.next()
+	if !ok {
+		t.Fatal("no frame after supersede")
+	}
+	if fr.event == "keyframe" {
+		t.Fatal("superseded catch-up delta must not restart with a keyframe")
+	}
+	// Already-delivered columns must not appear again on this frame.
+	var d Delta
+	if err := json.Unmarshal(fr.data, &d); err != nil {
+		t.Fatal(err)
+	}
+	sentSet := make(map[[2]int32]struct{}, len(sentBefore))
+	for _, key := range sentBefore {
+		sentSet[key] = struct{}{}
+	}
+	for _, c := range d.ColumnsAdded {
+		key := [2]int32{c.X, c.Z}
+		if _, ok := sentSet[key]; ok {
+			t.Fatalf("re-sent already-delivered column %v after supersede", key)
+		}
+	}
+}
+
+// TestSupersededKeyframeRestartsCleanly keeps the expensive path: losing an
+// unsent keyframe means the client has nothing valid, so the next delivery
+// restarts from an empty sentColumns set.
+func TestSupersededKeyframeRestartsCleanly(t *testing.T) {
+	const budget = 4
+	hub, err := New(Options{
+		Address:      "127.0.0.1:0",
+		ArtifactDir:  t.TempDir(),
+		Radius:       4,
+		ColumnBudget: budget,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer hub.Close()
+
+	s := hub.Register("PaceBot")
+	sub := s.attach()
+	defer s.detach(sub)
+
+	a := populatePacedWorld(t, 4)
+	s.Tick(a)
+	sub.mu.Lock()
+	if sub.pending == nil || sub.pending.event != "keyframe" {
+		sub.mu.Unlock()
+		t.Fatal("expected pending keyframe")
+	}
+	firstBatch := append([][2]int32(nil), sub.pending.columnsDelivered...)
+	sub.mu.Unlock()
+
+	// Force another encoder keyframe while the first is still unsent.
+	s.DimensionChanged(0, 0)
+	s.Tick(a)
+
+	fr, ok := sub.next()
+	if !ok {
+		t.Fatal("no frame after superseded keyframe")
+	}
+	if fr.event != "keyframe" {
+		t.Fatalf("event=%s want keyframe restart", fr.event)
+	}
+	if !fr.resetSent {
+		t.Fatal("restart keyframe must reset sentColumns on dequeue")
+	}
+	var kf Keyframe
+	if err := json.Unmarshal(fr.data, &kf); err != nil {
+		t.Fatal(err)
+	}
+	if len(kf.Columns) == 0 || len(kf.Columns) > budget {
+		t.Fatalf("restart keyframe columns=%d", len(kf.Columns))
+	}
+	// A clean restart re-offers the nearest columns (same first batch shape).
+	if len(firstBatch) != len(fr.columnsDelivered) {
+		t.Fatalf("restart batch=%d first batch=%d", len(fr.columnsDelivered), len(firstBatch))
+	}
+}
+
 // TestPerFramePayloadUnderBudget asserts marshalled frame size stays under a
 // few hundred KB for a world several times the budget.
 func TestPerFramePayloadUnderBudget(t *testing.T) {

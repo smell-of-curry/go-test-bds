@@ -1,4 +1,4 @@
-# Terrain (stage 6)
+# Terrain (stage 6 + stage 8 palette textures)
 
 Real textured block meshing for the viewer. Drop-in replacement for
 `PlaceholderMesher`.
@@ -9,11 +9,17 @@ Real textured block meshing for the viewer. Drop-in replacement for
 import { createTexturedMesher } from "./terrain";
 import { Scene } from "./scene";
 
-const { asMesher } = await createTexturedMesher({ baseUrl });
-const scene = new Scene(camera, asMesher);
+const bundle = await createTexturedMesher({ baseUrl });
+const scene = new Scene(camera, bundle.asMesher);
+
+// After the keyframe lands (store keeps `registries`):
+await bundle.applyRegistries(store.getState().registries);
 ```
 
 Entry: `createTexturedMesher` → `TexturedMesher` implements `Mesher`.
+`registries` is optional at create time (default `null`) so existing call sites
+keep compiling; pass it up front or via `applyRegistries` once the keyframe
+arrives so custom-block short-names enter the atlas.
 
 ## Material (what it does / does not)
 
@@ -37,6 +43,7 @@ smooth lighting, direction lights, or fog.
 | Winning PNG bytes | `GET /asset/<path>` |
 | Merged JSON | `GET /pack/<id>/blocks.json` etc. from **every** pack, then merge |
 | Block → texture short-names | Merged `blocks.json` (`textures` preserved when a later pack only sets `sound`) |
+| Custom blocks | Keyframe `registries.blocks` → `components.materialInstances` face textures |
 | Short-name → PNG path(s) | Merged `terrain_texture.json` (`texture_data`, all entry shapes) |
 | Animated tiles | Merged `flipbook_textures.json` (frame from **snapshot tick**) |
 | Image pixels | Via `/asset` — `.png`, `_opaque.png`, then `.tga` (many foliage tiles) |
@@ -53,6 +60,11 @@ per-block; we do the same via `/pack/<id>/…`.
 snapshot always names blocks `minecraft:stone`. `parseBlocksJson` canonicalises
 bare keys to `minecraft:…` so lookups hit.
 
+**Palette vs pack (renderer):** when `blocks.json` has a `textures` field, that
+pack path wins. The network palette covers names the pack cannot paint (typical
+`pokeb:*` custom blocks). Geometry from the palette is still a **textured unit
+cube** this round — see ponytail note in `resolve.ts`.
+
 No behaviour pack. Nothing vendored. Vanilla baseline arrives as pack id `vanilla`.
 
 ## Real-pack diagnosis
@@ -64,23 +76,26 @@ fixtures and run the packs you actually ship:
 # Vanilla: Mojang/bedrock-samples @ viewer/baseline.tag →
 #   ../.cache/baseline/<tag>/resource_pack
 # Server (optional): pokebedrock-res development_resource_packs path
+# Registries (optional): keyframe shape; defaults to testdata/registries-fixture.json
 node tools/diagnose-terrain-packs.mjs
 # or:
-# VANILLA_PACK=… SERVER_PACK=… node tools/diagnose-terrain-packs.mjs
+# VANILLA_PACK=… SERVER_PACK=… REGISTRIES_JSON=… node tools/diagnose-terrain-packs.mjs
 ```
 
-Prints resolve/fallback counts, the first ten failure reasons, and writes
+Prints resolve/fallback counts for `blocks.json`, **palette coverage**
+(`withMaterialInstances` / `texturesResolved` / `neutralNoMaterials` /
+`atlasMiss`), the first ten failure reasons, and writes
 `testdata/diagnose/atlas.png`. Exits 0 with `{ skipped: true }` when the
 vanilla pack is absent (CI without the cache).
 
 ## Fallback chain
 
-1. Resolve short-name via `terrain_texture.json` (weighted pick by block pos).
-2. Else try `textures/blocks/<short-name>.png`.
-3. Else use the generated magenta/black `__missing__` atlas tile.
-4. Missing paths never throw; they show the checker.
-
-Unnamed non-zero `rid` blocks (registry misses) also get `__missing__`.
+1. Pack `blocks.json` textures → resolve short-name via `terrain_texture.json`.
+2. Else network palette `materialInstances` → same short-name resolve.
+3. Else named custom / unknown → generated stone-grey `__neutral__` tile.
+4. Else try `textures/blocks/<short-name>.png` for a known short-name miss.
+5. Magenta/black `__missing__` only for unnamed non-zero `rid` or a short-name
+   that failed to load (bug marker — not "custom block").
 
 ## Culling / passes
 
@@ -89,14 +104,17 @@ Unnamed non-zero `rid` blocks (registry misses) also get `__missing__`.
 - Opaque full cubes occlude; cutout/translucent do not occlude opaques.
 - Adjacent same glass/leaves cull the shared face.
 - Transparent / cutout / liquid faces → second mesh (`userData.pass = "transparent"`).
+- Palette `renderMethod: alpha_test` → cutout pass (leaves-like custom blocks).
 - Coplanar same-texture faces greedy-merged; tile UVs repeat per block via the
   shader above (keeps triangle count down without stretching the atlas).
 
 ## Deliberately not handled yet
 
 - Block entities with dedicated geometry (chests, signs, banners, beds, skulls).
-- Custom block geometry from the network palette (stage 8) — seam is
-  `CustomGeometryHook` / `CubeModel.customGeometryKey`.
+- Full custom block geometry from the network palette — cube approximation with
+  `material_instances` textures; seam remains `CustomGeometryHook` /
+  `CubeModel.customGeometryKey` for stage 7's `.geo.json` parser.
+- Permutations / transformation / light_emission appearance.
 - Non-cube vanilla shapes (slabs, stairs, fences, doors as meshes).
 - Biome-coloured grass/foliage/water until Go adds biome data to the snapshot
   (see `BIOME_SNAPSHOT_NOTE` in `biome.ts`).

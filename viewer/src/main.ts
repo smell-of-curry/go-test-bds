@@ -3,7 +3,7 @@ import { installViewerHandle } from "./debug";
 import { MotionLerp } from "./motion";
 import { Overlay } from "./overlay";
 import type { Actor } from "./protocol";
-import { ViewerScene } from "./scene";
+import { LOADING_CLEAR, SKY_CLEAR, ViewerScene } from "./scene";
 import { SnapshotStream, streamUrlFromSearch } from "./stream";
 import { Store } from "./store";
 import { createTexturedMesher } from "./terrain";
@@ -15,21 +15,85 @@ const labelsEl = document.getElementById("labels") as HTMLElement;
 const captionEl = document.getElementById("caption") as HTMLElement;
 const uiEl = document.getElementById("ui-panel") as HTMLElement;
 const crosshairEl = document.getElementById("crosshair") as HTMLElement;
+const loadingEl = document.getElementById("loading") as HTMLElement;
 
 const store = new Store();
 const scene = new ViewerScene(canvas, labelsEl);
-// Textures come from the pack stack the bot serves, so they arrive later than
-// the scene does and may not arrive at all — an offline cache, a server that
-// sent no packs, a baseline that was never fetched. Coloured placeholders are
-// the honest fallback: a viewer that renders the world badly still shows where
-// the bot was standing, and one that refuses to start shows nothing.
-void createTexturedMesher()
+
+/**
+ * Asset load lifecycle:
+ * - loading: hide world, dark clear, show "loading textures…" — never capture
+ *   accidental coloured placeholders.
+ * - ready: textured mesher installed, sky clear, world visible.
+ * - failed: keep placeholder mesher, sky clear, world visible (honest fallback
+ *   for fixture runs / servers with no pack stack).
+ */
+type AssetsPhase = "loading" | "ready" | "failed";
+let assetsPhase: AssetsPhase = "loading";
+let streamError = "";
+let assetError = "";
+let lastActorRef: Actor | null = null;
+let lastMotionRevision = -1;
+
+function assetsSettled(): boolean {
+  return assetsPhase !== "loading";
+}
+
+function setLoadingVisible(visible: boolean, detail?: string): void {
+  loadingEl.classList.toggle("visible", visible);
+  if (detail) loadingEl.textContent = detail;
+}
+
+function showWorld(): void {
+  setLoadingVisible(false);
+  scene.setClearColor(SKY_CLEAR);
+  scene.setWorldVisible(true);
+}
+
+// Hide world until the atlas settles (or fails). Placeholder cubes stay meshed
+// underneath so a fail-fast path can reveal them without a remesh.
+scene.setClearColor(LOADING_CLEAR);
+scene.setWorldVisible(false);
+setLoadingVisible(true, "loading textures…");
+
+/**
+ * Custom-block definitions (network palette) ride the first keyframe's
+ * registries. Wait briefly for it so the atlas builds ONCE with custom tiles,
+ * instead of building vanilla-only and rebuilding on arrival. `world` is set
+ * only by a keyframe, so it doubles as the "keyframe applied" signal.
+ * ponytail: no late re-apply — registries are join-static, and every boot that
+ * has custom blocks (capture, dev, fixtures) attaches the stream well inside
+ * the timeout; a timed-out boot just renders vanilla-only.
+ */
+const REGISTRIES_WAIT_MS = 5000;
+const firstKeyframe = new Promise<void>((resolve) => {
+  const done = (): void => {
+    unsubscribe();
+    clearTimeout(timer);
+    resolve();
+  };
+  const unsubscribe = store.subscribe((state) => {
+    if (state.world !== null) done();
+  });
+  const timer = setTimeout(done, REGISTRIES_WAIT_MS);
+});
+
+void firstKeyframe
+  .then(() => createTexturedMesher({ registries: store.getState().registries }))
   .then(({ asMesher }) => {
     scene.setMesher(asMesher);
+    assetsPhase = "ready";
+    showWorld();
+    // Remesh may be pending after setMesher — store subscribe / frame loop drain it.
+    paintOverlay();
   })
   .catch((err: unknown) => {
     assetError = err instanceof Error ? err.message : String(err);
+    assetsPhase = "failed";
+    showWorld();
+    paintOverlay();
   });
+
 const camera = new CameraController(
   (canvas.clientWidth || window.innerWidth) /
     (canvas.clientHeight || window.innerHeight),
@@ -37,11 +101,6 @@ const camera = new CameraController(
 );
 const overlay = new Overlay(overlayEl, errorEl, captionEl, uiEl);
 const motion = new MotionLerp();
-
-let streamError = "";
-let assetError = "";
-let lastActorRef: Actor | null = null;
-let lastMotionRevision = -1;
 
 installViewerHandle(
   store,
@@ -52,6 +111,7 @@ installViewerHandle(
   camera,
   () => streamError,
   overlay,
+  assetsSettled,
 );
 
 camera.bindOrbitControls(canvas);
@@ -76,10 +136,16 @@ function showActorBody(): boolean {
 }
 
 function paintOverlay(): void {
+  const assetLine =
+    assetsPhase === "loading"
+      ? "assets: loading textures…"
+      : assetError
+        ? `assets: ${assetError}`
+        : "";
   overlay.render(store.getState(), camera.mode, {
     blockInstanceCount: scene.blockInstanceCount,
     sectionMeshCount: scene.sectionMeshCount,
-    streamError: streamError || (assetError ? `assets: ${assetError}` : ""),
+    streamError: streamError || assetLine,
   });
   crosshairEl.style.display = camera.mode === "firstPerson" ? "block" : "none";
 }

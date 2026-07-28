@@ -32,7 +32,9 @@ async function waitForSettled(
   await page.waitForFunction(
     () => {
       const v = window.__viewer;
-      return !!v && v.schemaOk && v.tick === 200;
+      // assetsSettled: ready or failed. Fixture has no /packs → fail-fast
+      // placeholder path; still must settle before counting the scene.
+      return !!v && v.schemaOk && v.tick === 200 && v.assetsSettled;
     },
     undefined,
     { timeout: 30_000 },
@@ -122,13 +124,14 @@ test("viewer smoke: fixture stream yields exact scene counts", async ({
         return `${data[0]},${data[1]},${data[2]}`;
       });
       const unique = new Set(colours);
-      // Background clear is ~11,14,20; require variety and at least one far-from-clear pixel.
+      // Background clear is sky blue #87CEEB ≈ 135,206,235; require variety
+      // and at least one far-from-sky pixel (world geometry).
       const nonBg = colours.some((c) => {
         const [r, g, b] = c.split(",").map(Number);
         return (
-          Math.abs((r ?? 0) - 11) +
-            Math.abs((g ?? 0) - 14) +
-            Math.abs((b ?? 0) - 20) >
+          Math.abs((r ?? 0) - 135) +
+            Math.abs((g ?? 0) - 206) +
+            Math.abs((b ?? 0) - 235) >
           40
         );
       });

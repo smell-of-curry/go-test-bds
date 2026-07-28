@@ -24,6 +24,13 @@ export interface ViewerHandle {
   readonly captionText: string;
   /** True once the remesh queue is empty after the latest frames. */
   settled: boolean;
+  /**
+   * True once texture-atlas loading has finished — either ready (textured
+   * mesher installed) or failed (placeholder fallback). False only while the
+   * pack fetch / atlas build is still in flight. Capture waits on this so a
+   * still never lands on the loading screen or accidental placeholders.
+   */
+  readonly assetsSettled: boolean;
   /** Force-drain the remesh queue (test helper). */
   flush: () => void;
   /** Advance highlight fade clock (test helper; real time still drives opacity). */
@@ -57,6 +64,7 @@ declare global {
  * @param camera - Live camera (for `diag` / mode).
  * @param getStreamError - Latest EventSource/parse error from the stream layer.
  * @param overlay - Caption / HUD (for `captionText`).
+ * @param getAssetsSettled - True once atlas load succeeded or failed.
  */
 export function installViewerHandle(
   store: Store,
@@ -65,6 +73,7 @@ export function installViewerHandle(
   camera: CameraController,
   getStreamError: () => string = () => "",
   overlay?: Overlay,
+  getAssetsSettled: () => boolean = () => true,
 ): void {
   window.__viewer = {
     get blockInstanceCount() {
@@ -114,6 +123,9 @@ export function installViewerHandle(
     },
     set settled(_v: boolean) {
       /* settled is derived; setter kept so tests can assign without throwing */
+    },
+    get assetsSettled() {
+      return getAssetsSettled();
     },
     flush: () => {
       scene.flush(store.getState());

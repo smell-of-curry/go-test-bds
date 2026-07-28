@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createServer, type ViteDevServer } from "vite";
-import { writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import {
   flipbookFrameAt,
   facingToFrontFace,
@@ -20,6 +20,10 @@ import {
   liquidHeight,
   wrapTileCoord,
   FALLBACK_TEXTURE,
+  NEUTRAL_TEXTURE,
+  diagnosePaletteCoverage,
+  facesFromMaterialInstances,
+  renderClassFromMethod,
 } from "../src/terrain";
 import { BlockModelResolver } from "../src/terrain/resolve";
 import {
@@ -28,11 +32,15 @@ import {
   startMultiPackAssetServer,
   startTerrainAssetServer,
 } from "./terrainAssetServer";
-import type { Block } from "../src/protocol";
+import type { Block, Registries } from "../src/protocol";
+import { Store } from "../src/store";
 import type { Color } from "three";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const viewerRoot = join(here, "..");
+const registriesFixture = JSON.parse(
+  readFileSync(join(viewerRoot, "testdata", "registries-fixture.json"), "utf8"),
+) as Registries;
 
 test.describe("terrain parse / resolve (node)", () => {
   test("weighted variation pick is stable for a position", () => {
@@ -236,6 +244,141 @@ test.describe("terrain parse / resolve (node)", () => {
     expect(wrapTileCoord(4)).toBe(1);
     expect(wrapTileCoord(3.0)).toBe(1);
     expect(wrapTileCoord(2.999999)).toBeGreaterThan(0.9);
+  });
+
+  test("palette material_instances → textured cube; bare → neutral; pack wins", () => {
+    expect(renderClassFromMethod("alpha_test")).toBe("cutout");
+    expect(renderClassFromMethod("opaque")).toBe("opaque");
+
+    const fromMats = facesFromMaterialInstances({
+      "*": { texture: "palette_right_texture", renderMethod: "alpha_test" },
+    })!;
+    expect(fromMats.faces.up.texture).toBe("palette_right_texture");
+    expect(fromMats.renderClass).toBe("cutout");
+
+    const packAndPalette = new BlockModelResolver(
+      {
+        "fixture:custom_crate": { textures: "stone" },
+        "minecraft:stone": { textures: "stone" },
+      },
+      registriesFixture,
+    );
+    // Pack textures present → keep pack short-name (not palette).
+    const both = packAndPalette.resolveCube(
+      { name: "fixture:custom_crate", states: {}, rid: 10 },
+      0,
+      0,
+      0,
+    )!;
+    expect(both.faces.up.texture).toBe("stone");
+
+    const paletteOnly = new BlockModelResolver({}, registriesFixture);
+    const crate = paletteOnly.resolveCube(
+      { name: "fixture:custom_crate", states: {}, rid: 10 },
+      0,
+      0,
+      0,
+    )!;
+    expect(crate.faces.north.texture).toBe("palette_right_texture");
+    expect(crate.faces.up.texture).not.toBe(FALLBACK_TEXTURE);
+
+    const bare = paletteOnly.resolveCube(
+      { name: "fixture:bare_unit", states: {}, rid: 11 },
+      0,
+      0,
+      0,
+    )!;
+    expect(bare.faces.up.texture).toBe(NEUTRAL_TEXTURE);
+    expect(bare.faces.up.texture).not.toBe(FALLBACK_TEXTURE);
+
+    const cutout = paletteOnly.resolveCube(
+      { name: "fixture:cutout_leaves", states: {}, rid: 12 },
+      0,
+      0,
+      0,
+    )!;
+    expect(cutout.renderClass).toBe("cutout");
+
+    const unnamed = paletteOnly.resolveCube(
+      { name: "", states: {}, rid: 99 },
+      0,
+      0,
+      0,
+    )!;
+    expect(unnamed.faces.up.texture).toBe(FALLBACK_TEXTURE);
+
+    const cov = diagnosePaletteCoverage(
+      registriesFixture,
+      (s) => s === "palette_right_texture",
+    );
+    expect(cov.entryCount).toBe(3);
+    expect(cov.withMaterialInstances).toBe(2);
+    expect(cov.texturesResolved).toBe(2);
+    expect(cov.neutralNoMaterials).toBe(1);
+    expect(cov.withGeometry).toBe(3);
+  });
+
+  test("store keeps keyframe registries", () => {
+    const store = new Store();
+    store.apply({
+      v: 1,
+      type: "hello",
+      bot: "t",
+      schema: 1,
+      tickRate: 20,
+      radius: 4,
+    });
+    store.apply({
+      v: 1,
+      type: "keyframe",
+      bot: "t",
+      tick: 1,
+      world: {
+        dimension: 0,
+        dimensionName: "overworld",
+        minY: -64,
+        maxY: 319,
+      },
+      actor: {
+        rid: 1,
+        uid: 1,
+        name: "t",
+        pos: [0, 64, 0],
+        eyePos: [0, 65.62, 0],
+        rot: [0, 0],
+        vel: [0, 0, 0],
+        onGround: true,
+        gamemode: 0,
+        dimension: 0,
+        health: 20,
+        maxHealth: 20,
+        food: 20,
+        heldSlot: 0,
+        sneaking: false,
+        sprinting: false,
+        swimming: false,
+        gliding: false,
+        hotbar: Array(9).fill(null),
+        inventory: Array(36).fill(null),
+        offhand: null,
+        armour: [null, null, null, null],
+        effects: [],
+        chunkRadius: 4,
+      },
+      columns: [],
+      entities: [],
+      registries: registriesFixture,
+    });
+    expect(store.getState().registries?.blocks[0]?.name).toBe(
+      "fixture:custom_crate",
+    );
+    store.apply({
+      v: 1,
+      type: "delta",
+      bot: "t",
+      tick: 2,
+    });
+    expect(store.getState().registries?.blocks.length).toBe(3);
   });
 });
 
@@ -1028,6 +1171,194 @@ test.describe("terrain atlas + mesher (browser)", () => {
           screenshot: pngPath,
         }),
       );
+    } finally {
+      await page.close().catch(() => undefined);
+      await devServer?.close();
+      await assets.close();
+    }
+  });
+
+  test("network palette: material_instances textured; bare → neutral; pack precedence", async ({
+    page,
+  }) => {
+    test.setTimeout(120_000);
+    const assets = await startTerrainAssetServer();
+    let devServer: ViteDevServer | undefined;
+    try {
+      devServer = await createServer({
+        root: viewerRoot,
+        configFile: join(viewerRoot, "vite.config.ts"),
+        server: { host: "127.0.0.1", port: 5183, strictPort: false },
+      });
+      await devServer.listen();
+      const base = devServer.resolvedUrls?.local[0];
+      if (!base) throw new Error("no vite url");
+      await page.goto(base, { waitUntil: "domcontentloaded" });
+
+      const result = await page.evaluate(
+        async ({ assetBase, registries }) => {
+          const THREE =
+            await import("/node_modules/three/build/three.module.js");
+          const {
+            createTexturedMesher,
+            FALLBACK_TEXTURE,
+            NEUTRAL_TEXTURE,
+            paletteCoverageAgainstAtlas,
+          } = await import("/src/terrain/index.ts");
+          const { sectionIndex, columnKey } = await import("/src/protocol.ts");
+
+          const AIR = { name: "minecraft:air", states: {}, rid: 0 };
+          const CRATE = {
+            name: "fixture:custom_crate",
+            states: {},
+            rid: 10,
+          };
+          const BARE = { name: "fixture:bare_unit", states: {}, rid: 11 };
+          const STONE = { name: "minecraft:stone", states: {}, rid: 1 };
+
+          const indices = new Uint16Array(4096);
+          indices[sectionIndex(0, 0, 0)] = 1; // crate
+          indices[sectionIndex(2, 0, 0)] = 2; // bare
+          indices[sectionIndex(4, 0, 0)] = 3; // stone (pack)
+          const section = {
+            y: 0,
+            indices,
+            palette: [AIR, CRATE, BARE, STONE],
+          };
+          const col = {
+            x: 0,
+            z: 0,
+            state: "complete" as const,
+            minY: 0,
+            maxY: 15,
+            sections: new Map([[0, section]]),
+          };
+          const state = {
+            tick: 0,
+            columns: new Map([[columnKey(0, 0), col]]),
+          };
+
+          const bundle = await createTexturedMesher({
+            baseUrl: assetBase,
+            registries,
+          });
+
+          if (!bundle.atlas.has("palette_right_texture")) {
+            throw new Error("palette short-name missing from atlas");
+          }
+          if (!bundle.atlas.has(NEUTRAL_TEXTURE)) {
+            throw new Error("neutral tile missing from atlas");
+          }
+
+          const crateCube = bundle.resolver.resolveCube(CRATE, 0, 0, 0)!;
+          if (crateCube.faces.up.texture !== "palette_right_texture") {
+            throw new Error(
+              `crate texture=${crateCube.faces.up.texture}, want palette_right_texture`,
+            );
+          }
+          if (crateCube.faces.up.texture === FALLBACK_TEXTURE) {
+            throw new Error("crate resolved to magenta fallback");
+          }
+
+          const bareCube = bundle.resolver.resolveCube(BARE, 0, 0, 0)!;
+          if (bareCube.faces.up.texture !== NEUTRAL_TEXTURE) {
+            throw new Error(
+              `bare texture=${bareCube.faces.up.texture}, want ${NEUTRAL_TEXTURE}`,
+            );
+          }
+
+          // Pack precedence: inject stone into a dual-name block via applyRegistries
+          // path already covered in node; here assert stone still pack-resolved.
+          const stoneCube = bundle.resolver.resolveCube(STONE, 0, 0, 0)!;
+          if (stoneCube.faces.up.texture !== "stone") {
+            throw new Error(
+              `stone lost pack texture: ${stoneCube.faces.up.texture}`,
+            );
+          }
+
+          const cov = paletteCoverageAgainstAtlas(registries, bundle.atlas);
+          const { meshes } = bundle.mesher.meshSection(
+            section as never,
+            col as never,
+            state as never,
+          );
+
+          const W = 128;
+          const H = 128;
+          const renderer = new THREE.WebGLRenderer({
+            antialias: false,
+            preserveDrawingBuffer: true,
+          });
+          renderer.setSize(W, H, false);
+          renderer.setPixelRatio(1);
+          renderer.outputColorSpace = THREE.SRGBColorSpace;
+          renderer.toneMapping = THREE.NoToneMapping;
+          renderer.setClearColor(0x101010, 1);
+          document.body.appendChild(renderer.domElement);
+          const scene = new THREE.Scene();
+          for (const m of meshes) scene.add(m);
+
+          const pick = (px: number, py: number) => {
+            const buf = new Uint8Array(4);
+            const gl = renderer.getContext() as WebGLRenderingContext;
+            gl.readPixels(px, py, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, buf);
+            return [buf[0]!, buf[1]!, buf[2]!] as const;
+          };
+          const isMagenta = (c: readonly [number, number, number]) =>
+            c[0] > 200 && c[1] < 50 && c[2] > 200;
+          const isBlue = (c: readonly [number, number, number]) =>
+            c[2] > 180 && c[0] < 80 && c[1] < 140;
+          const isGrey = (c: readonly [number, number, number]) =>
+            Math.abs(c[0] - c[1]) < 20 &&
+            Math.abs(c[1] - c[2]) < 20 &&
+            c[0] > 100 &&
+            c[0] < 180;
+
+          const cam = new THREE.OrthographicCamera(
+            -0.6,
+            0.6,
+            0.6,
+            -0.6,
+            0.1,
+            20,
+          );
+          // Top-down onto crate at (0.5,0,0.5)
+          cam.position.set(0.5, 4, 0.5);
+          cam.lookAt(0.5, 0.5, 0.5);
+          renderer.render(scene, cam);
+          const cratePix = pick(W / 2, H / 2);
+
+          cam.position.set(2.5, 4, 0.5);
+          cam.lookAt(2.5, 0.5, 0.5);
+          renderer.render(scene, cam);
+          const barePix = pick(W / 2, H / 2);
+
+          renderer.dispose();
+          renderer.domElement.remove();
+          bundle.mesher.dispose();
+
+          return {
+            cratePix: [...cratePix],
+            barePix: [...barePix],
+            crateBlue: isBlue(cratePix),
+            bareGrey: isGrey(barePix),
+            anyMagenta: isMagenta(cratePix) || isMagenta(barePix),
+            coverage: {
+              entryCount: cov.entryCount,
+              withMaterialInstances: cov.withMaterialInstances,
+              texturesResolved: cov.texturesResolved,
+              neutralNoMaterials: cov.neutralNoMaterials,
+            },
+          };
+        },
+        { assetBase: assets.url, registries: registriesFixture },
+      );
+
+      expect(result.anyMagenta).toBe(false);
+      expect(result.crateBlue).toBe(true);
+      expect(result.bareGrey).toBe(true);
+      expect(result.coverage.texturesResolved).toBe(2);
+      expect(result.coverage.neutralNoMaterials).toBe(1);
     } finally {
       await page.close().catch(() => undefined);
       await devServer?.close();

@@ -90,7 +90,7 @@ async function openViewer(page: Page, appUrl: string): Promise<void> {
   await page.waitForFunction(
     () => {
       const v = window.__viewer;
-      return !!v && v.schemaOk && v.tick >= 100;
+      return !!v && v.schemaOk && v.tick >= 100 && v.assetsSettled;
     },
     undefined,
     { timeout: 30_000 },

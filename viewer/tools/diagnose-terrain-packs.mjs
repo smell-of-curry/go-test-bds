@@ -14,6 +14,10 @@
  * Usage:
  *   node tools/diagnose-terrain-packs.mjs
  *   VANILLA_PACK=… SERVER_PACK=… node tools/diagnose-terrain-packs.mjs
+ *   REGISTRIES_JSON=testdata/registries-fixture.json node tools/diagnose-terrain-packs.mjs
+ *
+ * Palette coverage (stage 8): loads REGISTRIES_JSON or testdata/registries-fixture.json
+ * and reports material_instances / atlas-resolve / neutral-fallback counts.
  */
 import { createServer } from "node:http";
 import {
@@ -130,150 +134,204 @@ try {
   const page = await browser.newPage();
   await page.goto(viteUrl, { waitUntil: "domcontentloaded" });
 
-  const result = await page.evaluate(async (assetBase) => {
-    const { createTexturedMesher, FALLBACK_TEXTURE, expandTexturesField } =
-      await import("/src/terrain/index.ts");
+  const registriesPath =
+    process.env.REGISTRIES_JSON ||
+    join(viewerRoot, "testdata", "registries-fixture.json");
+  /** @type {unknown} */
+  let registriesJson = null;
+  if (existsSync(registriesPath)) {
+    registriesJson = JSON.parse(readFileSync(registriesPath, "utf8"));
+  }
 
-    const bundle = await createTexturedMesher({ baseUrl: assetBase });
-    const atlas = bundle.atlas;
-    const resolver = bundle.resolver;
-    const blocks = /** @type {Record<string, any>} */ (
-      // poke private map via allTextureNames + resolve
-      resolver
-    );
+  const result = await page.evaluate(
+    async ({ assetBase, registries }) => {
+      const {
+        createTexturedMesher,
+        FALLBACK_TEXTURE,
+        NEUTRAL_TEXTURE,
+        expandTexturesField,
+        paletteCoverageAgainstAtlas,
+      } = await import("/src/terrain/index.ts");
 
-    // Re-fetch merged blocks the same way createTexturedMesher did.
-    const packsRes = await fetch(`${assetBase}/packs`).then((r) => r.json());
-    const layers = [];
-    for (const p of packsRes) {
-      const res = await fetch(
-        `${assetBase}/pack/${encodeURIComponent(p.id)}/blocks.json`,
-      );
-      if (res.ok) layers.push(await res.json());
-    }
-    const { mergeBlocksLayers } = await import("/src/terrain/index.ts");
-    const merged = mergeBlocksLayers(layers);
+      const bundle = await createTexturedMesher({
+        baseUrl: assetBase,
+        registries,
+      });
+      const atlas = bundle.atlas;
+      const resolver = bundle.resolver;
 
-    const fbUv = atlas.uvRect(FALLBACK_TEXTURE, 0);
-    /** @type {Array<{ id: string, reason: string, detail?: string }>} */
-    const failures = [];
-    let ok = 0;
-    let fail = 0;
-    let noTextures = 0;
-
-    for (const [id, def] of Object.entries(merged)) {
-      const faces = expandTexturesField(def?.textures);
-      const shorts = [
-        ...new Set(Object.values(faces).filter((s) => typeof s === "string" && s)),
-      ];
-      if (shorts.length === 0) {
-        noTextures++;
-        // sound-only is fine for pokeb custom blocks without models yet —
-        // still count as "no atlas tile from textures field"
-        if (failures.length < 10) {
-          failures.push({
-            id,
-            reason: "no_textures_field",
-            detail: Object.keys(def ?? {}).join(","),
-          });
-        }
-        fail++;
-        continue;
+      // Re-fetch merged blocks the same way createTexturedMesher did.
+      const packsRes = await fetch(`${assetBase}/packs`).then((r) => r.json());
+      const layers = [];
+      for (const p of packsRes) {
+        const res = await fetch(
+          `${assetBase}/pack/${encodeURIComponent(p.id)}/blocks.json`,
+        );
+        if (res.ok) layers.push(await res.json());
       }
+      const { mergeBlocksLayers } = await import("/src/terrain/index.ts");
+      const merged = mergeBlocksLayers(layers);
 
-      /** @type {string[]} */
-      const reasons = [];
-      for (const short of shorts) {
-        if (!atlas.has(short)) {
-          const entry = atlas.terrainEntry?.(short);
-          if (!entry || entry.paths.length === 0) {
-            reasons.push(`short_name_absent_or_unpacked:${short}`);
+      const fbUv = atlas.uvRect(FALLBACK_TEXTURE, 0);
+      /** @type {Array<{ id: string, reason: string, detail?: string }>} */
+      const failures = [];
+      let ok = 0;
+      let fail = 0;
+      let noTextures = 0;
+
+      for (const [id, def] of Object.entries(merged)) {
+        const faces = expandTexturesField(def?.textures);
+        const shorts = [
+          ...new Set(
+            Object.values(faces).filter((s) => typeof s === "string" && s),
+          ),
+        ];
+        if (shorts.length === 0) {
+          noTextures++;
+          // sound-only is fine for pokeb custom blocks without models yet —
+          // still count as "no atlas tile from textures field"
+          if (failures.length < 10) {
+            failures.push({
+              id,
+              reason: "no_textures_field",
+              detail: Object.keys(def ?? {}).join(","),
+            });
+          }
+          fail++;
+          continue;
+        }
+
+        /** @type {string[]} */
+        const reasons = [];
+        for (const short of shorts) {
+          if (!atlas.has(short)) {
+            const entry = atlas.terrainEntry?.(short);
+            if (!entry || entry.paths.length === 0) {
+              reasons.push(`short_name_absent_or_unpacked:${short}`);
+            } else {
+              reasons.push(`atlas_pack_miss:${short}->${entry.paths[0]?.path}`);
+            }
           } else {
-            reasons.push(`atlas_pack_miss:${short}->${entry.paths[0]?.path}`);
+            const uv = atlas.uvFor(short, 0, 0, 0, 0);
+            if (
+              uv.u0 === fbUv.u0 &&
+              uv.v0 === fbUv.v0 &&
+              short !== FALLBACK_TEXTURE
+            ) {
+              reasons.push(`uv_is_fallback:${short}`);
+            }
+          }
+        }
+
+        // World snapshots use namespaced ids; bare blocks.json keys must still resolve.
+        const worldId = id.includes(":") ? id : `minecraft:${id}`;
+        const cube = resolver.resolveCube(
+          { name: worldId, states: {}, rid: 1 },
+          0,
+          0,
+          0,
+        );
+        if (cube) {
+          const faceTex = cube.faces.up?.texture;
+          if (faceTex === FALLBACK_TEXTURE) {
+            reasons.push(`resolveCube_fallback_for_world_id:${worldId}`);
+          } else if (faceTex !== NEUTRAL_TEXTURE && !atlas.has(faceTex)) {
+            reasons.push(`resolveCube_texture_unpacked:${faceTex}`);
+          }
+        }
+
+        if (reasons.length) {
+          fail++;
+          if (failures.length < 10) {
+            failures.push({
+              id,
+              reason: reasons[0],
+              detail: reasons.join(" | "),
+            });
           }
         } else {
-          const uv = atlas.uvFor(short, 0, 0, 0, 0);
-          if (uv.u0 === fbUv.u0 && uv.v0 === fbUv.v0 && short !== FALLBACK_TEXTURE) {
-            reasons.push(`uv_is_fallback:${short}`);
-          }
+          ok++;
         }
       }
 
-      // World snapshots use namespaced ids; bare blocks.json keys must still resolve.
-      const worldId = id.includes(":") ? id : `minecraft:${id}`;
-      const cube = resolver.resolveCube(
-        { name: worldId, states: {}, rid: 1 },
+      const palette = registries
+        ? paletteCoverageAgainstAtlas(registries, atlas)
+        : null;
+
+      // Atlas dump via canvas → data URL
+      const src = atlas.imageSource();
+      const dump = new OffscreenCanvas(src.width, src.height);
+      const ctx = dump.getContext("2d");
+      ctx.drawImage(src, 0, 0);
+      // Sample a few pixels for emptiness / single-colour check.
+      const sample = ctx.getImageData(
         0,
         0,
-        0,
-      );
-      if (cube) {
-        const faceTex = cube.faces.up?.texture;
-        if (faceTex === FALLBACK_TEXTURE) {
-          reasons.push(`resolveCube_fallback_for_world_id:${worldId}`);
-        } else if (!atlas.has(faceTex)) {
-          reasons.push(`resolveCube_texture_unpacked:${faceTex}`);
-        }
+        Math.min(64, src.width),
+        Math.min(64, src.height),
+      ).data;
+      let nonZero = 0;
+      let magenta = 0;
+      for (let i = 0; i < sample.length; i += 4) {
+        const r = sample[i],
+          g = sample[i + 1],
+          b = sample[i + 2],
+          a = sample[i + 3];
+        if (a > 0 && (r > 8 || g > 8 || b > 8)) nonZero++;
+        if (r > 200 && g < 40 && b > 200) magenta++;
       }
+      const blob = await dump.convertToBlob({ type: "image/png" });
+      const buf = new Uint8Array(await blob.arrayBuffer());
+      let binary = "";
+      for (let i = 0; i < buf.length; i++) binary += String.fromCharCode(buf[i]);
+      const atlasPngBase64 = btoa(binary);
 
-      if (reasons.length) {
-        fail++;
-        if (failures.length < 10) {
-          failures.push({ id, reason: reasons[0], detail: reasons.join(" | ") });
-        }
-      } else {
-        ok++;
-      }
-    }
-
-    // Atlas dump via canvas → data URL
-    const src = atlas.imageSource();
-    const dump = new OffscreenCanvas(src.width, src.height);
-    const ctx = dump.getContext("2d");
-    ctx.drawImage(src, 0, 0);
-    // Sample a few pixels for emptiness / single-colour check.
-    const sample = ctx.getImageData(0, 0, Math.min(64, src.width), Math.min(64, src.height)).data;
-    let nonZero = 0;
-    let magenta = 0;
-    for (let i = 0; i < sample.length; i += 4) {
-      const r = sample[i],
-        g = sample[i + 1],
-        b = sample[i + 2],
-        a = sample[i + 3];
-      if (a > 0 && (r > 8 || g > 8 || b > 8)) nonZero++;
-      if (r > 200 && g < 40 && b > 200) magenta++;
-    }
-    const blob = await dump.convertToBlob({ type: "image/png" });
-    const buf = new Uint8Array(await blob.arrayBuffer());
-    let binary = "";
-    for (let i = 0; i < buf.length; i++) binary += String.fromCharCode(buf[i]);
-    const atlasPngBase64 = btoa(binary);
-
-    bundle.mesher.dispose();
-    return {
-      packCount: packsRes.length,
-      blockCount: Object.keys(merged).length,
-      ok,
-      fail,
-      noTextures,
-      failures,
-      atlas: {
-        width: src.width,
-        height: src.height,
-        packedTiles: atlas.has("flattened_stone") || atlas.has("stone"),
-        hasFlattenedStone: atlas.has("flattened_stone"),
-        sampleNonZeroTexels: nonZero,
-        sampleMagentaTexels: magenta,
-        pngBase64: atlasPngBase64,
-      },
-      sampleKeys: Object.keys(merged).slice(0, 5),
-      hasMinecraftStoneKey: Object.prototype.hasOwnProperty.call(
-        merged,
-        "minecraft:stone",
-      ),
-      hasBareStoneKey: Object.prototype.hasOwnProperty.call(merged, "stone"),
-    };
-  }, assetServer.url);
+      bundle.mesher.dispose();
+      return {
+        packCount: packsRes.length,
+        blockCount: Object.keys(merged).length,
+        ok,
+        fail,
+        noTextures,
+        failures,
+        palette: palette
+          ? {
+              entryCount: palette.entryCount,
+              withMaterialInstances: palette.withMaterialInstances,
+              texturesResolved: palette.texturesResolved,
+              neutralNoMaterials: palette.neutralNoMaterials,
+              atlasMiss: palette.atlasMiss,
+              withGeometry: palette.withGeometry,
+              sample: palette.entries.slice(0, 10).map((e) => ({
+                name: e.name,
+                hasMaterialInstances: e.hasMaterialInstances,
+                texturesResolved: e.texturesResolved,
+                reason: e.reason,
+                detail: e.detail,
+                textureShortNames: e.textureShortNames,
+              })),
+            }
+          : { skipped: true, reason: "no REGISTRIES_JSON / fixture" },
+        atlas: {
+          width: src.width,
+          height: src.height,
+          packedTiles: atlas.has("flattened_stone") || atlas.has("stone"),
+          hasFlattenedStone: atlas.has("flattened_stone"),
+          hasNeutral: atlas.has(NEUTRAL_TEXTURE),
+          sampleNonZeroTexels: nonZero,
+          sampleMagentaTexels: magenta,
+          pngBase64: atlasPngBase64,
+        },
+        sampleKeys: Object.keys(merged).slice(0, 5),
+        hasMinecraftStoneKey: Object.prototype.hasOwnProperty.call(
+          merged,
+          "minecraft:stone",
+        ),
+        hasBareStoneKey: Object.prototype.hasOwnProperty.call(merged, "stone"),
+      };
+    },
+    { assetBase: assetServer.url, registries: registriesJson },
+  );
 
   mkdirSync(outDir, { recursive: true });
   const pngPath = join(outDir, "atlas.png");

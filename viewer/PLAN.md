@@ -456,11 +456,16 @@ ever seeing a behaviour pack.
 - [x] Establish precedence between the network palette and `blocks.json`, and
       assert it with a fixture rather than assuming it. (`FINDINGS-wire.md`,
       `TestPaletteWinsOverBlocksJSON`)
-- [ ] Resolve the geometry and texture names the palette references against the
+- [x] Resolve the geometry and texture names the palette references against the
       resource pack stack from stage 5. The palette says what to draw with; the
-      pack holds the thing itself. *(renderer / stage 6+)*
+      pack holds the thing itself. *(renderer: `material_instances` →
+      `terrain_texture.json` atlas; pack `blocks.json` textures win when present,
+      palette covers the rest; `createTexturedMesher({ registries })` /
+      `applyRegistries`)*
 - [ ] Support custom block geometry with per-instance materials, including
-      `render_method`, face-dimming and ambient-occlusion flags. *(renderer)*
+      `render_method`, face-dimming and ambient-occlusion flags. *(renderer —
+      `render_method` → cutout/opaque on the **cube** path is done; full geometry
+      + face-dimming/AO still open; cube approx + ponytail in `resolve.ts`)*
 - [ ] Support permutations: evaluate permutation conditions against the state
       properties carried in the snapshot and select the resulting components.
       *(renderer; conditions + components are on the wire)*
@@ -476,7 +481,8 @@ ever seeing a behaviour pack.
 - [x] Establish the fallback chain for a block the palette and pack stack cannot
       resolve: named-but-unknown, unnamed-but-present, and absent, each visually
       distinct so a missing asset is never silently a solid grey cube.
-      *(classification + PROTOCOL; distinct meshes are renderer)*
+      *(classification + PROTOCOL; renderer: magenta `__missing__` = unnamed /
+      load bug; stone-grey `__neutral__` = named gap / palette without materials)*
 
 **Check (Go):** fixture join sequence under `gotestbds/wire/testdata` — custom
 block resolves geometry and materials from palette NBT alone; no behaviour pack

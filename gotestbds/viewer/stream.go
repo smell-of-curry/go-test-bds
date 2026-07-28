@@ -42,13 +42,26 @@ type Stream struct {
 	lastDim  atomic.Int32
 }
 
+// Resync reasons appear on the stream-health warning so a thrash loop names
+// itself instead of only climbing a counter on the burnt-in overlay.
+const (
+	resyncReasonAttach             = "attach"
+	resyncReasonDimension          = "dimension"
+	resyncReasonEncoderKeyframe    = "encoder-keyframe"
+	resyncReasonSupersededKeyframe = "superseded-keyframe"
+)
+
 // subscriber holds what one SSE connection has yet to be sent.
 //
 // Two lanes, because the two kinds of frame fail differently. Events queue and
 // never drop. World frames keep only the newest: a viewer that has fallen behind
 // wants the current world, not a backlog of stale ones it will render and throw
-// away. Skipping a delta invalidates the client's state, so any replacement
-// flags a resync and the next frame it receives is a fresh keyframe.
+// away.
+//
+// Superseding a catch-up delta only re-queues that frame's columns — the client
+// still holds every column already delivered, so a full keyframe restart would
+// wipe valid state and feed the remesh thrash loop. A full restart (resync) is
+// reserved for a fresh attach or a superseded keyframe the client never got.
 //
 // Column delivery is paced per subscriber: sentColumns tracks what the writer
 // has actually dequeued, and a pending frame's columnsDelivered are treated as
@@ -65,6 +78,8 @@ type subscriber struct {
 	replaced             int
 	sent                 int
 	resync               bool
+	resyncReason         string // set while resync is armed
+	lastResyncReason     string // sticky for health logs after the keyframe clears it
 	lastReportedSent     int
 	lastReportedReplaced int
 
@@ -86,6 +101,11 @@ type encodedFrame struct {
 	resetSent        bool
 	columnsDelivered [][2]int32
 	columnsRemoved   [][2]int32
+	// columnsTouched are already-delivered columns this delta patched in place
+	// (blocks / state). On supersede they must be unclaimed so the next frame
+	// re-sends the full column; catch-up columnsDelivered unclaim themselves
+	// when pending is dropped.
+	columnsTouched [][2]int32
 }
 
 // signal wakes the writer without blocking a producer.
@@ -122,27 +142,61 @@ func (sub *subscriber) pushEvent(f encodedFrame) int {
 // subscriber that had fallen behind receiving deltas against a world it had
 // never been given. A keyframe replaces anything, because it is a fresh base.
 //
+// Superseding a pending delta re-queues only that frame's columns. Superseding
+// a pending keyframe forces a full restart — the client never received a base.
+//
 // @param f The frame to deliver.
 // @param keyframe Whether f is a keyframe rather than a delta.
 func (sub *subscriber) pushWorld(f encodedFrame, keyframe bool) {
 	sub.mu.Lock()
 	defer sub.mu.Unlock()
 
-	if sub.pending != nil && !keyframe {
-		// Something is being skipped either way, so the client must resync.
-		sub.resync = true
-		if sub.pending.event == "keyframe" {
+	if sub.pending != nil {
+		if !keyframe && sub.pending.event == "keyframe" {
+			// Keep the unsent keyframe; the dropped delta is not a lost base.
 			sub.replaced++
 			return
 		}
 		sub.replaced++
+		if sub.pending.event == "keyframe" {
+			// Lost an unsent keyframe — paced progress from before it is void.
+			sub.lastResyncReason = resyncReasonSupersededKeyframe
+			clear(sub.sentColumns)
+		} else {
+			sub.requeueSupersededColumnsLocked(*sub.pending)
+		}
 	}
 	frame := f
 	sub.pending = &frame
 	if keyframe {
 		sub.resync = false
+		sub.resyncReason = ""
 	}
 	sub.signal()
+}
+
+// releasePendingDeltaLocked drops an unread catch-up delta and re-queues its
+// columns. Keyframes are left in place. Caller holds sub.mu.
+func (sub *subscriber) releasePendingDeltaLocked() {
+	if sub.pending == nil || sub.pending.event == "keyframe" {
+		return
+	}
+	sub.replaced++
+	sub.requeueSupersededColumnsLocked(*sub.pending)
+	sub.pending = nil
+}
+
+// requeueSupersededColumnsLocked unclaims columns from a dropped pending delta.
+// Caller holds sub.mu.
+//
+// @param f The superseded frame whose in-flight columns must be offered again.
+func (sub *subscriber) requeueSupersededColumnsLocked(f encodedFrame) {
+	// columnsDelivered were claimed only via pending; replacing pending drops
+	// that claim. In-place patches lived in sentColumns and need an explicit
+	// unclaim so the next frame re-sends the full column.
+	for _, key := range f.columnsTouched {
+		delete(sub.sentColumns, key)
+	}
 }
 
 // next takes the frame to send, events first.
@@ -210,21 +264,30 @@ func (sub *subscriber) projectedSent() map[[2]int32]struct{} {
 }
 
 // markResync flags the subscriber for a fresh keyframe and drops paced progress.
-func (sub *subscriber) markResync() {
+//
+// @param reason Why the client has nothing valid to keep.
+func (sub *subscriber) markResync(reason string) {
 	sub.mu.Lock()
 	defer sub.mu.Unlock()
 	sub.resync = true
+	sub.resyncReason = reason
+	sub.lastResyncReason = reason
 	clear(sub.sentColumns)
 	sub.pending = nil
 }
 
 // stats reports delivery counters for the health log.
 //
-// @returns frames sent, frames superseded before sending, queued events.
-func (sub *subscriber) stats() (sent, replaced, queued int) {
+// @returns frames sent, frames superseded before sending, queued events, and
+// the last resync reason (empty when none has fired).
+func (sub *subscriber) stats() (sent, replaced, queued int, resyncReason string) {
 	sub.mu.Lock()
 	defer sub.mu.Unlock()
-	return sub.sent, sub.replaced, len(sub.events)
+	reason := sub.resyncReason
+	if reason == "" {
+		reason = sub.lastResyncReason
+	}
+	return sub.sent, sub.replaced, len(sub.events), reason
 }
 
 // needsResync reports whether the next world frame must be a keyframe.
@@ -291,7 +354,7 @@ func (s *Stream) Tick(a *actor.Actor) {
 
 	if globalKey {
 		for _, sub := range subs {
-			sub.markResync()
+			sub.markResync(resyncReasonEncoderKeyframe)
 		}
 	}
 
@@ -316,7 +379,16 @@ func (s *Stream) Tick(a *actor.Actor) {
 // @returns the encoded frame, whether it is a keyframe, and any marshal error.
 func (s *Stream) frameFor(sub *subscriber, cur *viewState, shared Delta, a *actor.Actor) (encodedFrame, bool, error) {
 	sub.mu.Lock()
-	needKey := sub.resync
+	// Drop an unread catch-up delta before sampling claims so its columns are
+	// offered again on this frame. An unsent keyframe stays — a delta must not
+	// tear down the base the client still needs.
+	sub.releasePendingDeltaLocked()
+	// While a keyframe sits unsent, regenerate it fresh rather than building a
+	// delta: pushWorld would drop that delta to keep the keyframe, silently
+	// losing its in-place block patches. A keyframe is a full base, so the
+	// newest one loses nothing — the client only ever receives one.
+	needKey := sub.resync ||
+		(sub.pending != nil && sub.pending.event == "keyframe")
 	budget := s.columnBudget
 	var claimed map[[2]int32]struct{}
 	if needKey {
@@ -420,12 +492,43 @@ func (s *Stream) frameFor(sub *subscriber, cur *viewState, shared Delta, a *acto
 	if err != nil {
 		return encodedFrame{}, false, err
 	}
+	touched := columnsTouchedByDelta(d)
 	return encodedFrame{
 		event:            "delta",
 		data:             data,
 		columnsDelivered: append([][2]int32(nil), batch...),
 		columnsRemoved:   append([][2]int32(nil), removed...),
+		columnsTouched:   touched,
 	}, false, nil
+}
+
+// columnsTouchedByDelta lists already-held columns a delta patches in place.
+//
+// @param d The delta about to be queued.
+// @returns unique column keys referenced by blocks or columnsState.
+func columnsTouchedByDelta(d Delta) [][2]int32 {
+	if len(d.Blocks) == 0 && len(d.ColumnsState) == 0 {
+		return nil
+	}
+	seen := make(map[[2]int32]struct{}, len(d.ColumnsState)+8)
+	var out [][2]int32
+	for _, st := range d.ColumnsState {
+		key := [2]int32{st.X, st.Z}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, key)
+	}
+	for _, bc := range d.Blocks {
+		key := [2]int32{int32(bc.Pos[0] >> 4), int32(bc.Pos[2] >> 4)}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, key)
+	}
+	return out
 }
 
 // pendingColumnKeys lists columns in cur that the subscriber has not claimed,
@@ -479,7 +582,7 @@ func (s *Stream) reportHealth(now time.Time) {
 	s.mu.Unlock()
 
 	for i, sub := range subs {
-		sent, replaced, queued := sub.stats()
+		sent, replaced, queued, resyncReason := sub.stats()
 		delta := sent - sub.lastReportedSent
 		sub.lastReportedSent = sent
 		droppedNow := replaced - sub.lastReportedReplaced
@@ -496,6 +599,7 @@ func (s *Stream) reportHealth(now time.Time) {
 			"sentInWindow", delta,
 			"supersededInWindow", droppedNow,
 			"queuedEvents", queued,
+			"resyncReason", resyncReason,
 			"windowMs", elapsed.Milliseconds(),
 		)
 	}
@@ -508,7 +612,7 @@ func (s *Stream) DimensionChanged(from, to int32) {
 	s.enc.DimensionChanged()
 	s.mu.Lock()
 	for sub := range s.subs {
-		sub.markResync()
+		sub.markResync(resyncReasonDimension)
 	}
 	s.mu.Unlock()
 }
@@ -517,9 +621,11 @@ func (s *Stream) DimensionChanged(from, to int32) {
 // sees resync delivers a keyframe.
 func (s *Stream) attach() *subscriber {
 	sub := &subscriber{
-		wake:        make(chan struct{}, 1),
-		resync:      true,
-		sentColumns: make(map[[2]int32]struct{}),
+		wake:             make(chan struct{}, 1),
+		resync:           true,
+		resyncReason:     resyncReasonAttach,
+		lastResyncReason: resyncReasonAttach,
+		sentColumns:      make(map[[2]int32]struct{}),
 	}
 	s.mu.Lock()
 	s.subs[sub] = struct{}{}

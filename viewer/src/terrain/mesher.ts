@@ -47,11 +47,11 @@ interface EmitStats {
  * faces go into a second transparent pass.
  */
 export class TexturedMesher implements Mesher {
-  private readonly atlas: TerrainAtlas;
+  private atlas: TerrainAtlas;
   private readonly resolver: BlockModelResolver;
   private readonly biomeAt: BiomeAt | null;
   private readonly custom: CustomGeometryHook | null;
-  private readonly texture: THREE.CanvasTexture;
+  private texture: THREE.CanvasTexture;
   private readonly matOpaque: THREE.RawShaderMaterial;
   private readonly matTransparent: THREE.RawShaderMaterial;
   /** Last mesh stats (tests / debug). */
@@ -390,6 +390,31 @@ export class TexturedMesher implements Mesher {
         yBot: 0,
       });
     }
+  }
+
+  /**
+   * Swap the terrain atlas (e.g. after late-bound registries pack new tiles).
+   * Keeps the same material objects so already-meshed sections stay valid once remeshed.
+   *
+   * @param atlas - Newly built atlas.
+   */
+  replaceAtlas(atlas: TerrainAtlas): void {
+    this.atlas = atlas;
+    this.texture.dispose();
+    this.texture = new THREE.CanvasTexture(atlas.imageSource());
+    this.texture.magFilter = THREE.NearestFilter;
+    this.texture.minFilter = THREE.NearestFilter;
+    this.texture.generateMipmaps = false;
+    this.texture.flipY = true;
+    this.texture.colorSpace = THREE.NoColorSpace;
+    this.texture.needsUpdate = true;
+    this.matOpaque.uniforms.map!.value = this.texture;
+    this.matOpaque.uniforms.atlasSize!.value.set(atlas.width, atlas.height);
+    this.matTransparent.uniforms.map!.value = this.texture;
+    this.matTransparent.uniforms.atlasSize!.value.set(
+      atlas.width,
+      atlas.height,
+    );
   }
 
   /** Release GPU resources. */

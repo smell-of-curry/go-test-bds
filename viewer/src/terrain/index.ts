@@ -1,6 +1,11 @@
 import type { Mesher } from "../scene";
+import type { Registries } from "../protocol";
 import { AssetClient } from "./assetClient";
-import { buildTerrainAtlas, type TerrainAtlas } from "./atlas";
+import {
+  buildTerrainAtlas,
+  FALLBACK_TEXTURE,
+  type TerrainAtlas,
+} from "./atlas";
 import type { BiomeAt, CustomGeometryHook } from "./types";
 import {
   mergeBlocksLayers,
@@ -9,6 +14,11 @@ import {
 } from "./merge";
 import { BlockModelResolver } from "./resolve";
 import { TexturedMesher } from "./mesher";
+import {
+  diagnosePaletteCoverage,
+  textureNamesFromRegistries,
+  type PaletteCoverageReport,
+} from "./palette";
 
 export { AssetClient, parsePackJson, normalizePath } from "./assetClient";
 export {
@@ -16,7 +26,9 @@ export {
   buildTerrainAtlas,
   packRects,
   FALLBACK_TEXTURE,
+  NEUTRAL_TEXTURE,
   makeFallbackBitmap,
+  makeNeutralBitmap,
 } from "./atlas";
 export {
   parseBlocksJson,
@@ -53,6 +65,19 @@ export {
 export { createTerrainMaterial, wrapTileCoord } from "./material";
 export { tintAt, UNTINTED, BIOME_SNAPSHOT_NOTE } from "./biome";
 export { decodeTga, bitmapFromTga } from "./tga";
+export {
+  indexRegistryBlocks,
+  textureNamesFromRegistries,
+  materialForFace,
+  renderClassFromMethod,
+  facesFromMaterialInstances,
+  diagnosePaletteCoverage,
+} from "./palette";
+export type {
+  PaletteCoverageReport,
+  PaletteEntryCoverage,
+  PaletteMissReason,
+} from "./palette";
 export type {
   BiomeAt,
   CubeModel,
@@ -75,6 +100,12 @@ export interface CreateTexturedMesherOptions {
    * Extra terrain short-names to pack (beyond blocks.json references).
    */
   extraTextures?: Iterable<string>;
+  /**
+   * Join-static network palette from keyframe `registries`.
+   * Optional — omit at boot; call {@link TexturedMesherBundle.applyRegistries}
+   * when the keyframe arrives so custom-block tiles enter the atlas.
+   */
+  registries?: Registries | null;
 }
 
 export interface TexturedMesherBundle {
@@ -84,21 +115,30 @@ export interface TexturedMesherBundle {
   atlas: TerrainAtlas;
   resolver: BlockModelResolver;
   client: AssetClient;
+  /**
+   * Bind/replace network palette and rebuild the atlas so new short-names pack.
+   * Existing call sites that never pass registries stay valid (no-op-capable).
+   *
+   * @param registries - Keyframe registries or null.
+   */
+  applyRegistries(registries: Registries | null): Promise<void>;
 }
 
 /**
  * Drop-in entry point for the parent agent:
  *
  * ```ts
- * const { asMesher } = await createTexturedMesher();
- * const scene = new Scene(camera, asMesher);
+ * const bundle = await createTexturedMesher();
+ * const scene = new Scene(camera, bundle.asMesher);
+ * // after keyframe:
+ * await bundle.applyRegistries(store.getState().registries);
  * ```
  *
  * Merges `blocks.json` / `terrain_texture.json` / flipbooks across the pack
  * stack via `GET /pack/<id>/...` (not the winner-only `/asset` path). A server
  * pack that only lists `sound` must not erase vanilla `textures`.
  *
- * @param opts - Base URL, biome hook, extras.
+ * @param opts - Base URL, biome hook, extras, optional registries.
  * @returns mesher + supporting objects.
  */
 export async function createTexturedMesher(
@@ -118,7 +158,10 @@ export async function createTexturedMesher(
     throw new Error("blocks.json missing from every pack in the stack");
   }
   const blocksMerged = mergeBlocksLayers(blockLayers);
-  const resolver = new BlockModelResolver(blocksMerged);
+  const resolver = new BlockModelResolver(
+    blocksMerged,
+    opts.registries ?? null,
+  );
 
   const terrainMerged = mergeTerrainLayers(
     await client.fetchJsonLayers("textures/terrain_texture.json"),
@@ -131,6 +174,9 @@ export async function createTexturedMesher(
   if (opts.extraTextures) {
     for (const n of opts.extraTextures) names.add(n);
   }
+  for (const n of textureNamesFromRegistries(opts.registries ?? null)) {
+    names.add(n);
+  }
 
   const atlas = await buildTerrainAtlas(client, names, {
     terrain: terrainMerged,
@@ -140,5 +186,49 @@ export async function createTexturedMesher(
     biomeAt: opts.biomeAt ?? null,
     customGeometry: opts.customGeometry ?? null,
   });
-  return { mesher, asMesher: mesher, atlas, resolver, client };
+
+  const bundle: TexturedMesherBundle = {
+    mesher,
+    asMesher: mesher,
+    atlas,
+    resolver,
+    client,
+    async applyRegistries(registries: Registries | null): Promise<void> {
+      resolver.setRegistries(registries);
+      const nextNames = resolver.allTextureNames();
+      if (opts.extraTextures) {
+        for (const n of opts.extraTextures) nextNames.add(n);
+      }
+      const nextAtlas = await buildTerrainAtlas(client, nextNames, {
+        terrain: terrainMerged,
+        flipbooks: flipbooksMerged,
+      });
+      bundle.atlas = nextAtlas;
+      mesher.replaceAtlas(nextAtlas);
+    },
+  };
+  return bundle;
+}
+
+/**
+ * Convenience for the diagnose script: palette coverage against a live atlas.
+ *
+ * @param registries - Registries to score.
+ * @param atlas - Built terrain atlas.
+ * @returns coverage report.
+ */
+export function paletteCoverageAgainstAtlas(
+  registries: Registries | null | undefined,
+  atlas: TerrainAtlas,
+): PaletteCoverageReport {
+  const fb = atlas.uvRect(FALLBACK_TEXTURE, 0);
+  return diagnosePaletteCoverage(
+    registries,
+    (s) => atlas.has(s),
+    (s) => {
+      if (!atlas.has(s)) return true;
+      const uv = atlas.uvFor(s, 0, 0, 0, 0);
+      return uv.u0 === fb.u0 && uv.v0 === fb.v0 && s !== FALLBACK_TEXTURE;
+    },
+  );
 }

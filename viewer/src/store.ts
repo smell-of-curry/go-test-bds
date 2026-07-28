@@ -9,6 +9,7 @@ import {
   type HelloFrame,
   type KeyframeFrame,
   type MarkFrame,
+  type Registries,
   type UI,
   type WorldMeta,
   SCHEMA_VERSION,
@@ -48,6 +49,8 @@ export interface WorldState {
   columns: Map<string, StoredColumn>;
   entities: Map<number, Entity>;
   ui: UI | null;
+  /** Join-static registries from the last keyframe; null until one arrives. */
+  registries: Registries | null;
   mark: MarkFrame | null;
   pendingCapture: CaptureFrame | null;
   /** Increments on every keyframe after the first successful one (server resync). */
@@ -84,6 +87,7 @@ function emptyState(): WorldState {
     columns: new Map(),
     entities: new Map(),
     ui: null,
+    registries: null,
     mark: null,
     pendingCapture: null,
     resyncCount: 0,
@@ -273,6 +277,8 @@ export class Store {
     this.state.world = frame.world;
     this.state.actor = frame.actor;
     this.state.ui = frame.ui ?? null;
+    // Registries are join-static; keyframe replaces, deltas never clear.
+    this.state.registries = frame.registries ?? null;
 
     for (const col of frame.columns) {
       const stored = decodeColumn(col);

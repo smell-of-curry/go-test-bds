@@ -424,10 +424,16 @@ async function handleCapture(
       (need) => {
         const v = (
           window as unknown as {
-            __viewer?: { schemaOk: boolean; tick: number };
+            __viewer?: {
+              schemaOk: boolean;
+              tick: number;
+              assetsSettled: boolean;
+            };
           }
         ).__viewer;
-        return !!v && v.schemaOk && v.tick >= need;
+        // assetsSettled = atlas ready OR failed (placeholder fallback). Still
+        // must not fire while the deliberate loading screen is up.
+        return !!v && v.schemaOk && v.tick >= need && v.assetsSettled;
       },
       minTick,
       { timeout: timeoutMs },

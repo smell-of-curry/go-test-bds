@@ -231,6 +231,10 @@ export function buildFixturePack(): Map<string, Uint8Array> {
         log_oak_top: { textures: "textures/blocks/log_oak_top" },
         big_tile: { textures: "textures/blocks/big_tile" },
         stripe: { textures: "textures/blocks/stripe" },
+        // Network-palette short-name (stage 8); not referenced from blocks.json.
+        palette_right_texture: {
+          textures: "textures/blocks/palette_right_texture",
+        },
         // Intentionally no entry for missing_only — fallback test.
       },
     }),
@@ -264,6 +268,11 @@ export function buildFixturePack(): Map<string, Uint8Array> {
   set("textures/blocks/big_tile.png", solidPng(32, 32, 255, 128, 0));
   // Left red / right cyan — pixel test samples same phase one tile apart.
   set("textures/blocks/stripe.png", stripePng(16, [255, 0, 0], [0, 255, 255]));
+  // Distinct blue for palette-only custom blocks (not magenta, not stone grey).
+  set(
+    "textures/blocks/palette_right_texture.png",
+    solidPng(16, 16, 30, 90, 220),
+  );
   set(
     "textures/blocks/water_still.png",
     flipbookPng(16, [

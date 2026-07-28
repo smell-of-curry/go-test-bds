@@ -46,6 +46,25 @@
       #schema-error.visible {
         display: flex;
       }
+      /* Deliberate loading state while the pack atlas builds — not placeholder cubes. */
+      #loading {
+        display: none;
+        position: fixed;
+        inset: 0;
+        align-items: center;
+        justify-content: center;
+        background: #0b0e14;
+        color: #c5ced8;
+        font-size: 18px;
+        letter-spacing: 0.02em;
+        z-index: 1;
+        pointer-events: none;
+        text-align: center;
+        padding: 24px;
+      }
+      #loading.visible {
+        display: flex;
+      }
       #crosshair {
         position: fixed;
         left: 50%;
@@ -174,6 +193,7 @@
     <div id="crosshair"></div>
     <div id="labels"></div>
     <div id="overlay">connecting…</div>
+    <div id="loading">loading textures…</div>
     <div id="caption"></div>
     <div id="ui-panel"></div>
     <div id="schema-error"></div>

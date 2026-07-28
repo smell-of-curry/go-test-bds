@@ -1,7 +1,6 @@
 package viewer
 
 import (
-	"encoding/json"
 	"testing"
 
 	"github.com/df-mc/dragonfly/server/block"
@@ -9,11 +8,11 @@ import (
 	dfworld "github.com/df-mc/dragonfly/server/world"
 )
 
-// TestSlowSubscriberGetsLatestWorldThenKeyframe covers a subscriber that has
-// fallen behind: it must not accumulate stale world frames, and once one has
-// been skipped the next frame it receives has to be a keyframe rather than a
-// delta against something it never saw.
-func TestSlowSubscriberGetsLatestWorldThenKeyframe(t *testing.T) {
+// TestSlowSubscriberKeepsLatestWorldWithoutKeyframeRestart covers a subscriber
+// that has fallen behind after its opening keyframe: only the newest world
+// frame is kept, and superseding catch-up deltas must not force another
+// keyframe (that restart is what thrashed remeshing under load).
+func TestSlowSubscriberKeepsLatestWorldWithoutKeyframeRestart(t *testing.T) {
 	hub, err := New(Options{Address: "127.0.0.1:0", ArtifactDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
@@ -53,27 +52,18 @@ func TestSlowSubscriberGetsLatestWorldThenKeyframe(t *testing.T) {
 		t.Fatalf("world frames queued as events: %d", queued)
 	}
 
-	// Exactly one world frame is kept, and because a delta was skipped it is a
-	// keyframe: a delta against a frame the subscriber never saw is unusable.
 	fr, ok = sub.next()
 	if !ok {
 		t.Fatal("no world frame pending after five unread ticks")
 	}
-	if fr.event != "keyframe" {
-		t.Fatalf("pending event=%s want keyframe after a skipped delta", fr.event)
-	}
-	var kf Keyframe
-	if err := json.Unmarshal(fr.data, &kf); err != nil {
-		t.Fatal(err)
-	}
-	if kf.Type != "keyframe" {
-		t.Fatalf("type=%s", kf.Type)
+	if fr.event != "delta" {
+		t.Fatalf("pending event=%s want delta after superseded catch-up (not a keyframe restart)", fr.event)
 	}
 	if _, ok := sub.next(); ok {
 		t.Fatal("more than one world frame kept for a subscriber that is behind")
 	}
 	if sub.needsResync() {
-		t.Fatal("resync flag should clear once the keyframe is delivered")
+		t.Fatal("resync must stay clear when only catch-up deltas were superseded")
 	}
 }
 
@@ -134,10 +124,57 @@ func TestEventQueueCapDiscardsOldest(t *testing.T) {
 	}
 }
 
+// TestUnsentKeyframeIsRegeneratedWithFreshBlocks covers the loss window behind
+// the keep-the-unsent-keyframe rule: while a keyframe sits unsent, frameFor
+// must regenerate it from the current world rather than build a delta —
+// pushWorld would drop that delta to keep the keyframe, silently losing its
+// in-place block patches. The client's one keyframe must carry the new block.
+func TestUnsentKeyframeIsRegeneratedWithFreshBlocks(t *testing.T) {
+	hub, err := New(Options{Address: "127.0.0.1:0", ArtifactDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer hub.Close()
+
+	s := hub.Register("TestBot")
+	sub := s.attach()
+	defer s.detach(sub)
+
+	a := testActor(t, "TestBot")
+	addColumn(a.World(), dfworld.ChunkPos{0, 0})
+
+	// First tick arms the opening keyframe; the writer never dequeues it.
+	s.Tick(a)
+	sub.mu.Lock()
+	if sub.pending == nil || sub.pending.event != "keyframe" {
+		t.Fatal("expected an unsent keyframe pending after the first tick")
+	}
+	before := append([]byte(nil), sub.pending.data...)
+	sub.mu.Unlock()
+
+	// A block changes while the keyframe is still unsent.
+	a.World().SetBlock(cube.Pos{1, 70, 1}, block.Gold{})
+	s.Tick(a)
+
+	fr, ok := sub.next()
+	if !ok {
+		t.Fatal("no frame pending after the second tick")
+	}
+	if fr.event != "keyframe" {
+		t.Fatalf("pending event=%s want a regenerated keyframe, not a delta destined to be dropped", fr.event)
+	}
+	if string(fr.data) == string(before) {
+		t.Fatal("keyframe was not regenerated; the block change is lost")
+	}
+	if _, ok := sub.next(); ok {
+		t.Fatal("more than one world frame kept while behind")
+	}
+}
+
 // TestDeltaDoesNotReplaceUnsentKeyframe covers the rule that keeps a subscriber
 // which has fallen behind able to render at all: a delta applies to a world the
 // client must already have, so it must never supersede a keyframe still waiting
-// to be sent.
+// to be sent. Dropping the delta alone is not a lost base — no resync.
 func TestDeltaDoesNotReplaceUnsentKeyframe(t *testing.T) {
 	sub := &subscriber{wake: make(chan struct{}, 1)}
 
@@ -151,8 +188,8 @@ func TestDeltaDoesNotReplaceUnsentKeyframe(t *testing.T) {
 	if f.event != "keyframe" {
 		t.Fatalf("pending event=%s want keyframe", f.event)
 	}
-	if !sub.needsResync() {
-		t.Fatal("skipping the delta must flag a resync")
+	if sub.needsResync() {
+		t.Fatal("keeping an unsent keyframe must not flag a full resync")
 	}
 	if _, ok := sub.next(); ok {
 		t.Fatal("the delta should have been dropped, not queued")

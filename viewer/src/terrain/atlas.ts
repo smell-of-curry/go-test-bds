@@ -15,6 +15,12 @@ import type {
 /** Sentinel short-name for the generated missing-texture tile. */
 export const FALLBACK_TEXTURE = "__missing__";
 
+/**
+ * Neutral stone-grey tile for named custom blocks with no material_instances.
+ * Magenta (`__missing__`) means a bug; this means "known gap, draw something".
+ */
+export const NEUTRAL_TEXTURE = "__neutral__";
+
 export interface PackedTile {
   id: string;
   x: number;
@@ -291,8 +297,14 @@ export async function buildTerrainAtlas(
       h: 16,
       bitmap: await makeFallbackBitmap(16),
     },
+    {
+      id: NEUTRAL_TEXTURE,
+      w: 16,
+      h: 16,
+      bitmap: await makeNeutralBitmap(16),
+    },
   ];
-  const loaded = new Set<string>([FALLBACK_TEXTURE]);
+  const loaded = new Set<string>([FALLBACK_TEXTURE, NEUTRAL_TEXTURE]);
 
   for (const name of needed) {
     if (loaded.has(name)) continue;
@@ -402,5 +414,20 @@ export async function makeFallbackBitmap(size: number): Promise<ImageBitmap> {
   ctx.fillStyle = "#000000";
   ctx.fillRect(half, 0, half, half);
   ctx.fillRect(0, half, half, half);
+  return createImageBitmap(c);
+}
+
+/**
+ * Flat stone-grey tile for palette entries without material_instances.
+ *
+ * @param size - Tile edge in pixels.
+ * @returns ImageBitmap.
+ */
+export async function makeNeutralBitmap(size: number): Promise<ImageBitmap> {
+  const c = new OffscreenCanvas(size, size);
+  const ctx = c.getContext("2d");
+  if (!ctx) throw new Error("2d unavailable");
+  ctx.fillStyle = "#8a8a8a";
+  ctx.fillRect(0, 0, size, size);
   return createImageBitmap(c);
 }

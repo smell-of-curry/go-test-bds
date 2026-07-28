@@ -105,7 +105,7 @@ guessed at.
 ### `POST /capture/<id>/error`
 
 ```json
-{"message":"no canvas frame reached tick 1024 within 5000ms"}
+{"message":"no canvas frame reached tick 1024 within 30000ms"}
 ```
 
 Fails the pending capture with that message. A harness that cannot produce a
@@ -204,8 +204,10 @@ chunks — first batch on the keyframe, the rest on later `delta.columnsAdded`.
   delta. Partial keyframe + `columnsAdded` is the normal catch-up path, not an
   error.
 - Every connection still starts with exactly one `keyframe` before any `delta`.
-  A mid-run attach or a resync re-queues columns from scratch rather than
-  blasting the full radius in one frame.
+  A mid-run attach or a full resync (fresh attach, dimension change, or a
+  superseded unsent keyframe) re-queues columns from scratch rather than
+  blasting the full radius in one frame. Superseding an unsent catch-up
+  `delta` only re-queues that frame's columns — already-delivered columns stay.
 
 `dimensionName` is one of `overworld`, `nether`, `end`, or `custom:<id>` for a
 script-registered dimension the bot only knows by number.
@@ -277,7 +279,7 @@ or stop recording.
 A request for a still. Emitted when the `screenshot` instruction runs.
 
 ```json
-{"v":1,"type":"capture","bot":"TestBot","id":"cap-3","minTick":1024,"timeoutMs":5000,"ext":"png","label":"after-interact"}
+{"v":1,"type":"capture","bot":"TestBot","id":"cap-3","minTick":1024,"timeoutMs":30000,"ext":"png","label":"after-interact"}
 ```
 
 The harness must not answer until it has rendered a frame from a snapshot whose
@@ -525,11 +527,21 @@ never reach it.
 - Each subscriber keeps at most one pending world frame: a newer frame replaces
   an unread one. Events (mark/capture) queue separately and never drop for world
   backpressure.
-- Skipping a delta flags the subscriber for resync; its next world frame is a
-  fresh paced `keyframe`. A delta never replaces an unsent keyframe.
+- Superseding an unsent catch-up `delta` re-queues only that frame's columns
+  (its `columnsAdded` batch plus any columns it patched in place). The client
+  keeps every column already delivered — a full keyframe restart here is what
+  thrashed remeshing under load (`resync` climbing on the overlay while the
+  world never finished arriving).
+- A full paced `keyframe` restart happens only when the client has nothing
+  valid: fresh attach, dimension change / encoder keyframe, or an unsent
+  `keyframe` that itself was superseded. A delta never replaces an unsent
+  keyframe.
 - Per-subscriber `sentColumns` tracks what the SSE writer has actually
-  dequeued, so a mid-run attach or resync re-queues columns instead of
-  re-sending the full radius in one frame.
+  dequeued, so a mid-run attach or full resync re-queues columns instead of
+  re-sending the full radius in one frame. Pending-frame column claims prevent
+  double-send while a frame waits on the writer.
+- Stream-health warnings include `resyncReason` (`attach`, `dimension`,
+  `encoder-keyframe`, `superseded-keyframe`) so a delivery loop names itself.
 - The stream carries columns within `radius` of the bot's chunk. Columns leaving
   the radius are emitted as `columnsRemoved`.
 - `ColumnBudget` (default 4) caps columns per frame so a single write stays in
@@ -542,7 +554,7 @@ or clean errors when no viewer is attached — never a hang.
 
 | Instruction | Parameters | Data | No viewer |
 | --- | --- | --- | --- |
-| `screenshot` | `{"label":"","timeoutMs":5000}` | `{"path","width","height","bytes","tick"}` | errors: `viewer: no subscriber attached` |
+| `screenshot` | `{"label":"","timeoutMs":30000}` | `{"path","width","height","bytes","tick"}` | errors: `viewer: no subscriber attached` |
 | `viewerMark` | the `mark` frame's fields | none | succeeds, does nothing |
 | `pullArtifacts` | `{}` | `{"artifacts":[Artifact]}` | succeeds, returns `[]` |
 
