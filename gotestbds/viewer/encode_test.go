@@ -1,6 +1,7 @@
 package viewer
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
@@ -400,4 +401,40 @@ func TestSectionPaletteIndexOrder(t *testing.T) {
 	}
 	check(1, 6, 2, goldIdx)
 	check(3, 7, 4, dirtIdx)
+}
+
+// TestColumnSectionsNeverNull pins the shape the consumer relies on: a nil slice
+// marshals as `null`, and a column with no sections in range (a bot standing
+// above the section window) arrived that way and threw in the viewer's store,
+// freezing it for the rest of the run.
+func TestColumnSectionsNeverNull(t *testing.T) {
+	dfworld.DefaultBlockRegistry.Finalize()
+
+	a := testActor(t, "TestBot")
+	addColumn(a.World(), dfworld.ChunkPos{0, 0})
+
+	enc := newEncoder("TestBot", 8, 0)
+	// Centre the section window far above the column's blocks so nothing is in
+	// range and the sections slice stays empty.
+	a.Move(mgl64.Vec3{8, 2000, 8}, cube.Rotation{})
+
+	event, data, err := enc.frame(a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if event != "keyframe" {
+		t.Fatalf("event=%s want keyframe", event)
+	}
+	if bytes.Contains(data, []byte(`"sections":null`)) {
+		t.Fatal("column sections encoded as null; the consumer iterates it")
+	}
+	var kf Keyframe
+	if err := json.Unmarshal(data, &kf); err != nil {
+		t.Fatal(err)
+	}
+	for _, col := range kf.Columns {
+		if col.Sections == nil {
+			t.Fatalf("column %d,%d has nil sections", col.X, col.Z)
+		}
+	}
 }

@@ -101,7 +101,10 @@ function emptyState(): WorldState {
 
 function decodeColumn(col: Column): StoredColumn {
   const sections = new Map<number, DecodedSection>();
-  for (const sec of col.sections) {
+  // Tolerate a missing array. A nil slice on the Go side once arrived as null
+  // and the throw here froze the whole viewer: no frame after it was applied,
+  // for the rest of the run.
+  for (const sec of col.sections ?? []) {
     sections.set(sec.y, {
       y: sec.y,
       indices: decodeSectionBlocks(sec.blocks),

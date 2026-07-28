@@ -409,6 +409,12 @@ func (e *encoder) encodeColumn(w *gw.World, pos dfworld.ChunkPos, col *gw.Column
 		State: col.State.String(),
 		MinY:  r[0],
 		MaxY:  r[1],
+		// Never nil: a nil slice marshals as `null`, and a column with no
+		// sections in range — a bot standing above the section window, say —
+		// then arrived as `"sections": null` and threw in the consumer
+		// ("sections is not iterable"), which froze the viewer for the rest of
+		// the run. PROTOCOL.md promises arrays are present, possibly empty.
+		Sections: []Section{},
 	}
 	subs := col.Sub()
 	for i, sub := range subs {

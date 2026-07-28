@@ -1,5 +1,8 @@
 import type { Frame } from "./protocol";
 
+/** Shortest gap between resyncs triggered by an unreadable frame. */
+const RESYNC_INTERVAL_MS = 2_000;
+
 export type StreamHandlers = {
   onFrame: (frame: Frame) => void;
   onError?: (err: Error) => void;
@@ -15,6 +18,7 @@ export class SnapshotStream {
   private readonly url: string;
   private readonly handlers: StreamHandlers;
   private closed = false;
+  private lastResyncAt = 0;
 
   constructor(url: string, handlers: StreamHandlers) {
     this.url = url;
@@ -30,6 +34,21 @@ export class SnapshotStream {
     this.closed = true;
     this.source?.close();
     this.source = null;
+  }
+
+  /**
+   * Drop the connection so the server sends a fresh keyframe.
+   *
+   * At most once every {@link RESYNC_INTERVAL_MS}.
+   */
+  private resync(): void {
+    if (this.closed) return;
+    const now = Date.now();
+    if (now - this.lastResyncAt < RESYNC_INTERVAL_MS) return;
+    this.lastResyncAt = now;
+    this.source?.close();
+    this.source = null;
+    this.connect();
   }
 
   private connect(): void {
@@ -66,6 +85,11 @@ export class SnapshotStream {
           this.handlers.onError?.(
             err instanceof Error ? err : new Error(String(err)),
           );
+          // A frame that throws leaves the world half-applied, and every frame
+          // after it builds on that. Reconnecting is the resync: the server
+          // always opens with hello + keyframe. Rate-limited so a frame the
+          // client simply cannot read does not become a reconnect loop.
+          this.resync();
         }
       });
     }
