@@ -456,11 +456,14 @@ export class Bot {
    * @throws {InstructionError} if no form opened in time.
    */
   async waitForForm(timeoutMs = 15_000): Promise<OpenForm> {
+    // Generous grace over the bot's own deadline: a bot ticking below the
+    // client rate (heavy world streaming) reports its timeout status several
+    // seconds late, and a 5s grace turned that into "no status at all".
     return runActionForData<"waitForForm", OpenForm>(
       this.player,
       "waitForForm",
       { timeoutMs },
-      { timeoutMs: timeoutMs + 5_000 },
+      { timeoutMs: timeoutMs + 15_000 },
     );
   }
 

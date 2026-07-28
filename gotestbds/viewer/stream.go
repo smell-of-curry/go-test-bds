@@ -45,7 +45,21 @@ type Stream struct {
 	// so a slow world subscriber cannot lose a line that a recording needs.
 	lastMsgSeq   uint64
 	lastTitleSeq uint64
+
+	// lastEncodeAt throttles the world projection — bot goroutine only.
+	lastEncodeAt time.Time
+	// encodeInterval is worldEncodeInterval in production; tests zero it to
+	// drive Tick faster than wall time.
+	encodeInterval time.Duration
 }
+
+// worldEncodeInterval is the minimum gap between world projections. Projecting
+// every loaded column each of the client's 20 ticks starved the bot loop below
+// the client rate (37/100 ticks in a window), which lagged packet processing —
+// and with it every instruction — behind real time until test statuses missed
+// their deadlines. The viewer interpolates entity motion and terrain changes
+// arrive as deltas, so 10 Hz is indistinguishable in the recording.
+const worldEncodeInterval = 100 * time.Millisecond
 
 // Resync reasons appear on the stream-health warning so a thrash loop names
 // itself instead of only climbing a counter on the burnt-in overlay.
@@ -307,11 +321,12 @@ func newStream(h *Hub, name string, radius, sectionRadius, columnBudget int) *St
 		columnBudget = DefaultColumnBudget
 	}
 	return &Stream{
-		hub:          h,
-		name:         name,
-		enc:          newEncoder(name, radius, sectionRadius),
-		columnBudget: columnBudget,
-		subs:         make(map[*subscriber]struct{}),
+		hub:            h,
+		name:           name,
+		enc:            newEncoder(name, radius, sectionRadius),
+		columnBudget:   columnBudget,
+		subs:           make(map[*subscriber]struct{}),
+		encodeInterval: worldEncodeInterval,
 	}
 }
 
@@ -340,6 +355,14 @@ func (s *Stream) Tick(a *actor.Actor) {
 		// whether or not a viewer is attached.
 		return
 	}
+
+	// Chat and titles stay per-tick (cheap cursor reads); the world projection
+	// is the expensive part and runs at most every encodeInterval.
+	if now := time.Now(); !s.enc.forceKey && now.Sub(s.lastEncodeAt) < s.encodeInterval {
+		s.emitHudEvents(a)
+		return
+	}
+	s.lastEncodeAt = time.Now()
 
 	cur, err := s.enc.project(a)
 	if err != nil {

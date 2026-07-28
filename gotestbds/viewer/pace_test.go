@@ -81,7 +81,7 @@ func applyStreamFrames(t *testing.T, frames []encodedFrame) *clientModel {
 // small budget and checks keyframe + columnsAdded rebuild the encoder's set.
 func TestPacedWorldReconstructsAcrossFrames(t *testing.T) {
 	const budget = 4
-	hub, err := New(Options{
+	hub, err := New(Options{EncodeEveryTick: true,
 		Address:      "127.0.0.1:0",
 		ArtifactDir:  t.TempDir(),
 		Radius:       4,
@@ -142,7 +142,7 @@ func TestPacedWorldReconstructsAcrossFrames(t *testing.T) {
 // a delta before the keyframe.
 func TestMidRunAttachGetsKeyframeThenColumns(t *testing.T) {
 	const budget = 3
-	hub, err := New(Options{
+	hub, err := New(Options{EncodeEveryTick: true,
 		Address:      "127.0.0.1:0",
 		ArtifactDir:  t.TempDir(),
 		Radius:       4,
@@ -202,7 +202,7 @@ func TestMidRunAttachGetsKeyframeThenColumns(t *testing.T) {
 // TestUnchangedColumnNotResent ensures a column that has not changed is not
 // re-encoded onto the wire after the subscriber has it.
 func TestUnchangedColumnNotResent(t *testing.T) {
-	hub, err := New(Options{
+	hub, err := New(Options{EncodeEveryTick: true,
 		Address:      "127.0.0.1:0",
 		ArtifactDir:  t.TempDir(),
 		Radius:       4,
@@ -286,7 +286,7 @@ func TestSlowSubscriberColumnDeliveryConverges(t *testing.T) {
 	// columns, so payloads grow with ticks/drainEvery — well above 3× world.
 	thrashFloor := drains * budget
 
-	hub, err := New(Options{
+	hub, err := New(Options{EncodeEveryTick: true,
 		Address:      "127.0.0.1:0",
 		ArtifactDir:  t.TempDir(),
 		Radius:       radius,
@@ -369,7 +369,7 @@ func TestSlowSubscriberColumnDeliveryConverges(t *testing.T) {
 // columns or force a keyframe restart.
 func TestSupersededCatchUpDeltaRequeuesOnlyItsColumns(t *testing.T) {
 	const budget = 4
-	hub, err := New(Options{
+	hub, err := New(Options{EncodeEveryTick: true,
 		Address:      "127.0.0.1:0",
 		ArtifactDir:  t.TempDir(),
 		Radius:       4,
@@ -414,7 +414,7 @@ func TestSupersededCatchUpDeltaRequeuesOnlyItsColumns(t *testing.T) {
 
 	a.World().SetBlock(cube.Pos{1, 70, 1}, block.Stone{})
 	edited := [2]int32{0, 0} // chunk covering {1,70,1}
-	s.Tick(a) // supersedes the unread delta
+	s.Tick(a)                // supersedes the unread delta
 
 	if sub.needsResync() {
 		t.Fatal("superseding a catch-up delta must not flag a full keyframe resync")
@@ -461,7 +461,7 @@ func TestSupersededCatchUpDeltaRequeuesOnlyItsColumns(t *testing.T) {
 // restarts from an empty sentColumns set.
 func TestSupersededKeyframeRestartsCleanly(t *testing.T) {
 	const budget = 4
-	hub, err := New(Options{
+	hub, err := New(Options{EncodeEveryTick: true,
 		Address:      "127.0.0.1:0",
 		ArtifactDir:  t.TempDir(),
 		Radius:       4,
@@ -522,7 +522,7 @@ func TestPerFramePayloadUnderBudget(t *testing.T) {
 	// for non-default sky (anything under a platform) ride every section.
 	const maxFrameBytes = 900_000
 
-	hub, err := New(Options{
+	hub, err := New(Options{EncodeEveryTick: true,
 		Address:      "127.0.0.1:0",
 		ArtifactDir:  t.TempDir(),
 		Radius:       4,

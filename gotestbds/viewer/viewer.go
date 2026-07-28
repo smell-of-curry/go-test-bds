@@ -34,6 +34,10 @@ type Options struct {
 	AppDir       string // built viewer app to serve at "/", optional
 	Assets       *assets.Manager
 	Logger       *slog.Logger
+	// EncodeEveryTick disables the world-projection throttle so tests can
+	// drive Tick faster than wall time. Production keeps the throttle: a
+	// full-rate projection starved the bot loop below the client tick rate.
+	EncodeEveryTick bool
 }
 
 // Hub is the process-wide viewer server. All bots share one Hub; streams are
@@ -131,6 +135,12 @@ func (h *Hub) Register(botName string) *Stream {
 		return s
 	}
 	s := newStream(h, botName, h.opts.Radius, h.opts.SectionRadius, h.opts.ColumnBudget)
+	if h.opts.EncodeEveryTick {
+		s.encodeInterval = 0
+		// Unlimited light per pass keeps test column deltas deterministic;
+		// production spreads light over passes to protect the tick loop.
+		s.enc.lightBudget = int(^uint(0) >> 1)
+	}
 	h.streams[botName] = s
 	h.meta[botName] = botMeta{}
 	return s

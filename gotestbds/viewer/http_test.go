@@ -34,7 +34,7 @@ func TestHTTPServesAppAssets(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	hub, err := New(Options{Address: "127.0.0.1:0", ArtifactDir: t.TempDir(), AppDir: appDir})
+	hub, err := New(Options{EncodeEveryTick: true, Address: "127.0.0.1:0", ArtifactDir: t.TempDir(), AppDir: appDir})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +72,7 @@ func TestHTTPServesAppAssets(t *testing.T) {
 // TestHTTPStreamAndArtifact covers GET /stream hello+keyframe and POST /artifact.
 func TestHTTPStreamAndArtifact(t *testing.T) {
 	dir := t.TempDir()
-	hub, err := New(Options{Address: "127.0.0.1:0", ArtifactDir: dir, Radius: 4})
+	hub, err := New(Options{EncodeEveryTick: true, Address: "127.0.0.1:0", ArtifactDir: dir, Radius: 4})
 	if err != nil {
 		t.Fatal(err)
 	}

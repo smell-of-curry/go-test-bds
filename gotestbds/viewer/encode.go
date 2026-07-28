@@ -31,6 +31,7 @@ type encoder struct {
 	botName       string
 	radius        int
 	sectionRadius int
+	lightBudget   int
 
 	blockCache map[uint32]Block
 	// colCache reuses wire columns whose world Revision has not moved. Cleared
@@ -57,7 +58,10 @@ type colCacheEntry struct {
 // operation remaps hashed palettes and runs dragonfly light propagation on the
 // bot goroutine; an unbounded pass over a freshly streamed city stalled the
 // tick loop for tens of seconds and starved instruction responses.
-const lightFillBudget = 24
+const lightFillBudget = 8
+
+// encoder.lightBudget defaults to lightFillBudget; tests raise it so light
+// lands in the first pass and column deltas stay deterministic.
 
 // viewState is the last fully projected snapshot, used to build deltas.
 type viewState struct {
@@ -84,6 +88,7 @@ func newEncoder(botName string, radius, sectionRadius int) *encoder {
 		botName:       botName,
 		radius:        radius,
 		sectionRadius: sectionRadius,
+		lightBudget:   lightFillBudget,
 		blockCache:    make(map[uint32]Block),
 		colCache:      make(map[[2]int32]colCacheEntry),
 	}
@@ -166,7 +171,7 @@ func (e *encoder) project(a *actor.Actor) (*viewState, error) {
 		// streamed columns stalled the tick loop long enough for instructions
 		// to miss their status window. Columns over budget stay dirty (and get
 		// encoded without light — bright default) until a later snapshot.
-		if lightFills < lightFillBudget && w.EnsureColumnLight(cpos) {
+		if lightFills < e.lightBudget && w.EnsureColumnLight(cpos) {
 			lightFills++
 		}
 		rev := col.Revision

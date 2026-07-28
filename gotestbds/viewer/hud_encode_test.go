@@ -58,7 +58,7 @@ func TestEncodeUICarriesTitleAndHotbar(t *testing.T) {
 }
 
 func TestChatAndTitleEventsNeverDropForWorldFrames(t *testing.T) {
-	hub, err := New(Options{Address: "127.0.0.1:0", ArtifactDir: t.TempDir()})
+	hub, err := New(Options{EncodeEveryTick: true, Address: "127.0.0.1:0", ArtifactDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,7 +115,7 @@ func TestChatAndTitleEventsNeverDropForWorldFrames(t *testing.T) {
 }
 
 func TestProtocolNoiseNeverEmittedAsChatEvent(t *testing.T) {
-	hub, err := New(Options{Address: "127.0.0.1:0", ArtifactDir: t.TempDir()})
+	hub, err := New(Options{EncodeEveryTick: true, Address: "127.0.0.1:0", ArtifactDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
 	}

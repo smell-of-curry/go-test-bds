@@ -13,7 +13,7 @@ import (
 // frame is kept, and superseding catch-up deltas must not force another
 // keyframe (that restart is what thrashed remeshing under load).
 func TestSlowSubscriberKeepsLatestWorldWithoutKeyframeRestart(t *testing.T) {
-	hub, err := New(Options{Address: "127.0.0.1:0", ArtifactDir: t.TempDir()})
+	hub, err := New(Options{EncodeEveryTick: true, Address: "127.0.0.1:0", ArtifactDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +71,7 @@ func TestSlowSubscriberKeepsLatestWorldWithoutKeyframeRestart(t *testing.T) {
 // mark or capture cannot be repaired by a later keyframe, so a subscriber that
 // is behind on world frames must still receive every event, in order.
 func TestEventsAreNeverDroppedForWorldFrames(t *testing.T) {
-	hub, err := New(Options{Address: "127.0.0.1:0", ArtifactDir: t.TempDir()})
+	hub, err := New(Options{EncodeEveryTick: true, Address: "127.0.0.1:0", ArtifactDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,7 +130,7 @@ func TestEventQueueCapDiscardsOldest(t *testing.T) {
 // pushWorld would drop that delta to keep the keyframe, silently losing its
 // in-place block patches. The client's one keyframe must carry the new block.
 func TestUnsentKeyframeIsRegeneratedWithFreshBlocks(t *testing.T) {
-	hub, err := New(Options{Address: "127.0.0.1:0", ArtifactDir: t.TempDir()})
+	hub, err := New(Options{EncodeEveryTick: true, Address: "127.0.0.1:0", ArtifactDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
 	}
