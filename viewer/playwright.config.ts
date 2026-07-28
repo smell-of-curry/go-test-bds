@@ -19,7 +19,23 @@ export default defineConfig({
   },
   projects: [
     {
+      name: "smoke",
+      testMatch: /smoke\.spec\.ts/,
+      use: { browserName: "chromium" },
+    },
+    {
+      name: "terrain",
+      testMatch: /terrain\.spec\.ts/,
+      use: { browserName: "chromium" },
+    },
+    {
+      name: "golden",
+      testMatch: /golden\.spec\.ts/,
+      use: { browserName: "chromium" },
+    },
+    {
       name: "chromium",
+      testIgnore: [/smoke\.spec\.ts/, /terrain\.spec\.ts/, /golden\.spec\.ts/],
       use: { browserName: "chromium" },
     },
   ],

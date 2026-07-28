@@ -37,12 +37,14 @@ Stages 5, 6 and 8 are shipped too, and the viewer now renders the real server
 world with the server's own pack textures during a live run — including custom
 palette blocks (`material_instances` → textured cubes; full custom geometry is
 stage 7's parser wired in). Stage 9's Molang interpreter and stage 7's geometry
-parser exist as libraries; nothing draws an entity with them yet. Stage 11's
-form panel is done. Stages 7, 10 and 12, and the rest of 9 and 11, are not
-started — every box below says which. Capture presentation is deliberate now: a
-loading screen (not accidental placeholder cubes) until the atlas settles,
-stills gated on asset readiness, and a flat sky-blue clear until stage 10 builds
-a real sky.
+parser exist as libraries. Stage 7 now also draws textured entity models from
+client entity defs + render controllers (bone hierarchy, alphatest skins, Steve
+for players); wireframe boxes remain the fallback. Stage 11's form panel is
+done. Stage 12's golden suite + `viewer-golden` workflow are in; vanilla-baseline
+bump wiring is still open. Stages 10 and the rest of 7/9/11 are not started —
+every box below says which. Capture presentation is deliberate now: a loading
+screen (not accidental placeholder cubes) until the atlas settles, stills gated
+on asset readiness, and a flat sky-blue clear until stage 10 builds a real sky.
 
 Getting the picture right cost a run of bugs worth naming, because each was
 invisible from outside and each looked like a different problem:
@@ -395,11 +397,13 @@ path-traversal coverage. Endpoints documented in [`PROTOCOL.md`](PROTOCOL.md).
 - [x] Implement liquids: surface geometry, flow direction from state, animated
       texture, and the layer-1 waterlogging the world already tracks through
       `World.Liquid`.
-- [ ] Implement biome tinting for grass, foliage and water. This needs biome
-      data the world does not currently expose; add it to the chunk decode and
-      to the snapshot. **The renderer's half is done** — tinting runs through a
-      `biomeAt` lookup and degrades to untinted — so this is waiting on the Go
-      side to carry biome ids per column.
+- [ ] Implement biome tinting for grass, foliage and water. **Go half landed
+      (Stage 10a):** request-mode `LevelChunk` biomes decode via dragonfly
+      `NetworkDecodeBuffer(..., 0, ...)`, and complete columns export a 16×16
+      surface `biomePalette` + `biomes` on the snapshot (see `PROTOCOL.md`).
+      **The renderer's half is done** — tinting runs through a `biomeAt`
+      lookup and degrades to untinted — wire the new column fields into that
+      lookup to finish.
 - [ ] Render block entities that the client draws with dedicated geometry rather
       than from the atlas: chests, signs, banners, beds, skulls. The NBT already
       arrives through `BlockActorDataHandler`. Non-cube shapes (slabs, stairs,
@@ -421,29 +425,36 @@ and it skips itself when those packs are absent.
 
 ## Stage 7 — entities
 
-- [ ] Parse `.geo.json` geometry: bone hierarchy, pivots, cube inflation,
+- [x] Parse `.geo.json` geometry: bone hierarchy, pivots, cube inflation,
       per-face UVs, mesh (poly) elements, and the coordinate conversion between
-      Bedrock and the renderer's handedness.
-- [ ] Parse client entity definitions: geometry, texture, material and animation
-      short-name tables.
-- [ ] Implement render controllers. Resolve `geometry`, `textures`, `materials`
+      Bedrock and the renderer's handedness. _(library: `viewer/src/geometry/`)_
+- [x] Parse client entity definitions: geometry, texture, material and animation
+      short-name tables. _( `viewer/src/entity/` — materials/animations stored;
+      geometry+texture drive the renderer)_
+- [x] Implement render controllers. Resolve `geometry`, `textures`, `materials`
       and `part_visibility`, including `arrays` indexed by Molang expressions and
       the `color` / `overlay_color` / `on_fire_color` / `is_hurt_color` fields.
       This needs the Molang interpreter, so land a constant-expression subset
       here and revisit.
+      _(subset landed: geometry / textures / part_visibility / arrays+Molang;
+      color overlays not yet)_
 - [ ] Implement the material layer: alpha test versus blend, backface culling,
       emissive materials, and the tinting a controller applies. The vanilla
       material definitions are not in `bedrock-samples`, so the mapping from
       material name to render state has to be established empirically and
       documented per material.
-- [ ] Render players: skin geometry from the wire, slim versus classic arms,
+      _(alphatest cutout ~0.5 only for now)_
+- [x] Render players: skin geometry from the wire, slim versus classic arms,
       cape, and the metadata-driven pose set (sneaking, swimming, crawling,
       gliding, sleeping, riding).
+      _(basic: `geometry.humanoid.custom` + Steve texture; wire carries no skin —
+      documented gap; no slim/cape/pose set yet)_
 - [ ] Render armour and held items using the vanilla layer geometry and the
       equipment state the world already tracks.
 - [ ] Render dropped items and item frames, including the flat-item geometry the
       client generates from a sprite.
 - [ ] Render name tags with the client's font, ordering and occlusion rules.
+      _(DOM labels kept as interim)_
 
 **Check:** golden images per entity type at fixed camera and pose, and unit
 tests for the geometry parser against fixture `.geo.json` files covering nested
@@ -468,31 +479,30 @@ ever seeing a behaviour pack.
       `TestPaletteWinsOverBlocksJSON`)
 - [x] Resolve the geometry and texture names the palette references against the
       resource pack stack from stage 5. The palette says what to draw with; the
-      pack holds the thing itself. *(renderer: `material_instances` →
+      pack holds the thing itself. _(renderer: `material_instances` →
       `terrain_texture.json` atlas; pack `blocks.json` textures win when present,
       palette covers the rest; `createTexturedMesher({ registries })` /
-      `applyRegistries`)*
+      `applyRegistries`)_
 - [ ] Support custom block geometry with per-instance materials, including
-      `render_method`, face-dimming and ambient-occlusion flags. *(renderer —
-      `render_method` → cutout/opaque on the **cube** path is done; full geometry
-      + face-dimming/AO still open; cube approx + ponytail in `resolve.ts`)*
+      `render_method`, face-dimming and ambient-occlusion flags. _(renderer —
+      `render_method` → cutout/opaque on the **cube** path is done; full geometry + face-dimming/AO still open; cube approx + ponytail in `resolve.ts`)_
 - [ ] Support permutations: evaluate permutation conditions against the state
       properties carried in the snapshot and select the resulting components.
-      *(renderer; conditions + components are on the wire)*
+      _(renderer; conditions + components are on the wire)_
 - [ ] Support transformation components (rotation, scale, translation), bone
       visibility, and `minecraft:light_emission` where it affects appearance.
-      *(renderer; decoded on the wire)*
+      _(renderer; decoded on the wire)_
 - [x] Read custom item components from `packet.ItemRegistry`, whose entries carry
       them for exactly the same reason, and resolve item icons through the pack
-      stack's `item_texture.json`. *(decode + icon short-name on wire; pack
-      resolve is renderer)*
+      stack's `item_texture.json`. _(decode + icon short-name on wire; pack
+      resolve is renderer)_
 - [x] Read entity property definitions from `packet.SyncActorProperty` so
       `query.property` has something to resolve against.
 - [x] Establish the fallback chain for a block the palette and pack stack cannot
       resolve: named-but-unknown, unnamed-but-present, and absent, each visually
       distinct so a missing asset is never silently a solid grey cube.
-      *(classification + PROTOCOL; renderer: magenta `__missing__` = unnamed /
-      load bug; stone-grey `__neutral__` = named gap / palette without materials)*
+      _(classification + PROTOCOL; renderer: magenta `__missing__` = unnamed /
+      load bug; stone-grey `__neutral__` = named gap / palette without materials)_
 
 **Check (Go):** fixture join sequence under `gotestbds/wire/testdata` — custom
 block resolves geometry and materials from palette NBT alone; no behaviour pack
@@ -515,9 +525,9 @@ asserted. Renderer pack resolution remains for later stage boxes.
       than silently wrong. Trig is in degrees and out-of-range array indices wrap;
       both verified against the documentation, not assumed.
 - [x] Extend the snapshot with everything those queries need, including entity
-      properties, which the world does not currently decode. *(entity `props`,
+      properties, which the world does not currently decode. _(entity `props`,
       flags and attributes ride the snapshot; property **definitions** come from
-      `packet.SyncActorProperty` in stage 8)*
+      `packet.SyncActorProperty` in stage 8)_
 - [ ] Implement animation playback: bone keyframes, interpolation modes,
       `anim_time_update`, looping, and Molang-valued channels.
 - [ ] Implement animation controllers: states, transitions with Molang
@@ -539,14 +549,15 @@ series.
 
 ## Stage 10 — lighting and environment
 
-- [ ] ~~Decode and store sky and block light from the chunk payload; the world
+- [x] ~~Decode and store sky and block light from the chunk payload; the world
       currently discards it.~~ **Wrong premise, corrected.** Bedrock does not send
       light at all — the client computes it, which is why nothing in the chunk
       decode touches it. Fill it locally instead: dragonfly already implements the
-      propagation (`chunk.LightArea(...).Fill()`), so a column completing runs a
-      fill and the snapshot carries the result per section. Reimplementing
-      propagation in the browser would be a great deal of code for something
-      already sitting in a dependency.
+      propagation (`chunk.LightArea(...).Fill()` + `Spread()`), so a column
+      completing runs a fill and the snapshot carries the result per section
+      (`skyLight` / `blockLight`, with all-15 / all-0 omission defaults). **Go
+      half landed (Stage 10a).** Reimplementing propagation in the browser would
+      be a great deal of code for something already sitting in a dependency.
 - [ ] Implement the client's lighting model: per-face shading, smooth lighting,
       ambient occlusion, and light propagation on block change. Until this lands,
       terrain renders **unlit at authored brightness** — deliberately, so a flat
@@ -591,9 +602,12 @@ series.
 
 ## Stage 12 — visual regression in CI
 
-- [ ] Add the golden-image suites to CI with a tolerance that survives driver
+- [x] Add the golden-image suites to CI with a tolerance that survives driver
       differences, and a documented procedure for reviewing and accepting
       intentional visual changes.
+      (`viewer/tests/golden.spec.ts` + `goldenCompare.ts`; thresholds Δ8 /
+      0.5% pixels; `GOLDEN_UPDATE=1` accept; `GOLDEN_SOFT=1` local escape;
+      workflow `.github/workflows/viewer-golden.yml`.)
 - [ ] Wire the vanilla-baseline bump PRs into the same suites, so a Mojang asset
       change arrives as a reviewable image diff rather than a surprise.
 
