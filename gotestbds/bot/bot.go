@@ -67,25 +67,48 @@ func (b *Bot) Close() error {
 }
 
 // StartTickLoop starts handling loop.
+//
+// The tick is what makes the bot a client: physics, navigation and every timeout
+// expressed in ticks run off it. A due tick is therefore taken before anything
+// else — `select` picks at random between ready cases, and `time.Ticker` drops
+// ticks rather than queueing them, so a busy packet queue would otherwise cost
+// simulated time with nothing to show it happened.
 func (b *Bot) StartTickLoop() {
-	ticker := time.NewTicker(time.Second / 20)
+	ticker := time.NewTicker(tickInterval)
+	defer ticker.Stop()
 
 	defer b.conn.Close()
 	defer b.a.Close()
 
 	go b.handlePackets()
 
+	var health tickHealth
 	for {
+		health.report(b.logger, time.Now())
+
 		select {
 		case <-b.closed:
 			return
 		case <-ticker.C:
 			b.a.Tick()
+			health.tick()
+			continue
+		default:
+		}
+
+		select {
+		case <-b.closed:
+			return
+		case <-ticker.C:
+			b.a.Tick()
+			health.tick()
 		case t := <-b.tasks:
 			t.fn(b.a)
 			close(t.done)
 		case pk := <-b.packets:
+			start := time.Now()
 			b.HandlePacket(pk)
+			health.packet(pk, time.Since(start))
 		}
 	}
 }
