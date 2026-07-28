@@ -34,10 +34,15 @@ asks the dev-server manager for capture, and each run publishes its stills and
 run video as the `addon-test-viewer` workflow artefact.
 
 Stages 5, 6 and 8 are shipped too, and the viewer now renders the real server
-world with the server's own pack textures during a live run. Stage 9's Molang
-interpreter and stage 7's geometry parser exist as libraries; nothing draws an
-entity with them yet. Stage 11's form panel is done. Stages 7, 10 and 12, and the
-rest of 9 and 11, are not started — every box below says which.
+world with the server's own pack textures during a live run — including custom
+palette blocks (`material_instances` → textured cubes; full custom geometry is
+stage 7's parser wired in). Stage 9's Molang interpreter and stage 7's geometry
+parser exist as libraries; nothing draws an entity with them yet. Stage 11's
+form panel is done. Stages 7, 10 and 12, and the rest of 9 and 11, are not
+started — every box below says which. Capture presentation is deliberate now: a
+loading screen (not accidental placeholder cubes) until the atlas settles,
+stills gated on asset readiness, and a flat sky-blue clear until stage 10 builds
+a real sky.
 
 Getting the picture right cost a run of bugs worth naming, because each was
 invisible from outside and each looked like a different problem:
@@ -52,6 +57,11 @@ invisible from outside and each looked like a different problem:
   vanilla's textures.
 - Vanilla keys blocks bare while the wire namespaces them, so 4 identifiers out of
   1231 resolved and the whole world drew as the missing-texture fallback.
+- Superseding a paced catch-up delta flagged a full keyframe restart, which wiped
+  the client's valid columns and re-dirtied every section — the remesh storm made
+  the client slower, causing the next supersede. A still burnt in the result:
+  `columns 4`, `resync 70`. A supersede now re-queues only the lost columns, and
+  an unsent keyframe is regenerated fresh instead of dropping deltas against it.
 
 The lesson that generalises: **judge a capture by decoding it.** Every one of those
 was found by pulling frames out of a recording and reading the burnt-in overlay,
