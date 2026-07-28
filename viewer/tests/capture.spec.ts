@@ -22,6 +22,11 @@ const here = dirname(fileURLToPath(import.meta.url));
 const viewerRoot = join(here, "..");
 const cliPath = join(viewerRoot, "dist-capture", "cli.cjs");
 
+// Serial: both tests bundle the CLI to the same path and run their own Chromium.
+// In parallel, one esbuild write truncates the file the other is executing, and
+// the harness dies on startup with nothing to say for itself.
+test.describe.configure({ mode: "serial" });
+
 interface UploadedArtifact {
   kind: string;
   ext: string;
@@ -496,6 +501,7 @@ test("capture harness: --video-out writes a whole webm", async () => {
     bot.stream.broadcast(mark("runStart", { runId: "run-cap" }));
     bot.stream.broadcast(delta(110));
     bot.stream.broadcast(delta(120));
+
     bot.stream.broadcast(
       mark("runEnd", { runId: "run-cap", status: "passed", tick: 120 }),
     );
@@ -511,6 +517,50 @@ test("capture harness: --video-out writes a whole webm", async () => {
     expect(head).toBe("1a45dfa3");
     expect(stderr).not.toContain("video upload failed");
     expect(bot.artifacts.filter((a) => a.kind === "video")).toHaveLength(0);
+  } finally {
+    child?.kill();
+    await bot.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// The runner ends a harness with SIGTERM, and that is where the recording used
+// to be lost: Playwright's own signal handling closed the browser before the
+// video could be finalised. Windows has no signals � `kill` terminates the
+// process outright � so this can only be checked where it actually happens.
+test("capture harness: SIGTERM still writes the run video", async () => {
+  test.skip(process.platform === "win32", "signals are not real on Windows");
+  await buildCaptureCli();
+
+  const bot = await startFakeBot();
+  const dir = mkdtempSync(join(tmpdir(), "gotestbds-sigterm-"));
+  const videoOut = join(dir, "run.webm");
+  let child: ChildProcessWithoutNullStreams | undefined;
+  try {
+    child = spawnHarness(bot.url, videoOut);
+    const exited = new Promise<{ code: number | null; signal: string | null }>(
+      (resolve, reject) => {
+        child!.on("error", reject);
+        child!.on("exit", (code, signal) => resolve({ code, signal }));
+      },
+    );
+    let out = "";
+    child.stdout.on("data", (c: Buffer) => (out += c.toString()));
+    child.stderr.on("data", (c: Buffer) => (out += c.toString()));
+
+    await waitFor(() => bot.stream.attached >= 2);
+    bot.stream.broadcast(mark("runStart", { runId: "run-cap" }));
+    bot.stream.broadcast(delta(110));
+    child.kill("SIGTERM");
+
+    const ended = await exited;
+    expect(ended.signal, out).toBeNull();
+    expect(ended.code, out).toBe(0);
+    expect(out).toContain("SIGTERM received");
+    expect(statSync(videoOut).size).toBeGreaterThan(1_000);
+    expect(readFileSync(videoOut).subarray(0, 4).toString("hex")).toBe(
+      "1a45dfa3",
+    );
   } finally {
     child?.kill();
     await bot.close();

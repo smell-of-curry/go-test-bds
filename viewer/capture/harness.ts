@@ -35,6 +35,39 @@ interface MarkState {
   test?: string;
 }
 
+/** Set once the run has something to close; null before and after. */
+let shutdownHandler: (() => void) | null = null;
+/** True when a shutdown was asked for before there was anything to close. */
+let shutdownPending = false;
+
+/**
+ * Register (or clear) what a shutdown request should close.
+ *
+ * @param handler Closes the stream so the run unwinds normally, or null to clear.
+ */
+function setShutdownHandler(handler: (() => void) | null): void {
+  shutdownHandler = handler;
+  if (handler && shutdownPending) {
+    shutdownPending = false;
+    handler();
+  }
+}
+
+/**
+ * Ask the harness to finish: close the stream, write the video, exit.
+ *
+ * Safe before the browser is up — the request is remembered and applied as soon
+ * as there is a stream to close. The CLI calls this from its signal handlers, so
+ * a terminated run still produces its recording.
+ */
+export function requestHarnessShutdown(): void {
+  if (shutdownHandler) {
+    shutdownHandler();
+    return;
+  }
+  shutdownPending = true;
+}
+
 interface CaptureFrame {
   type: "capture";
   id: string;
@@ -94,6 +127,13 @@ export async function runHarness(opts: HarnessOptions): Promise<void> {
     executablePath: opts.browserPath,
     headless: true,
     args: GL_ARGS,
+    // Playwright closes the browser itself on these signals by default, which
+    // races the shutdown that writes the run video: the runner sends SIGTERM,
+    // the browser goes away, and saving the recording fails with "browser has
+    // been closed". This process owns its own shutdown instead.
+    handleSIGTERM: false,
+    handleSIGINT: false,
+    handleSIGHUP: false,
   });
 
   // Follow camera is the capture default so the bot body and its surroundings
@@ -270,16 +310,12 @@ export async function runHarness(opts: HarnessOptions): Promise<void> {
   }, opts.maxSegmentSeconds * 1000);
   if (typeof capTimer.unref === "function") capTimer.unref();
 
-  // The runner kills this process once the bot exits, and a signal does not run
-  // the finally below — which is where the video is written. Close the stream
-  // instead and let the normal path finish, so a terminated run still produces
-  // its recording.
-  const stopOnSignal = (signal: NodeJS.Signals): void => {
-    log.info(`capture: ${signal} received; finishing the run video`);
-    sse.close();
-  };
-  process.once("SIGTERM", stopOnSignal);
-  process.once("SIGINT", stopOnSignal);
+  // The runner kills this process once the bot exits, and the signal handler is
+  // registered by the CLI before anything else exists, because a signal that
+  // arrives while the browser is still starting must not kill the process
+  // outright — that loses the recording. Hand it the stream to close and let the
+  // normal path unwind and write the video.
+  setShutdownHandler(() => sse.close());
 
   try {
     await stillsPage.goto(appUrl, { waitUntil: "domcontentloaded" });
@@ -334,8 +370,7 @@ export async function runHarness(opts: HarnessOptions): Promise<void> {
     log.info("capture: stream closed");
   } finally {
     clearTimeout(capTimer);
-    process.removeListener("SIGTERM", stopOnSignal);
-    process.removeListener("SIGINT", stopOnSignal);
+    setShutdownHandler(null);
     await safe(log, async () => {
       await uploadRunVideo("run");
     });

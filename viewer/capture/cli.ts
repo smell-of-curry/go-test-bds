@@ -1,5 +1,10 @@
 import { existsSync } from "node:fs";
-import { runHarness, type HarnessOptions, type LogLevel } from "./harness";
+import {
+  requestHarnessShutdown,
+  runHarness,
+  type HarnessOptions,
+  type LogLevel,
+} from "./harness";
 
 const HELP = `Usage: node viewer/dist-capture/cli.cjs --stream <url> --bot <name> [options]
 
@@ -169,6 +174,16 @@ async function main(): Promise<void> {
     logLevel: parsed.options.logLevel ?? "info",
     ...(parsed.options.videoOut ? { videoOut: parsed.options.videoOut } : {}),
   };
+
+  // Registered before the harness starts: the runner can terminate this process
+  // at any point, and without a listener the default action kills it outright,
+  // which loses the recording. With one, shutdown always runs the normal path.
+  for (const signal of ["SIGTERM", "SIGINT"] as const) {
+    process.on(signal, () => {
+      console.warn(`capture: ${signal} received; finishing the run video`);
+      requestHarnessShutdown();
+    });
+  }
 
   try {
     await runHarness(opts);
