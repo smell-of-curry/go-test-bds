@@ -4,6 +4,7 @@ import type { Overlay } from "./overlay";
 import { columnKey, sectionIndex } from "./protocol";
 import type { ViewerScene } from "./scene";
 import type { Store } from "./store";
+import type { HudHandle } from "./ui";
 
 /** Exact shape exposed on `window.__viewer` for Playwright / the capture harness. */
 export interface ViewerHandle {
@@ -24,6 +25,10 @@ export interface ViewerHandle {
   readonly cameraMode: CameraMode;
   /** Burnt-in caption band text (suite · test · elapsed · status / message). */
   readonly captionText: string;
+  /** Player HUD chat lines currently in the DOM. */
+  readonly hudChatCount: number;
+  /** Active block-break particle bursts. */
+  readonly hudBurstCount: number;
   /** True once the remesh queue is empty after the latest frames. */
   settled: boolean;
   /**
@@ -94,8 +99,9 @@ declare global {
  * @param getSettled - Returns whether the remesh queue is empty.
  * @param camera - Live camera (for `diag` / mode).
  * @param getStreamError - Latest EventSource/parse error from the stream layer.
- * @param overlay - Caption / HUD (for `captionText`).
+ * @param overlay - Caption / forms panel (for `captionText`).
  * @param getAssetsSettled - True once atlas load succeeded or failed.
+ * @param hud - Player HUD (chat / hotbar) for test counters.
  */
 export function installViewerHandle(
   store: Store,
@@ -105,6 +111,7 @@ export function installViewerHandle(
   getStreamError: () => string = () => "",
   overlay?: Overlay,
   getAssetsSettled: () => boolean = () => true,
+  hud?: HudHandle,
 ): void {
   window.__viewerInternals = { store, scene, camera, THREE };
   window.__viewer = {
@@ -149,6 +156,12 @@ export function installViewerHandle(
     },
     get captionText() {
       return overlay?.captionText ?? "";
+    },
+    get hudChatCount() {
+      return hud?.chatCount ?? 0;
+    },
+    get hudBurstCount() {
+      return hud?.burstCount ?? 0;
     },
     get settled() {
       return getSettled();

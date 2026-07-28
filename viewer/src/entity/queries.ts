@@ -75,6 +75,16 @@ export function createEntityMolangHost(
       is_alive: 1,
       is_spectator: 0,
       has_cape: 0,
+      // Stage 9: overwritten each frame by EntityAnimator.
+      anim_time: 0,
+      delta_time: 0,
+      life_time: 0,
+      modified_distance_moved: 0,
+      modified_move_speed: 0,
+      ground_speed: 0,
+      vertical_speed: 0,
+      all_animations_finished: 0,
+      any_animation_finished: 0,
     },
   });
 }

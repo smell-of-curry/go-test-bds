@@ -36,15 +36,18 @@ run video as the `addon-test-viewer` workflow artefact.
 Stages 5, 6 and 8 are shipped too, and the viewer now renders the real server
 world with the server's own pack textures during a live run — including custom
 palette blocks (`material_instances` → textured cubes; full custom geometry is
-stage 7's parser wired in). Stage 9's Molang interpreter and stage 7's geometry
-parser exist as libraries. Stage 7 now also draws textured entity models from
-client entity defs + render controllers (bone hierarchy, alphatest skins, Steve
-for players); wireframe boxes remain the fallback. Stage 11's form panel is
-done. Stage 12's golden suite + `viewer-golden` workflow are in; vanilla-baseline
-bump wiring is still open. Stages 10 and the rest of 7/9/11 are not started —
-every box below says which. Capture presentation is deliberate now: a loading
-screen (not accidental placeholder cubes) until the atlas settles, stills gated
-on asset readiness, and a flat sky-blue clear until stage 10 builds a real sky.
+stage 7's parser wired in). Stage 7 draws textured entity models from client
+entity defs + render controllers; Stage 9 plays animations/controllers/scripts
+on those bones (`EntityAnimator`) and applies motion-lerped poses. Stage 11's
+form panel and player HUD DOM (chat/title/hotbar/health + break bursts) are
+done; JSON UI / font atlas / full particles remain open. Stage 12's golden
+suite + `viewer-golden` workflow are in;
+vanilla-baseline bump wiring is still open. Stage 10a (Go light fill + biome
+export) and 10b (viewer lighting, biome tint, gradient sky + distance fog) are
+in; time-of-day / weather / fog JSON remain open. Attachables and the rest of
+7/11 still have open boxes below. Capture presentation is deliberate: a loading
+screen until the atlas settles, stills gated on asset readiness, then the
+gradient sky once the world shows.
 
 Getting the picture right cost a run of bugs worth naming, because each was
 invisible from outside and each looked like a different problem:
@@ -528,22 +531,32 @@ asserted. Renderer pack resolution remains for later stage boxes.
       properties, which the world does not currently decode. _(entity `props`,
       flags and attributes ride the snapshot; property **definitions** come from
       `packet.SyncActorProperty` in stage 8)_
-- [ ] Implement animation playback: bone keyframes, interpolation modes,
+- [x] Implement animation playback: bone keyframes, interpolation modes,
       `anim_time_update`, looping, and Molang-valued channels.
-- [ ] Implement animation controllers: states, transitions with Molang
+      (`viewer/src/entity/parseAnimation.ts`, `animation.ts` — linear +
+      catmullrom per actor_animation 1.8.0 schema; older bedrock.dev text that
+      claimed "only linear" is outdated. `loop` / `hold_on_last_frame` / stop.)
+- [x] Implement animation controllers: states, transitions with Molang
       conditions, blend transitions, and per-state animation weights.
-- [ ] Implement the client-side animation entrypoints from the entity
+      (`parseAnimController.ts`, `controllerRuntime.ts` — one transition/frame,
+      `blend_transition` on the leaving state.)
+- [x] Implement the client-side animation entrypoints from the entity
       definition's `scripts` block — `animate`, `pre_animation`,
       `initialize`, and variable assignment ordering.
-- [ ] Implement attachables for held and worn items, including their own
-      geometry, animations and bone binding.
-- [ ] Handle interpolation of networked motion: the client smooths between
+- [ ] ~~Implement attachables for held and worn items, including their own
+      geometry, animations and bone binding.~~ **Punted** with Stage 7 item work
+      (armour / held items / attachables).
+- [x] Handle interpolation of networked motion: the client smooths between
       `MoveActorAbsolute` updates rather than snapping, and matching that is
-      most of what makes motion look right.
+      most of what makes motion look right. _(already in `viewer/src/motion.ts`
+      `MotionLerp` — inter-arrival span clamped ~16–250 ms ≈ 1–5 ticks; scene
+      `upsertEntity` no longer snaps pose on sync; `tickEntities` applies lerped
+      samples + bone animation. Particle / sound keyframes from animations also
+      **punted**.)_
 
 **Check:** evaluate fixture animations at fixed times and assert bone transforms
 against recorded values; assert controller state sequences for a scripted input
-series.
+series. ✓ `tests/entity.animation.spec.ts`
 
 ---
 
@@ -558,20 +571,29 @@ series.
       (`skyLight` / `blockLight`, with all-15 / all-0 omission defaults). **Go
       half landed (Stage 10a).** Reimplementing propagation in the browser would
       be a great deal of code for something already sitting in a dependency.
-- [ ] Implement the client's lighting model: per-face shading, smooth lighting,
-      ambient occlusion, and light propagation on block change. Until this lands,
-      terrain renders **unlit at authored brightness** — deliberately, so a flat
-      frame reads as "no lighting yet" rather than as a lighting bug.
+- [x] Implement the client's lighting model: per-face shading, smooth lighting,
+      ambient occlusion. **Viewer half landed (Stage 10b):** samples light at the
+      face-neighbour cell (smooth: average 4 corner-adjacent cells + classic AO),
+      brightness curve `L/(4−3L)` with `L=level/15`, face shade
+      up/down/N-S/E-W = 1.0/0.5/0.8/0.6, baked into `vertColor`. Smooth lighting
+      flag defaults ON (skips greedy merge when on). Light on block change arrives
+      as re-encoded `columnsAdded` sections (Go refill) — store decode remeshes.
+- [x] Wire column `biomePalette` + `biomes` into the existing `biomeAt` / tint
+      path (`plains` → `minecraft:plains`; numeric ids → untinted fallback).
 - [ ] Implement the sky: time of day, sun and moon, star field, clouds, and the
-      horizon gradient per dimension.
+      horizon gradient per dimension. **Partial (10b):** gradient sky dome
+      (zenith deeper blue, horizon lighter) + `THREE.Fog` tuned to stream radius.
+      Time-of-day / sun / moon / stars / clouds **punted**.
 - [ ] Implement fog from client biome definitions and `fog` JSON, including
-      distance fog, water fog and the dimension defaults.
-- [ ] Implement weather: rain, snow, and their effect on lighting.
+      distance fog, water fog and the dimension defaults. **Partial (10b):**
+      basic distance fog only (horizon colour, near/far from chunk radius).
+- [ ] Implement weather: rain, snow, and their effect on lighting. **Punted.**
 - [ ] Implement camera state: field of view and its modifiers, view bobbing,
       third-person offsets, and the camera instruction packets a server can send
       to override any of it.
 
-**Check:** golden images at fixed times of day and weather states.
+**Check:** golden images at fixed times of day and weather states. Stage 12
+goldens regenerated after 10b shading/sky landed.
 
 ---
 
@@ -579,11 +601,18 @@ series.
 
 - [ ] Implement the particle system from particle JSON: emitters, curves, and
       the Molang-driven components, matching the documented component set.
-- [ ] Render server-triggered effects: block break particles, damage flash,
-      death animation, and the effects carried by `packet.ActorEvent` and
-      `packet.LevelEvent`.
-- [ ] Render the heads-up display: hotbar, health, hunger, experience, effect
-      icons, and the action bar and title text the bot already receives.
+- [~] Render server-triggered effects: block-break particle bursts (simple
+      THREE.Points, gray) trigger off delta `blocks` / highlight dirty cells.
+      Damage flash, death animation, `packet.ActorEvent` and `packet.LevelEvent`
+      decoding are punted — recordings only needed the break burst.
+- [x] Render the heads-up display as a plain DOM overlay (`viewer/src/ui/hud.ts`):
+      chat (last ~8 lines, `§` colour codes, fade after ~10s), title/subtitle +
+      action bar (fadeIn/stay/fadeOut from SetTitle ticks), hotbar (short-name
+      text + count + selected slot), health/hunger when the actor carries them.
+      Wire: actor already had hotbar/health/food; UI now fills title fields;
+      event-lane `chat`/`title` frames never drop. Boss bar punted. Item icons
+      punted (no atlas). Protocol noise (`[RUN_ACTION]`/`[STATUS]`/`[GOTESTBDS]`)
+      filtered on the Go side.
 - [x] Render forms and containers. The bot tracks open forms, containers, signs
       and NPC dialogues; drawing them is what makes a recording of a test show
       what the player would have seen at the moment of failure. Drawn as a plain
@@ -591,12 +620,18 @@ series.
       name and slot count — which is the half that matters for a recording. JSON
       UI and the font atlas are the boxes below, and are untouched.
 - [ ] Implement JSON UI to the extent the HUD and forms require, driven by the
-      pack stack so a server's custom UI appears.
+      pack stack so a server's custom UI appears. **Punt for recordings:** the
+      DOM approximation (forms panel + `#player-hud`) is the deliberate scope —
+      JSON UI is a fidelity goal, not what capture needs to read as gameplay.
 - [ ] Render text with the client's font atlas, including glyph pages, format
       codes and the custom glyph sheets packs ship. The vanilla atlas is not in
       `bedrock-samples`, so this stage owns the answer to where it comes from.
+      **Punt for recordings:** `§` codes → coloured DOM spans is enough; the
+      font atlas is the same fidelity track as JSON UI above.
 
-**Check:** golden images for each UI surface against recorded state.
+**Check:** golden images for each UI surface against recorded state. (HUD
+covered by Playwright DOM asserts in `viewer/tests/hud.spec.ts` until goldens
+exist for these surfaces.)
 
 ---
 

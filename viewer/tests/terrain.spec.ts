@@ -24,6 +24,11 @@ import {
   diagnosePaletteCoverage,
   facesFromMaterialInstances,
   renderClassFromMethod,
+  lightBrightness,
+  combinedLight,
+  aoFactor,
+  encodeSectionLight,
+  normalizeBiomeId,
 } from "../src/terrain";
 import { BlockModelResolver } from "../src/terrain/resolve";
 import {
@@ -33,6 +38,11 @@ import {
   startTerrainAssetServer,
 } from "./terrainAssetServer";
 import type { Block, Registries } from "../src/protocol";
+import {
+  biomeIndex,
+  decodeSectionLight,
+  sectionIndex as protoSectionIndex,
+} from "../src/protocol";
 import { Store } from "../src/store";
 import type { Color } from "three";
 
@@ -41,6 +51,144 @@ const viewerRoot = join(here, "..");
 const registriesFixture = JSON.parse(
   readFileSync(join(viewerRoot, "testdata", "registries-fixture.json"), "utf8"),
 ) as Registries;
+
+test.describe("terrain light / biome decode (node)", () => {
+  test("nibble light: even index low nibble, odd high; omission defaults", () => {
+    const levels = new Uint8Array(4096);
+    // Indices 0 and 1 share byte 0 (low / high nibble).
+    levels[0] = 1;
+    levels[1] = 10;
+    levels[2] = 15;
+    levels[3] = 0;
+    levels[protoSectionIndex(2, 3, 4)] = 7;
+    const b64 = encodeSectionLight(levels);
+    const decoded = decodeSectionLight(b64, 0);
+    expect(decoded[0]).toBe(1);
+    expect(decoded[1]).toBe(10);
+    expect(decoded[2]).toBe(15);
+    expect(decoded[3]).toBe(0);
+    expect(decoded[protoSectionIndex(2, 3, 4)]).toBe(7);
+    expect(decodeSectionLight(undefined, 15)[0]).toBe(15);
+    expect(decodeSectionLight("", 0)[100]).toBe(0);
+  });
+
+  test("brightness curve: 0→0, 15→1, mid steep", () => {
+    expect(lightBrightness(0)).toBeCloseTo(0, 5);
+    expect(lightBrightness(15)).toBeCloseTo(1, 5);
+    expect(lightBrightness(7)).toBeCloseTo(7 / 15 / (4 - 3 * (7 / 15)), 5);
+    expect(lightBrightness(7)).toBeLessThan(0.5);
+    expect(combinedLight(15, 0, 1)).toBe(15);
+    expect(combinedLight(15, 0, 0)).toBe(0);
+    expect(combinedLight(4, 10, 1)).toBe(10);
+    expect(aoFactor(false, false, false)).toBeCloseTo(1);
+    expect(aoFactor(true, true, false)).toBeCloseTo(0.4);
+  });
+
+  test("biome id normalize: bare names, numeric → null", () => {
+    expect(normalizeBiomeId("plains")).toBe("minecraft:plains");
+    expect(normalizeBiomeId("minecraft:cherry_grove")).toBe(
+      "minecraft:cherry_grove",
+    );
+    expect(normalizeBiomeId(192)).toBeNull();
+    expect(normalizeBiomeId("192")).toBeNull();
+    expect(biomeIndex(3, 5)).toBe((3 << 4) | 5);
+  });
+
+  test("store decodes light/biomes; columnsAdded dirties section for remesh", () => {
+    const levels = new Uint8Array(4096);
+    levels.fill(15);
+    levels[0] = 3;
+    const skyB64 = encodeSectionLight(levels);
+    const biomes = new Uint8Array(256);
+    biomes[biomeIndex(1, 2)] = 0;
+    let biomeBin = "";
+    for (let i = 0; i < 256; i++) biomeBin += String.fromCharCode(biomes[i]!);
+    const blocks = new Uint16Array(4096);
+    let blockBin = "";
+    for (let i = 0; i < 4096; i++) {
+      blockBin += String.fromCharCode(
+        blocks[i]! & 0xff,
+        (blocks[i]! >> 8) & 0xff,
+      );
+    }
+
+    const store = new Store();
+    store.apply({
+      v: 1,
+      type: "keyframe",
+      bot: "t",
+      tick: 1,
+      world: {
+        dimension: 0,
+        dimensionName: "overworld",
+        minY: 0,
+        maxY: 15,
+      },
+      actor: {
+        rid: 1,
+        uid: 1,
+        name: "t",
+        pos: [0, 0, 0],
+        eyePos: [0, 1, 0],
+        rot: [0, 0],
+        vel: [0, 0, 0],
+        onGround: true,
+        gamemode: 0,
+        dimension: 0,
+        health: 20,
+        maxHealth: 20,
+        food: 20,
+        heldSlot: 0,
+        sneaking: false,
+        sprinting: false,
+        swimming: false,
+        gliding: false,
+        hotbar: [],
+        inventory: [],
+        offhand: null,
+        armour: [null, null, null, null],
+        effects: [],
+        chunkRadius: 8,
+      },
+      columns: [],
+      entities: [],
+    });
+    store.clearDirty();
+
+    store.apply({
+      v: 1,
+      type: "delta",
+      bot: "t",
+      tick: 2,
+      columnsAdded: [
+        {
+          x: 0,
+          z: 0,
+          state: "complete",
+          minY: 0,
+          maxY: 15,
+          sections: [
+            {
+              y: 0,
+              palette: [{ name: "minecraft:air", states: {}, rid: 0 }],
+              blocks: btoa(blockBin),
+              skyLight: skyB64,
+            },
+          ],
+          biomePalette: ["plains"],
+          biomes: btoa(biomeBin),
+        },
+      ],
+    });
+
+    const st = store.getState();
+    expect(st.dirtySections.has("0,0,0")).toBe(true);
+    const col = st.columns.get("0,0")!;
+    expect(col.sections.get(0)!.skyLight[0]).toBe(3);
+    expect(col.biomePalette[0]).toBe("plains");
+    expect(col.biomeIndices![biomeIndex(1, 2)]).toBe(0);
+  });
+});
 
 test.describe("terrain parse / resolve (node)", () => {
   test("weighted variation pick is stable for a position", () => {
@@ -515,10 +663,14 @@ test.describe("terrain atlas + mesher (browser)", () => {
               }
             }
           }
+          const skyLight = new Uint8Array(4096);
+          skyLight.fill(15);
           const sec: Record<string, unknown> = {
             y: 0,
             indices,
             palette,
+            skyLight,
+            blockLight: new Uint8Array(4096),
           };
           if (layer1) {
             const indices1 = new Uint16Array(4096);
@@ -535,7 +687,11 @@ test.describe("terrain atlas + mesher (browser)", () => {
           return sec;
         }
 
-        const bundle = await createTexturedMesher({ baseUrl: assetBase });
+        // Merge assertions need flat lighting (smooth path skips greedy merge).
+        const bundle = await createTexturedMesher({
+          baseUrl: assetBase,
+          smoothLighting: false,
+        });
 
         // Column 0: solid 2×2×2 stone at origin + one glass + waterlogged stone
         const sec0 = makeSection(
@@ -1068,7 +1224,10 @@ test.describe("terrain atlas + mesher (browser)", () => {
           fullReset: false,
         };
 
-        const bundle = await createTexturedMesher({ baseUrl: assetBase });
+        const bundle = await createTexturedMesher({
+          baseUrl: assetBase,
+          smoothLighting: false,
+        });
         const { meshes } = bundle.mesher.meshSection(
           section as never,
           col as never,

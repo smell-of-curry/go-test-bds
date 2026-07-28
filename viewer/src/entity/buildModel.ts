@@ -91,6 +91,8 @@ export function buildEntityModel(
     }
     g.matrixAutoUpdate = false;
     g.matrixWorldNeedsUpdate = true;
+    // Stage 9 animation resets to this bind pose each frame.
+    g.userData.restMatrix = g.matrix.clone();
   }
 
   for (const root of roots) {
@@ -245,14 +247,10 @@ export function applyHeadPitch(
 ): void {
   const head = bones.get("head") ?? bones.get("Head");
   if (!head) return;
-  // Rest-pose matrix is baked into head.matrix; apply pitch as an extra Euler
-  // on a child wrapper… For Stage 7 we multiply a pitch delta onto the existing
-  // matrix's rotation by rebuilding from matrix + pitch. Simpler: store base
-  // matrix in userData on first call.
-  if (!head.userData.baseMatrix) {
-    head.userData.baseMatrix = head.matrix.clone();
+  if (!head.userData.restMatrix) {
+    head.userData.restMatrix = head.matrix.clone();
   }
-  const base = head.userData.baseMatrix as THREE.Matrix4;
+  const base = head.userData.restMatrix as THREE.Matrix4;
   const pitch = THREE.MathUtils.degToRad(pitchDeg);
   const pitchMat = new THREE.Matrix4().makeRotationX(pitch);
   head.matrix.copy(base).multiply(pitchMat);

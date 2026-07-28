@@ -1,6 +1,11 @@
 import * as THREE from "three";
 import type { CameraController } from "./camera";
-import type { BuiltEntityModel, EntityModelRegistry } from "./entity";
+import {
+  applyEntityYaw,
+  EntityAnimator,
+  type BuiltEntityModel,
+  type EntityModelRegistry,
+} from "./entity";
 import type { Block, Entity } from "./protocol";
 import { columnKey, sectionIndex } from "./protocol";
 import type { DecodedSection, StoredColumn, WorldState } from "./store";
@@ -24,12 +29,19 @@ export const HIGHLIGHT_MAX = 48;
 export const LOADING_CLEAR = 0x0b0e14;
 
 /**
- * Flat overworld sky once the world is showing (textured or placeholder
- * fallback). Stage 10 owns real sky/time-of-day; this is one line of "not void".
- * Chosen as classic `#87CEEB` sky blue — sits in the `#79a6ff`–`#8cb8ff`
- * horizon band from real screenshots without inventing a gradient.
+ * Horizon band of the gradient sky dome (also fog colour).
+ * Zenith is deeper — see {@link SKY_ZENITH}. Time-of-day / sun / stars: punt.
  */
-export const SKY_CLEAR = 0x87ceeb;
+export const SKY_HORIZON = 0xa8d4f0;
+
+/** Zenith colour of the gradient sky dome. */
+export const SKY_ZENITH = 0x3a6ea5;
+
+/**
+ * @deprecated Prefer {@link SKY_HORIZON}; kept so older call sites compile.
+ * `setClearColor(SKY_CLEAR)` now enables the gradient sky + fog.
+ */
+export const SKY_CLEAR = SKY_HORIZON;
 
 export interface Mesher {
   /**
@@ -330,6 +342,8 @@ interface EntityNode {
   /** Wireframe bbox fallback (kept until a model loads; restored on failure). */
   wire: THREE.LineSegments;
   model: BuiltEntityModel | null;
+  /** Stage 9 per-instance animation / Molang state. */
+  animator: EntityAnimator | null;
   /** In-flight model load token — bumped to ignore stale async results. */
   loadToken: number;
   type: string;
@@ -364,6 +378,8 @@ export class ViewerScene {
   /** When false, world geometry stays on scene but is not drawn (loading). */
   private worldVisible = true;
   private actorWantedVisible = false;
+  private skyMesh: THREE.Mesh | null = null;
+  private envRadiusBlocks = 128;
   private static readonly highlightGeo = new THREE.EdgesGeometry(
     new THREE.BoxGeometry(1.02, 1.02, 1.02),
   );
@@ -393,7 +409,7 @@ export class ViewerScene {
       canvas.clientHeight || window.innerHeight,
       false,
     );
-    // Start dark (loading). main.ts flips to SKY_CLEAR once assets settle.
+    // Start dark (loading). main.ts enables sky dome + fog once assets settle.
     this.scene.background = new THREE.Color(LOADING_CLEAR);
 
     const ambient = new THREE.AmbientLight(0xffffff, 0.55);
@@ -543,11 +559,43 @@ export class ViewerScene {
 
   /**
    * Set the WebGL clear / scene background colour.
+   * {@link LOADING_CLEAR} tears down sky+fog; any other value enables the
+   * gradient sky dome and distance fog (Stage 10b).
    *
    * @param hex - RGB packed as `0xRRGGBB`.
    */
   setClearColor(hex: number): void {
-    this.scene.background = new THREE.Color(hex);
+    if (hex === LOADING_CLEAR) {
+      this.setEnvironment({ enabled: false });
+      this.scene.background = new THREE.Color(hex);
+      return;
+    }
+    this.setEnvironment({ enabled: true });
+  }
+
+  /**
+   * Install or remove the gradient sky dome + distance fog.
+   *
+   * @param opts.enabled - When false, flat loading clear (caller sets colour).
+   * @param opts.radiusChunks - Stream/view radius in chunks (fog far ≈ radius×16).
+   */
+  setEnvironment(opts: { enabled: boolean; radiusChunks?: number }): void {
+    if (opts.radiusChunks != null && opts.radiusChunks > 0) {
+      this.envRadiusBlocks = opts.radiusChunks * 16;
+    }
+    if (!opts.enabled) {
+      this.removeSkyDome();
+      this.scene.fog = null;
+      this.applyFogToMesher(null);
+      return;
+    }
+    this.ensureSkyDome();
+    // Fallback clear behind the dome (zenith) if a seam shows.
+    this.scene.background = new THREE.Color(SKY_ZENITH);
+    const far = this.envRadiusBlocks;
+    const fog = new THREE.Fog(SKY_HORIZON, far * 0.5, far * 0.92);
+    this.scene.fog = fog;
+    this.applyFogToMesher(fog);
   }
 
   /**
@@ -574,6 +622,9 @@ export class ViewerScene {
    * Move an existing entity node to an interpolated pose. Missing rids are ignored
    * (structure still comes from {@link sync}).
    *
+   * Networked motion is lerped in {@link MotionLerp} (~inter-arrival / ~3 ticks);
+   * this applies the already-smoothed sample.
+   *
    * @param rid - Entity runtime ID.
    * @param pos - World position.
    * @param rot - Optional `[yaw, pitch]` degrees.
@@ -591,6 +642,28 @@ export class ViewerScene {
     } else if (rot) {
       node.group.rotation.order = "YXZ";
       node.group.rotation.y = Math.PI - THREE.MathUtils.degToRad(rot[0]);
+    }
+  }
+
+  /**
+   * Per-frame entity pose + Stage 9 animation. Call from the render loop with
+   * motion-lerped entity samples.
+   *
+   * @param dtSec - Frame delta in seconds.
+   * @param entities - Interpolated entity map (from {@link MotionLerp}).
+   */
+  tickEntities(dtSec: number, entities: Map<number, Entity>): void {
+    for (const [rid, ent] of entities) {
+      const node = this.entities.get(rid);
+      if (!node) continue;
+      node.group.position.set(ent.pos[0], ent.pos[1], ent.pos[2]);
+      if (node.animator && node.model) {
+        // Animator owns bone + head pitch; only yaw the model root here.
+        node.animator.tick(dtSec, ent, node.model);
+        applyEntityYaw(node.model.root, ent.rot[0]);
+      } else {
+        this.setEntityPos(rid, ent.pos, ent.rot);
+      }
     }
   }
 
@@ -792,11 +865,14 @@ export class ViewerScene {
         group,
         wire,
         model: null,
+        animator: null,
         loadToken: 0,
         type: ent.type,
         label,
       };
       this.entities.set(rid, node);
+      // Initial pose only — subsequent poses come from motion-lerped tickEntities.
+      node.group.position.set(ent.pos[0], ent.pos[1], ent.pos[2]);
       this.requestEntityModel(node, ent);
     } else if (node.type !== ent.type) {
       node.type = ent.type;
@@ -807,10 +883,7 @@ export class ViewerScene {
     }
 
     const [w, h] = ent.bbox;
-    node.group.position.set(ent.pos[0], ent.pos[1], ent.pos[2]);
-    if (node.model) {
-      this.entityRegistry?.applyPose(node.model, ent.rot);
-    } else {
+    if (!node.model) {
       node.group.rotation.order = "YXZ";
       node.group.rotation.y = Math.PI - THREE.MathUtils.degToRad(ent.rot[0]);
       // Resize wireframe if bbox changed.
@@ -858,6 +931,30 @@ export class ViewerScene {
       // Model owns yaw; clear group yaw so we don't double-apply.
       node.group.rotation.set(0, 0, 0);
       registry.applyPose(model, ent.rot);
+      node.animator = this.createAnimator(ent);
+    });
+  }
+
+  /**
+   * @param ent - Entity snapshot for type / props seed.
+   * @returns animator or null.
+   */
+  private createAnimator(ent: Entity): EntityAnimator | null {
+    const registry = this.entityRegistry;
+    if (!registry) return null;
+    const bindings = registry.getAnimationBindings(ent.type);
+    if (!bindings) return null;
+    if (
+      Object.keys(bindings.shortNames).length === 0 &&
+      bindings.scripts.animate.length === 0
+    ) {
+      return null;
+    }
+    return new EntityAnimator(bindings, {
+      type: ent.type,
+      player: ent.player,
+      props: ent.props ?? {},
+      flags: ent.flags ?? {},
     });
   }
 
@@ -869,6 +966,7 @@ export class ViewerScene {
     node.group.remove(node.model.root);
     node.model.dispose();
     node.model = null;
+    node.animator = null;
     node.wire.visible = true;
   }
 
@@ -972,10 +1070,73 @@ export class ViewerScene {
    */
   setMesher(mesher: Mesher): void {
     this.mesher = mesher;
+    if (this.scene.fog instanceof THREE.Fog) {
+      this.applyFogToMesher(this.scene.fog);
+    }
     for (const key of [...this.sections.keys()]) {
       this.removeSection(key);
       this.enqueueSection(key);
     }
+  }
+
+  /**
+   * Push fog uniforms into a textured mesher when present.
+   *
+   * @param fog - Active fog, or null to disable.
+   */
+  private applyFogToMesher(fog: THREE.Fog | null): void {
+    const m = this.mesher as Mesher & {
+      setFog?: (
+        color: { r: number; g: number; b: number } | null,
+        near?: number,
+        far?: number,
+      ) => void;
+    };
+    if (typeof m.setFog !== "function") return;
+    if (!fog) {
+      m.setFog(null);
+      return;
+    }
+    m.setFog(fog.color, fog.near, fog.far);
+  }
+
+  /** Build an inward-facing sky sphere with zenith→horizon vertex colours. */
+  private ensureSkyDome(): void {
+    if (this.skyMesh) return;
+    const geo = new THREE.SphereGeometry(800, 24, 16);
+    const cols = new Float32Array(geo.attributes.position!.count * 3);
+    const zenith = new THREE.Color(SKY_ZENITH);
+    const horizon = new THREE.Color(SKY_HORIZON);
+    const pos = geo.attributes.position!;
+    const tmp = new THREE.Color();
+    for (let i = 0; i < pos.count; i++) {
+      // y/radius ∈ [-1,1]; high y (zenith) → blend 1 toward zenith colour.
+      const ny = pos.getY(i) / 800;
+      const blend = Math.min(1, Math.max(0, (ny + 0.15) / 1.15));
+      tmp.copy(horizon).lerp(zenith, blend);
+      cols[i * 3] = tmp.r;
+      cols[i * 3 + 1] = tmp.g;
+      cols[i * 3 + 2] = tmp.b;
+    }
+    geo.setAttribute("color", new THREE.BufferAttribute(cols, 3));
+    const mat = new THREE.MeshBasicMaterial({
+      vertexColors: true,
+      side: THREE.BackSide,
+      depthWrite: false,
+      fog: false,
+    });
+    this.skyMesh = new THREE.Mesh(geo, mat);
+    this.skyMesh.name = "sky-dome";
+    this.skyMesh.frustumCulled = false;
+    this.scene.add(this.skyMesh);
+  }
+
+  private removeSkyDome(): void {
+    if (!this.skyMesh) return;
+    this.scene.remove(this.skyMesh);
+    this.skyMesh.geometry.dispose();
+    (this.skyMesh.material as THREE.Material).dispose();
+    this.skyMesh = null;
   }
 
   /** Re-queue every live section (unused today; handy if mesher settings change). */

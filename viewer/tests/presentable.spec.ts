@@ -22,9 +22,6 @@ import {
 const here = dirname(fileURLToPath(import.meta.url));
 const viewerRoot = join(here, "..");
 
-/** Matches `SKY_CLEAR` in scene.ts (`#87CEEB`). */
-const SKY_RGB = { r: 0x87, g: 0xce, b: 0xeb };
-
 /**
  * Sample one canvas pixel via WebGL (preserveDrawingBuffer is on).
  * Origin is top-left in the arguments; GL reads bottom-left.
@@ -53,13 +50,10 @@ async function readCanvasRgb(
   );
 }
 
-function nearSky(rgb: [number, number, number], tol = 35): boolean {
-  return (
-    Math.abs(rgb[0] - SKY_RGB.r) +
-      Math.abs(rgb[1] - SKY_RGB.g) +
-      Math.abs(rgb[2] - SKY_RGB.b) <=
-    tol
-  );
+/** Gradient sky: zenith deeper blue, horizon lighter — accept either band. */
+function nearSky(rgb: [number, number, number]): boolean {
+  const [r, g, b] = rgb;
+  return b > 130 && b > r && g > 90 && r < 200;
 }
 
 function nearDark(rgb: [number, number, number], tol = 25): boolean {

@@ -1,12 +1,48 @@
 /**
- * Bedrock entity rendering: client entity defs, render controllers, and
- * textured bone hierarchies.
+ * Bedrock entity rendering: client entity defs, render controllers,
+ * textured bone hierarchies, and Stage 9 animation / Molang playback.
  *
  * See {@link ./README.md}.
  */
 
 export { parseClientEntity } from "./parseClient";
 export { parseRenderControllers } from "./parseController";
+export { parseAnimations } from "./parseAnimation";
+export type {
+  AnimBoneChannels,
+  AnimChannel,
+  AnimKeyframe,
+  ChannelExpr,
+  ParsedAnimation,
+} from "./parseAnimation";
+export { parseAnimControllers } from "./parseAnimController";
+export type {
+  ControllerAnimRef,
+  ControllerState,
+  ControllerTransition,
+  ParsedAnimController,
+} from "./parseAnimController";
+export {
+  advanceAnimTime,
+  applyBonePoses,
+  catmullRom,
+  emptyBonePose,
+  ensureRestMatrix,
+  isAnimationFinished,
+  resetBonesToRest,
+  resolveSampleTime,
+  sampleAnimation,
+  sampleAnimationPoses,
+  sampleChannel,
+  type BoneAnimPose,
+} from "./animation";
+export {
+  buildAnimationBindings,
+  EntityAnimator,
+  remapCurve,
+  type AnimEntityState,
+  type AnimationBindings,
+} from "./controllerRuntime";
 export { createEntityMolangHost } from "./queries";
 export {
   expandShortRef,
@@ -29,6 +65,8 @@ export {
 export {
   EntityModelRegistry,
   geometryPathCandidates,
+  isAnimControllerPath,
+  isAnimationPath,
   isClientEntityPath,
   isRenderControllerPath,
   type EntityLike,
@@ -36,6 +74,7 @@ export {
 export type {
   ClientEntityDef,
   ClientEntityMaps,
+  ClientEntityScripts,
   EntityRenderInputs,
   RenderControllerArrays,
   RenderControllerDef,

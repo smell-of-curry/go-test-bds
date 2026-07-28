@@ -60,10 +60,24 @@ export {
   TexturedMesher,
   greedyMerge,
   neighbourBlock,
+  neighbourLight,
   liquidHeight,
 } from "./mesher";
 export { createTerrainMaterial, wrapTileCoord } from "./material";
-export { tintAt, UNTINTED, BIOME_SNAPSHOT_NOTE } from "./biome";
+export {
+  tintAt,
+  UNTINTED,
+  normalizeBiomeId,
+  biomeIdAt,
+  biomeAtFromState,
+} from "./biome";
+export {
+  lightBrightness,
+  combinedLight,
+  aoFactor,
+  FACE_SHADE,
+  encodeSectionLight,
+} from "./light";
 export { decodeTga, bitmapFromTga } from "./tga";
 export {
   indexRegistryBlocks,
@@ -92,8 +106,10 @@ export type {
 export interface CreateTexturedMesherOptions {
   /** Viewer HTTP origin. Defaults to `window.location.origin`. */
   baseUrl?: string;
-  /** Biome lookup; null/omit → untinted. */
+  /** Biome lookup; null/omit → column wire biomes / untinted. */
   biomeAt?: BiomeAt | null;
+  /** Smooth lighting + AO (default true). */
+  smoothLighting?: boolean;
   /** Stage-8 custom geometry seam. */
   customGeometry?: CustomGeometryHook | null;
   /**
@@ -189,6 +205,7 @@ export async function createTexturedMesher(
   const mesher = new TexturedMesher(atlas, resolver, {
     biomeAt: opts.biomeAt ?? null,
     customGeometry: opts.customGeometry ?? null,
+    smoothLighting: opts.smoothLighting,
   });
 
   const bundle: TexturedMesherBundle = {

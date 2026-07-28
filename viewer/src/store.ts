@@ -2,6 +2,7 @@ import {
   type Actor,
   type Block,
   type CaptureFrame,
+  type ChatFrame,
   type Column,
   type DeltaFrame,
   type Entity,
@@ -10,11 +11,14 @@ import {
   type KeyframeFrame,
   type MarkFrame,
   type Registries,
+  type TitleFrame,
   type UI,
   type WorldMeta,
   SCHEMA_VERSION,
   columnKey,
+  decodeColumnBiomes,
   decodeSectionBlocks,
+  decodeSectionLight,
   sectionIndex,
 } from "./protocol";
 
@@ -23,6 +27,10 @@ export interface DecodedSection {
   /** length 4096, palette index per local cell */
   indices: Uint16Array;
   palette: Block[];
+  /** length 4096 sky light 0..15 (omission default: all 15) */
+  skyLight: Uint8Array;
+  /** length 4096 block light 0..15 (omission default: all 0) */
+  blockLight: Uint8Array;
 }
 
 export interface StoredColumn {
@@ -32,6 +40,10 @@ export interface StoredColumn {
   minY: number;
   maxY: number;
   sections: Map<number, DecodedSection>;
+  /** Wire biome palette (names or numeric ids); empty when omitted. */
+  biomePalette: Array<string | number>;
+  /** length 256 surface biome indices, or null when omitted. */
+  biomeIndices: Uint8Array | null;
 }
 
 export interface WorldState {
@@ -113,6 +125,8 @@ function decodeColumn(col: Column): StoredColumn {
       y: sec.y,
       indices: decodeSectionBlocks(sec.blocks),
       palette: sec.palette,
+      skyLight: decodeSectionLight(sec.skyLight, 15),
+      blockLight: decodeSectionLight(sec.blockLight, 0),
     });
   }
   return {
@@ -122,6 +136,8 @@ function decodeColumn(col: Column): StoredColumn {
     minY: col.minY,
     maxY: col.maxY,
     sections,
+    biomePalette: col.biomePalette ? [...col.biomePalette] : [],
+    biomeIndices: decodeColumnBiomes(col.biomes),
   };
 }
 
@@ -217,6 +233,12 @@ export class Store {
       case "capture":
         this.state.pendingCapture = frame;
         break;
+      case "chat":
+        this.applyChat(frame);
+        break;
+      case "title":
+        this.applyTitle(frame);
+        break;
       default:
         return;
     }
@@ -236,6 +258,43 @@ export class Store {
 
   private emit(): void {
     for (const listener of this.listeners) listener(this.state);
+  }
+
+  /**
+   * Append a chat event onto `ui.messages` (cap 20, oldest dropped).
+   *
+   * @param frame - Event-lane chat frame.
+   */
+  private applyChat(frame: ChatFrame): void {
+    this.state.tick = frame.tick;
+    const ui: UI = { ...(this.state.ui ?? {}) };
+    const msgs = [...(ui.messages ?? []), frame.text];
+    while (msgs.length > 20) msgs.shift();
+    ui.messages = msgs;
+    this.state.ui = ui;
+  }
+
+  /**
+   * Merge a title event into `ui` title/subtitle/actionBar fields.
+   *
+   * @param frame - Event-lane title frame.
+   */
+  private applyTitle(frame: TitleFrame): void {
+    this.state.tick = frame.tick;
+    const ui: UI = { ...(this.state.ui ?? {}) };
+    if (frame.clear) {
+      ui.title = "";
+      ui.subtitle = "";
+      ui.actionBar = "";
+    } else {
+      if (frame.title !== undefined) ui.title = frame.title;
+      if (frame.subtitle !== undefined) ui.subtitle = frame.subtitle;
+      if (frame.actionBar !== undefined) ui.actionBar = frame.actionBar;
+    }
+    if (frame.fadeInTicks !== undefined) ui.fadeInTicks = frame.fadeInTicks;
+    if (frame.stayTicks !== undefined) ui.stayTicks = frame.stayTicks;
+    if (frame.fadeOutTicks !== undefined) ui.fadeOutTicks = frame.fadeOutTicks;
+    this.state.ui = ui;
   }
 
   private applyHello(frame: HelloFrame): void {
@@ -399,10 +458,15 @@ export class Store {
     let sec = col.sections.get(sy);
     if (!sec) {
       // Absent section was all-air; materialising a non-air block creates it.
+      // Light stays at omission defaults until the next columnsAdded refill.
+      const skyLight = new Uint8Array(4096);
+      skyLight.fill(15);
       sec = {
         y: sy,
         indices: new Uint16Array(4096),
         palette: [{ name: "minecraft:air", states: {}, rid: 0 }],
+        skyLight,
+        blockLight: new Uint8Array(4096),
       };
       col.sections.set(sy, sec);
     }

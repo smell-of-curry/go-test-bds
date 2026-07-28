@@ -8,6 +8,13 @@ import {
   geometryById,
   type BuiltEntityModel,
 } from "./buildModel";
+import {
+  buildAnimationBindings,
+  type AnimationBindings,
+} from "./controllerRuntime";
+import { parseAnimControllers } from "./parseAnimController";
+import { parseAnimations, type ParsedAnimation } from "./parseAnimation";
+import type { ParsedAnimController } from "./parseAnimController";
 import { parseClientEntity } from "./parseClient";
 import { parseRenderControllers } from "./parseController";
 import { modelCacheKey, resolveRenderPasses } from "./resolve";
@@ -41,6 +48,8 @@ export class EntityModelRegistry {
 
   private readonly entities = new Map<string, ClientEntityDef>();
   private readonly controllers = new Map<string, RenderControllerDef>();
+  private readonly animations = new Map<string, ParsedAnimation>();
+  private readonly animControllers = new Map<string, ParsedAnimController>();
   /** geometry.* id → pack-relative `.geo.json` path. */
   private readonly geoPaths = new Map<string, string>();
   private readonly geoJsonCache = new Map<string, Promise<unknown | null>>();
@@ -92,6 +101,43 @@ export class EntityModelRegistry {
    */
   getController(name: string): RenderControllerDef | undefined {
     return this.controllers.get(name);
+  }
+
+  /**
+   * Look up a parsed animation by identifier.
+   *
+   * @param id - e.g. `animation.quadruped.walk`.
+   * @returns animation or undefined.
+   */
+  getAnimation(id: string): ParsedAnimation | undefined {
+    return this.animations.get(id);
+  }
+
+  /**
+   * Look up a parsed animation controller by identifier.
+   *
+   * @param id - e.g. `controller.animation.sheep.move`.
+   * @returns controller or undefined.
+   */
+  getAnimController(id: string): ParsedAnimController | undefined {
+    return this.animControllers.get(id);
+  }
+
+  /**
+   * Build Stage-9 animation bindings for a client entity identifier.
+   *
+   * @param identifier - Entity type id.
+   * @returns bindings, or null when the entity def is missing.
+   */
+  getAnimationBindings(identifier: string): AnimationBindings | null {
+    const def = this.entities.get(identifier);
+    if (!def) return null;
+    return buildAnimationBindings(
+      def.animations,
+      def.scripts,
+      this.animations,
+      this.animControllers,
+    );
   }
 
   /**
@@ -147,6 +193,8 @@ export class EntityModelRegistry {
     this.loadPromise = null;
     this.entities.clear();
     this.controllers.clear();
+    this.animations.clear();
+    this.animControllers.clear();
     this.geoPaths.clear();
     this.geoJsonCache.clear();
     for (const p of this.modelCache.values()) {
@@ -166,9 +214,13 @@ export class EntityModelRegistry {
 
     const entityPaths: string[] = [];
     const rcPaths: string[] = [];
+    const animPaths: string[] = [];
+    const acPaths: string[] = [];
     for (const path of Object.keys(index)) {
       if (isClientEntityPath(path)) entityPaths.push(path);
       else if (isRenderControllerPath(path)) rcPaths.push(path);
+      else if (isAnimationPath(path)) animPaths.push(path);
+      else if (isAnimControllerPath(path)) acPaths.push(path);
     }
 
     // Winner-per-path bytes; when two paths share an identifier, higher pack
@@ -213,6 +265,34 @@ export class EntityModelRegistry {
         arrays: { materials: {}, geometries: {}, textures: {} },
       });
     }
+
+    const animPri = new Map<string, number>();
+    await mapPool(animPaths, 24, async (path) => {
+      const packId = index[path] ?? "";
+      const pri = priority.get(packId) ?? -1;
+      const json = await this.client.fetchJson(path);
+      if (!json) return;
+      for (const [id, def] of parseAnimations(json)) {
+        const prev = animPri.get(id);
+        if (prev !== undefined && prev > pri) continue;
+        animPri.set(id, pri);
+        this.animations.set(id, def);
+      }
+    });
+
+    const acPri = new Map<string, number>();
+    await mapPool(acPaths, 24, async (path) => {
+      const packId = index[path] ?? "";
+      const pri = priority.get(packId) ?? -1;
+      const json = await this.client.fetchJson(path);
+      if (!json) return;
+      for (const [id, def] of parseAnimControllers(json)) {
+        const prev = acPri.get(id);
+        if (prev !== undefined && prev > pri) continue;
+        acPri.set(id, pri);
+        this.animControllers.set(id, def);
+      }
+    });
 
     this.loaded = true;
   }
@@ -328,6 +408,24 @@ export function isRenderControllerPath(path: string): boolean {
 }
 
 /**
+ * @param path - Pack-relative path.
+ * @returns true when it looks like an animations file.
+ */
+export function isAnimationPath(path: string): boolean {
+  const p = path.toLowerCase();
+  return p.startsWith("animations/") && p.endsWith(".json");
+}
+
+/**
+ * @param path - Pack-relative path.
+ * @returns true when it looks like an animation controller file.
+ */
+export function isAnimControllerPath(path: string): boolean {
+  const p = path.toLowerCase();
+  return p.startsWith("animation_controllers/") && p.endsWith(".json");
+}
+
+/**
  * Heuristic pack paths for a geometry identifier.
  *
  * @param geometryId - `geometry.foo.bar`.
@@ -423,9 +521,10 @@ function cloneBuiltModel(model: BuiltEntityModel): BuiltEntityModel {
       bones.set(obj.name, obj);
     }
   });
-  // Re-seed baseMatrix for head pitch on the clone.
-  const head = bones.get("head") ?? bones.get("Head");
-  if (head) head.userData.baseMatrix = head.matrix.clone();
+  // Rest matrices for Stage 9 animation / head pitch on the clone.
+  for (const g of bones.values()) {
+    g.userData.restMatrix = g.matrix.clone();
+  }
 
   return {
     root,

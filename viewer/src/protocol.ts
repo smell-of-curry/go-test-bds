@@ -1,7 +1,8 @@
 /** Schema version every frame must carry. Mismatch → refuse to render. */
 export const SCHEMA_VERSION = 1;
 
-export type FrameType = "hello" | "keyframe" | "delta" | "mark" | "capture";
+export type FrameType =
+  "hello" | "keyframe" | "delta" | "mark" | "capture" | "chat" | "title";
 
 export type ColumnReceiptState = "requested" | "partial" | "complete";
 
@@ -21,6 +22,16 @@ export interface Section {
   blocks: string;
   /** layer 1 (waterlogging); absent when all air */
   blocks1?: string;
+  /**
+   * base64 of 2048 bytes (4096 nibbles) sky light, same index as `blocks`.
+   * Even index → low nibble. Absent ⇒ every level is 15 (full sky).
+   */
+  skyLight?: string;
+  /**
+   * base64 of 2048 bytes (4096 nibbles) block light, same packing as `skyLight`.
+   * Absent ⇒ every level is 0.
+   */
+  blockLight?: string;
 }
 
 export interface Column {
@@ -30,6 +41,15 @@ export interface Column {
   minY: number;
   maxY: number;
   sections: Section[];
+  /**
+   * Surface biome palette entries: dragonfly names (`plains`) or numeric ids.
+   * Paired with {@link biomes}; omitted on incomplete columns.
+   */
+  biomePalette?: Array<string | number>;
+  /**
+   * base64 of 256 uint8 indices into {@link biomePalette}, order `(x<<4)|z`.
+   */
+  biomes?: string;
 }
 
 export interface Item {
@@ -117,6 +137,12 @@ export interface UI {
   title?: string;
   subtitle?: string;
   actionBar?: string;
+  /** Title fade-in duration in ticks (20ths of a second). */
+  fadeInTicks?: number;
+  /** Title stay duration in ticks. */
+  stayTicks?: number;
+  /** Title fade-out duration in ticks. */
+  fadeOutTicks?: number;
 }
 
 export interface HelloFrame {
@@ -297,8 +323,38 @@ export interface CaptureFrame {
   label?: string;
 }
 
+/** Event-lane chat line (never dropped for world backpressure). */
+export interface ChatFrame {
+  v: number;
+  type: "chat";
+  bot: string;
+  tick: number;
+  text: string;
+}
+
+/** Event-lane title / subtitle / action-bar update. */
+export interface TitleFrame {
+  v: number;
+  type: "title";
+  bot: string;
+  tick: number;
+  title?: string;
+  subtitle?: string;
+  actionBar?: string;
+  fadeInTicks?: number;
+  stayTicks?: number;
+  fadeOutTicks?: number;
+  clear?: boolean;
+}
+
 export type Frame =
-  HelloFrame | KeyframeFrame | DeltaFrame | MarkFrame | CaptureFrame;
+  | HelloFrame
+  | KeyframeFrame
+  | DeltaFrame
+  | MarkFrame
+  | CaptureFrame
+  | ChatFrame
+  | TitleFrame;
 
 export function columnKey(x: number, z: number): string {
   return `${x},${z}`;
@@ -328,4 +384,57 @@ export function decodeSectionBlocks(b64: string): Uint16Array {
 /** Local section cell index: Bedrock sub-chunk order `(x<<8)|(z<<4)|y`. */
 export function sectionIndex(x: number, y: number, z: number): number {
   return (x << 8) | (z << 4) | y;
+}
+
+/**
+ * Decode a section light payload (sky or block) into 4096 levels 0..15.
+ * Packing matches Bedrock/dragonfly: even index in the low nibble.
+ *
+ * @param b64 - base64 of 2048 bytes, or undefined/empty for the omission default.
+ * @param fill - Level written when the field is omitted (15 for sky, 0 for block).
+ * @returns per-cell light levels, length 4096, index {@link sectionIndex}.
+ * @throws if `b64` is present but not exactly 2048 decoded bytes.
+ */
+export function decodeSectionLight(
+  b64: string | undefined,
+  fill: number,
+): Uint8Array {
+  const out = new Uint8Array(4096);
+  if (b64 == null || b64 === "") {
+    out.fill(fill & 0xf);
+    return out;
+  }
+  const bin = atob(b64);
+  if (bin.length !== 2048) {
+    throw new Error(`section light length ${bin.length}, expected 2048`);
+  }
+  for (let i = 0; i < 2048; i++) {
+    const b = bin.charCodeAt(i);
+    out[i * 2] = b & 0xf;
+    out[i * 2 + 1] = (b >> 4) & 0xf;
+  }
+  return out;
+}
+
+/**
+ * Decode a column surface biome index map.
+ *
+ * @param b64 - base64 of 256 uint8 palette indices, or undefined when omitted.
+ * @returns length-256 index array, or null when absent.
+ * @throws if `b64` is present but not exactly 256 decoded bytes.
+ */
+export function decodeColumnBiomes(b64: string | undefined): Uint8Array | null {
+  if (b64 == null || b64 === "") return null;
+  const bin = atob(b64);
+  if (bin.length !== 256) {
+    throw new Error(`column biomes length ${bin.length}, expected 256`);
+  }
+  const out = new Uint8Array(256);
+  for (let i = 0; i < 256; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+/** Column biome cell index: `(x<<4)|z` with x,z local 0..15. */
+export function biomeIndex(x: number, z: number): number {
+  return (x << 4) | z;
 }

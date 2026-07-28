@@ -71,6 +71,8 @@ export class SnapshotStream {
       "delta",
       "mark",
       "capture",
+      "chat",
+      "title",
     ] as const) {
       es.addEventListener(type, (ev: MessageEvent<string>) => {
         try {

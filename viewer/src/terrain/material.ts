@@ -31,13 +31,16 @@ out vec2 vTileUv;
 out vec4 vAtlasRect;
 out float vTileRot;
 out vec3 vColor;
+out float vFogDepth;
 
 void main() {
   vTileUv = tileUv;
   vAtlasRect = atlasRect;
   vTileRot = tileRot;
   vColor = vertColor;
-  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  vec4 mv = modelViewMatrix * vec4(position, 1.0);
+  vFogDepth = -mv.z;
+  gl_Position = projectionMatrix * mv;
 }
 `;
 
@@ -48,11 +51,16 @@ precision highp int;
 uniform sampler2D map;
 uniform vec2 atlasSize;
 uniform float alphaCutoff;
+uniform vec3 fogColor;
+uniform float fogNear;
+uniform float fogFar;
+uniform float fogEnabled;
 
 in vec2 vTileUv;
 in vec4 vAtlasRect;
 in float vTileRot;
 in vec3 vColor;
+in float vFogDepth;
 
 out vec4 fragColor;
 
@@ -78,8 +86,13 @@ void main() {
   vec2 uv = origin + f * size;
   vec4 tex = texture(map, uv);
   if (tex.a < alphaCutoff) discard;
-  // Unlit: full texture brightness × vertex biome tint.
-  fragColor = vec4(tex.rgb * vColor, 1.0);
+  // Vertex colour carries biome tint × face shade × light brightness × AO.
+  vec3 rgb = tex.rgb * vColor;
+  if (fogEnabled > 0.5) {
+    float t = clamp((vFogDepth - fogNear) / max(fogFar - fogNear, 1e-3), 0.0, 1.0);
+    rgb = mix(rgb, fogColor, t);
+  }
+  fragColor = vec4(rgb, 1.0);
 }
 `;
 
@@ -92,7 +105,8 @@ export interface TerrainMaterialOpts {
 }
 
 /**
- * Unlit terrain material with tile-space UV → atlas rect in the fragment shader.
+ * Terrain material with tile-space UV → atlas rect; lighting is pre-baked into
+ * `vertColor`. Optional linear distance fog (RawShader has no THREE.Fog hook).
  *
  * @param opts - Atlas texture + size + pass flags.
  * @returns RawShaderMaterial (GLSL3, no lights, no tone mapping).
@@ -109,6 +123,10 @@ export function createTerrainMaterial(
         value: new THREE.Vector2(opts.atlasWidth, opts.atlasHeight),
       },
       alphaCutoff: { value: transparent ? 0.1 : 0.01 },
+      fogColor: { value: new THREE.Vector3(0.66, 0.83, 0.94) },
+      fogNear: { value: 0 },
+      fogFar: { value: 1 },
+      fogEnabled: { value: 0 },
     },
     vertexShader: VERT,
     fragmentShader: FRAG,

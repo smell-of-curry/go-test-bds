@@ -4,10 +4,11 @@ import { EntityModelRegistry } from "./entity";
 import { MotionLerp } from "./motion";
 import { Overlay } from "./overlay";
 import type { Actor } from "./protocol";
-import { LOADING_CLEAR, SKY_CLEAR, ViewerScene } from "./scene";
+import { LOADING_CLEAR, ViewerScene } from "./scene";
 import { SnapshotStream, streamUrlFromSearch } from "./stream";
 import { Store } from "./store";
 import { createTexturedMesher } from "./terrain";
+import { initHud } from "./ui";
 
 const canvas = document.getElementById("c") as HTMLCanvasElement;
 const overlayEl = document.getElementById("overlay") as HTMLElement;
@@ -47,7 +48,8 @@ function setLoadingVisible(visible: boolean, detail?: string): void {
 
 function showWorld(): void {
   setLoadingVisible(false);
-  scene.setClearColor(SKY_CLEAR);
+  const radiusChunks = store.getState().hello?.radius ?? 8;
+  scene.setEnvironment({ enabled: true, radiusChunks });
   scene.setWorldVisible(true);
 }
 
@@ -147,6 +149,7 @@ const camera = new CameraController(
   cameraModeFromSearch(location.search),
 );
 const overlay = new Overlay(overlayEl, errorEl, captionEl, uiEl);
+const hud = initHud({ threeScene: scene.scene });
 const motion = new MotionLerp();
 
 installViewerHandle(
@@ -159,6 +162,7 @@ installViewerHandle(
   () => streamError,
   overlay,
   assetsSettled,
+  hud,
 );
 
 camera.bindOrbitControls(canvas);
@@ -221,6 +225,7 @@ store.subscribe((state) => {
     lastMotionRevision = state.revision;
   }
 
+  hud.onFrame(state);
   store.clearDirty();
   paintOverlay();
 });
@@ -256,6 +261,7 @@ function frame(): void {
     requestAnimationFrame(frame);
     return;
   }
+  const dtSec = Math.min(0.25, (now - lastPaintAt) / 1000);
   lastPaintAt = now;
 
   const state = store.getState();
@@ -263,13 +269,14 @@ function frame(): void {
     if (scene.pendingRemeshCount > 0) {
       scene.tickRemesh(state);
     }
-    scene.tickHighlights(performance.now());
+    const nowMs = performance.now();
+    scene.tickHighlights(nowMs);
+    hud.tick(nowMs);
 
     const actor = motion.sampleActor() ?? state.actor;
     const entities = motion.sampleEntities();
-    for (const [rid, ent] of entities) {
-      scene.setEntityPos(rid, ent.pos, ent.rot);
-    }
+    // MotionLerp (~inter-arrival / ~3 ticks) + Stage 9 bone animation.
+    scene.tickEntities(dtSec > 0 ? dtSec : PAINT_INTERVAL_MS / 1000, entities);
 
     camera.update(actor);
     scene.setActorVisible(

@@ -165,23 +165,7 @@ export class Overlay {
     if (ui.sign) {
       chunks.push(panelBlock("Sign", "front", ui.sign.front.join("\n"), []));
     }
-    if (
-      !chunks.length &&
-      (ui.title ||
-        ui.subtitle ||
-        ui.actionBar ||
-        (ui.messages?.length ?? 0) > 0)
-    ) {
-      const body = [
-        ui.title,
-        ui.subtitle,
-        ui.actionBar,
-        ...(ui.messages ?? []).slice(-3),
-      ]
-        .filter((s) => s && s.length > 0)
-        .join("\n");
-      if (body) chunks.push(panelBlock("HUD", "", body, []));
-    }
+    // Chat / title / hotbar live in `#player-hud` (Stage 11), not this panel.
 
     if (!chunks.length) {
       this.uiEl.classList.remove("visible");

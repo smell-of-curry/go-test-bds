@@ -46,6 +46,17 @@ export interface DefaultMolangHost extends MolangHost {
   readonly unimplementedQueries: readonly string[];
   /** Clear the unimplemented-query log. */
   clearUnimplemented(): void;
+  /**
+   * Replace or add a query implementation (animation runtime updates
+   * `anim_time` / `delta_time` / flags each frame).
+   *
+   * @param name - Query name without `query.` prefix.
+   * @param value - Constant or function.
+   */
+  setQuery(
+    name: string,
+    value: MolangValue | ((args: MolangValue[]) => MolangValue),
+  ): void;
 }
 
 /**
@@ -80,6 +91,9 @@ export function createDefaultHost(
     unimplementedQueries: unimplemented,
     clearUnimplemented(): void {
       unimplemented.length = 0;
+    },
+    setQuery(name, value): void {
+      queries.set(name.toLowerCase(), value);
     },
     query(name: string, args: MolangValue[]): MolangValue {
       const impl = queries.get(name);

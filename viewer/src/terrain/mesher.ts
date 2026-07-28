@@ -4,7 +4,8 @@ import type { Block } from "../protocol";
 import { columnKey, sectionIndex } from "../protocol";
 import type { DecodedSection, StoredColumn, WorldState } from "../store";
 import { FALLBACK_TEXTURE, type TerrainAtlas } from "./atlas";
-import { tintAt } from "./biome";
+import { biomeAtFromState, tintAt } from "./biome";
+import { aoFactor, combinedLight, FACE_SHADE, lightBrightness } from "./light";
 import { createTerrainMaterial } from "./material";
 import { isAir, isWaterlogFluid, type BlockModelResolver } from "./resolve";
 import type {
@@ -51,6 +52,10 @@ export class TexturedMesher implements Mesher {
   private readonly resolver: BlockModelResolver;
   private readonly biomeAt: BiomeAt | null;
   private readonly custom: CustomGeometryHook | null;
+  /** Smooth lighting + AO; default on (goldens regenerate with this path). */
+  readonly smoothLighting: boolean;
+  /** Daylight factor 0..1 applied to sky light (1 = noon). */
+  skyDarken: number;
   private texture: THREE.CanvasTexture;
   private readonly matOpaque: THREE.RawShaderMaterial;
   private readonly matTransparent: THREE.RawShaderMaterial;
@@ -64,7 +69,7 @@ export class TexturedMesher implements Mesher {
   /**
    * @param atlas - Packed terrain atlas.
    * @param resolver - Block state → model.
-   * @param opts - Optional biome lookup + custom geometry hook.
+   * @param opts - Optional biome lookup, custom geometry, smooth-lighting flag.
    */
   constructor(
     atlas: TerrainAtlas,
@@ -72,12 +77,18 @@ export class TexturedMesher implements Mesher {
     opts?: {
       biomeAt?: BiomeAt | null;
       customGeometry?: CustomGeometryHook | null;
+      /** Per-vertex light + AO. Default true. */
+      smoothLighting?: boolean;
+      /** Sky daylight factor 0..1. Default 1 (noon). */
+      skyDarken?: number;
     },
   ) {
     this.atlas = atlas;
     this.resolver = resolver;
     this.biomeAt = opts?.biomeAt ?? null;
     this.custom = opts?.customGeometry ?? null;
+    this.smoothLighting = opts?.smoothLighting !== false;
+    this.skyDarken = opts?.skyDarken ?? 1;
 
     this.texture = new THREE.CanvasTexture(atlas.imageSource());
     this.texture.magFilter = THREE.NearestFilter;
@@ -103,6 +114,31 @@ export class TexturedMesher implements Mesher {
   }
 
   /**
+   * Push distance-fog uniforms into both terrain passes (matches scene fog).
+   *
+   * @param color - Fog RGB 0..1, or null to disable.
+   * @param near - Fog start distance.
+   * @param far - Fog end distance.
+   */
+  setFog(
+    color: { r: number; g: number; b: number } | null,
+    near = 0,
+    far = 1,
+  ): void {
+    for (const mat of [this.matOpaque, this.matTransparent]) {
+      const u = mat.uniforms;
+      if (color) {
+        (u.fogColor!.value as THREE.Vector3).set(color.r, color.g, color.b);
+        u.fogNear!.value = near;
+        u.fogFar!.value = far;
+        u.fogEnabled!.value = 1;
+      } else {
+        u.fogEnabled!.value = 0;
+      }
+    }
+  }
+
+  /**
    * Remesh one section.
    *
    * @param section - Decoded section (optional layer-1 via duck typing).
@@ -123,6 +159,10 @@ export class TexturedMesher implements Mesher {
     const cx = column.x;
     const cz = column.z;
     const sy = section.y;
+    // Prefer column wire biomes; fall back to constructor hook.
+    const columnBiome = biomeAtFromState(state);
+    const biomeAt: BiomeAt = (x, z) =>
+      columnBiome(x, z) ?? this.biomeAt?.(x, z) ?? null;
 
     let quadsBefore = 0;
     let instanceCount = 0;
@@ -149,6 +189,16 @@ export class TexturedMesher implements Mesher {
       return neighbourBlock(state, cx, cz, sy, lx, ly, lz);
     };
 
+    const lightCtx: LightCtx = {
+      state,
+      cx,
+      cz,
+      sy,
+      resolver: this.resolver,
+      skyDarken: this.skyDarken,
+      smooth: this.smoothLighting,
+    };
+
     for (let x = 0; x < 16; x++) {
       for (let z = 0; z < 16; z++) {
         for (let y = 0; y < 16; y++) {
@@ -165,6 +215,7 @@ export class TexturedMesher implements Mesher {
               originZ,
               tick,
               blockAt,
+              biomeAt,
               emits,
               () => {
                 quadsBefore++;
@@ -191,6 +242,7 @@ export class TexturedMesher implements Mesher {
               wz,
               tick,
               blockAt,
+              biomeAt,
               emits,
               () => {
                 quadsBefore++;
@@ -215,7 +267,7 @@ export class TexturedMesher implements Mesher {
             const app = cube.faces[d.face];
             const texName = app.texture || FALLBACK_TEXTURE;
             const uv = this.atlas.uvFor(texName, tick, wx, wy, wz);
-            const tint = tintAt(this.biomeAt, app.tint, wx, wz);
+            const tint = tintAt(biomeAt, app.tint, wx, wz);
             const color = new THREE.Color(tint.r, tint.g, tint.b);
             const key = `${pass}|${d.dir}|${texName}|${app.tint}|${app.rotation}|${uv.u0},${uv.v0},${uv.u1},${uv.v1}`;
             emits.push({
@@ -246,6 +298,7 @@ export class TexturedMesher implements Mesher {
             originZ,
             tick,
             blockAt,
+            biomeAt,
             emits,
             () => {
               quadsBefore++;
@@ -255,8 +308,8 @@ export class TexturedMesher implements Mesher {
       }
     }
 
-    // Greedy merge: group by (pass, dir, key material), then merge on face plane.
-    const merged = greedyMerge(emits);
+    // Smooth lighting needs per-unit-face corners; skip greedy merge when on.
+    const merged = this.smoothLighting ? emits : greedyMerge(emits);
     this.lastStats = {
       quadsBeforeMerge: quadsBefore,
       quadsAfterMerge: merged.length,
@@ -275,6 +328,7 @@ export class TexturedMesher implements Mesher {
         originZ,
         q,
         d,
+        lightCtx,
       );
     }
 
@@ -298,6 +352,7 @@ export class TexturedMesher implements Mesher {
     originZ: number,
     tick: number,
     blockAt: (x: number, y: number, z: number) => Block | undefined,
+    biomeAt: BiomeAt,
     emits: MergeQuad[],
     onQuad: () => void,
   ): void {
@@ -315,6 +370,7 @@ export class TexturedMesher implements Mesher {
       originZ + z,
       tick,
       blockAt,
+      biomeAt,
       emits,
       onQuad,
     );
@@ -330,13 +386,14 @@ export class TexturedMesher implements Mesher {
     wz: number,
     tick: number,
     blockAt: (x: number, y: number, z: number) => Block | undefined,
+    biomeAt: BiomeAt,
     emits: MergeQuad[],
     onQuad: () => void,
   ): void {
     const model = this.resolver.resolveLiquid(block);
     if (!model) return;
     const height = liquidHeight(model.depth);
-    const tint = tintAt(this.biomeAt, model.tint, wx, wz);
+    const tint = tintAt(biomeAt, model.tint, wx, wz);
     const color = new THREE.Color(tint.r, tint.g, tint.b);
     const still = this.atlas.uvFor(model.textureStill, tick, wx, wy, wz);
     const flow = this.atlas.uvFor(model.textureFlow, tick, wx, wy, wz);
@@ -623,6 +680,16 @@ function axisDelta(axis: 0 | 1 | 2): [number, number, number] {
   return [0, 0, 1];
 }
 
+interface LightCtx {
+  state: WorldState;
+  cx: number;
+  cz: number;
+  sy: number;
+  resolver: BlockModelResolver;
+  skyDarken: number;
+  smooth: boolean;
+}
+
 function pushMergedQuad(
   buf: MeshBuffers,
   originX: number,
@@ -630,6 +697,7 @@ function pushMergedQuad(
   originZ: number,
   q: MergeQuad,
   d: (typeof DIRS)[number],
+  light: LightCtx,
 ): void {
   const x0 = originX + q.x;
   const y0 = originY + q.y;
@@ -646,6 +714,9 @@ function pushMergedQuad(
     Math.abs(uv.u1 - uv.u0),
     Math.abs(uv.v1 - uv.v0),
   ];
+  const shade = FACE_SHADE[d.dir] ?? 1;
+  // Corner brightness multipliers (tint × face shade × light × AO).
+  const cornerMul = vertexLightMultipliers(q, d, light, shade);
   const order = [0, 1, 2, 0, 2, 3];
   for (const i of order) {
     const c = corners[i]!;
@@ -654,8 +725,231 @@ function pushMergedQuad(
     buf.tileUv.push(t[0], t[1]);
     buf.atlasRect.push(rect[0], rect[1], rect[2], rect[3]);
     buf.tileRot.push(rotation);
-    buf.col.push(color.r, color.g, color.b);
+    const m = cornerMul[i]!;
+    buf.col.push(color.r * m, color.g * m, color.b * m);
   }
+}
+
+/**
+ * Per-corner light×AO×faceShade multipliers for a face (order = faceCorners).
+ *
+ * Smooth path: average combined light of the 4 blocks around each corner, then
+ * AO-darken by how many of the three outer cells occlude.
+ * Flat path: sample once at the face-neighbour cell.
+ *
+ * @param q - Emitted/merged quad in section-local coords.
+ * @param d - Face direction descriptor.
+ * @param light - World light context.
+ * @param shade - Directional face shade.
+ * @returns four multipliers in faceCorners order.
+ */
+function vertexLightMultipliers(
+  q: MergeQuad,
+  d: (typeof DIRS)[number],
+  light: LightCtx,
+  shade: number,
+): [number, number, number, number] {
+  const nx = q.x + d.dx;
+  const ny = q.y + d.dy;
+  const nz = q.z + d.dz;
+
+  if (!light.smooth) {
+    const level = sampleCombined(light, nx, ny, nz);
+    const m = lightBrightness(level) * shade;
+    return [m, m, m, m];
+  }
+
+  // UV sign per faceCorners corner index: which way from the face cell.
+  const uvSigns = cornerUvSigns(d.dir, q.du, q.dv);
+  const out: [number, number, number, number] = [1, 1, 1, 1];
+  for (let i = 0; i < 4; i++) {
+    const [su, sv] = uvSigns[i]!;
+    const uOff = axisDelta(d.uAxis);
+    const vOff = axisDelta(d.vAxis);
+    const sx = uOff[0]! * su;
+    const sy = uOff[1]! * su;
+    const sz = uOff[2]! * su;
+    const tx = vOff[0]! * sv;
+    const ty = vOff[1]! * sv;
+    const tz = vOff[2]! * sv;
+
+    const c0 = sampleCombined(light, nx, ny, nz);
+    const c1 = sampleCombined(light, nx + sx, ny + sy, nz + sz);
+    const c2 = sampleCombined(light, nx + tx, ny + ty, nz + tz);
+    const c3 = sampleCombined(light, nx + sx + tx, ny + sy + ty, nz + sz + tz);
+    const avg = (c0 + c1 + c2 + c3) * 0.25;
+
+    const o1 = cellOccludes(light, nx + sx, ny + sy, nz + sz);
+    const o2 = cellOccludes(light, nx + tx, ny + ty, nz + tz);
+    const o3 = cellOccludes(light, nx + sx + tx, ny + sy + ty, nz + sz + tz);
+    out[i] = lightBrightness(avg) * aoFactor(o1, o2, o3) * shade;
+  }
+  return out;
+}
+
+/**
+ * UV corner signs matching {@link faceCorners} / {@link tileCornersForDir}.
+ * Values are −1 (toward u/v=0 edge) or +1 (toward u/v=du/dv edge), relative
+ * to the face-neighbour cell — for unit faces du=dv=1 this is ±1 toward the
+ * adjacent column along that axis.
+ *
+ * @param dir - Face direction.
+ * @param du - Merged size along U (only unit faces used with smooth lighting).
+ * @param dv - Merged size along V.
+ * @returns four `[su,sv]` pairs.
+ */
+function cornerUvSigns(
+  dir: Dir,
+  du: number,
+  dv: number,
+): Array<[number, number]> {
+  // Signs point from the face-neighbour cell toward each corner's outer sides.
+  // For a unit face the neighbour sits on the face; corners need −1 toward the
+  // block's low-U/V edges and +0/+du toward high — use −1 / +1 with the high
+  // side meaning "into the next cell past the high edge".
+  void du;
+  void dv;
+  if (dir === 2) {
+    // +Y corners: (0,0),(0,dv),(du,dv),(du,0) in (u,v)=(x,z)
+    return [
+      [-1, -1],
+      [-1, 1],
+      [1, 1],
+      [1, -1],
+    ];
+  }
+  if (dir === 3) {
+    // -Y: (0,0),(du,0),(du,dv),(0,dv)
+    return [
+      [-1, -1],
+      [1, -1],
+      [1, 1],
+      [-1, 1],
+    ];
+  }
+  // Sides: (u0,v0),(u1,v0),(u1,v1),(u0,v1)
+  return [
+    [-1, -1],
+    [1, -1],
+    [1, 1],
+    [-1, 1],
+  ];
+}
+
+/**
+ * Sample combined light at a section-local neighbour coordinate.
+ *
+ * @param light - Context.
+ * @param lx - Local X (may be outside 0..15).
+ * @param ly - Local Y.
+ * @param lz - Local Z.
+ * @returns combined level 0..15.
+ */
+function sampleCombined(
+  light: LightCtx,
+  lx: number,
+  ly: number,
+  lz: number,
+): number {
+  const { sky, block } = neighbourLight(
+    light.state,
+    light.cx,
+    light.cz,
+    light.sy,
+    lx,
+    ly,
+    lz,
+  );
+  return combinedLight(sky, block, light.skyDarken);
+}
+
+/**
+ * Whether the cell at a local neighbour coordinate occludes for AO.
+ *
+ * @param light - Context.
+ * @param lx - Local X.
+ * @param ly - Local Y.
+ * @param lz - Local Z.
+ * @returns true when an opaque block occupies the cell.
+ */
+function cellOccludes(
+  light: LightCtx,
+  lx: number,
+  ly: number,
+  lz: number,
+): boolean {
+  const b = neighbourBlock(
+    light.state,
+    light.cx,
+    light.cz,
+    light.sy,
+    lx,
+    ly,
+    lz,
+  );
+  if (!b || isAir(b)) return false;
+  return light.resolver.occludes(b);
+}
+
+/**
+ * Sky/block light at a neighbour cell. Missing/requested → sky 15, block 0.
+ *
+ * @param state - World.
+ * @param cx - Column X.
+ * @param cz - Column Z.
+ * @param sy - Section Y.
+ * @param lx - Local neighbour X (may be outside 0..15).
+ * @param ly - Local neighbour Y.
+ * @param lz - Local neighbour Z.
+ * @returns sky and block levels.
+ */
+export function neighbourLight(
+  state: WorldState,
+  cx: number,
+  cz: number,
+  sy: number,
+  lx: number,
+  ly: number,
+  lz: number,
+): { sky: number; block: number } {
+  let ncx = cx;
+  let ncz = cz;
+  let nsy = sy;
+  let x = lx;
+  let y = ly;
+  let z = lz;
+  if (x < 0) {
+    ncx--;
+    x = 15;
+  } else if (x > 15) {
+    ncx++;
+    x = 0;
+  }
+  if (y < 0) {
+    nsy--;
+    y = 15;
+  } else if (y > 15) {
+    nsy++;
+    y = 0;
+  }
+  if (z < 0) {
+    ncz--;
+    z = 15;
+  } else if (z > 15) {
+    ncz++;
+    z = 0;
+  }
+
+  const col = state.columns.get(columnKey(ncx, ncz));
+  if (!col || col.state === "requested") return { sky: 15, block: 0 };
+  const sec = col.sections.get(nsy);
+  if (!sec) return { sky: 15, block: 0 };
+  const i = sectionIndex(x, y, z);
+  // Tests may omit light arrays — treat as omission defaults.
+  return {
+    sky: sec.skyLight?.[i] ?? 15,
+    block: sec.blockLight?.[i] ?? 0,
+  };
 }
 
 /** Tile UV per faceCorners vertex (0..du / 0..dv in face U/V). */

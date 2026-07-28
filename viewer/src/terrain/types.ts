@@ -86,7 +86,8 @@ export interface LiquidModel {
 }
 
 /**
- * Biome lookup. Snapshot has no biome data yet — return null to skip tint.
+ * Biome lookup. Column wire biomes feed this via `biomeAtFromState`;
+ * return null to skip tint (untinted white).
  *
  * @param x - Block X.
  * @param z - Block Z.

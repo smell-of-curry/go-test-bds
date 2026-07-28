@@ -1,3 +1,5 @@
+import { biomeIndex, columnKey } from "../protocol";
+import type { WorldState } from "../store";
 import type { BiomeAt, TintRgb } from "./types";
 
 /** Default grass / foliage / water colours when biome is unknown (null). */
@@ -30,7 +32,60 @@ const BIOME_TINTS: Record<string, Partial<typeof PLAINS>> = {
     foliage: { r: 0.4, g: 0.45, b: 0.2 },
     water: { r: 0.35, g: 0.45, b: 0.4 },
   },
+  "minecraft:cherry_grove": {
+    grass: { r: 0.7, g: 0.7, b: 0.5 },
+    foliage: { r: 0.85, g: 0.55, b: 0.7 },
+    water: { r: 0.3, g: 0.5, b: 0.9 },
+  },
 };
+
+/**
+ * Normalise a wire biome palette entry to a `minecraft:…` id.
+ * Numeric / unknown entries return null so tint falls back to untinted/plains.
+ *
+ * @param entry - Palette entry from the snapshot (`plains`, `minecraft:plains`, or id).
+ * @returns namespaced biome id, or null when unusable.
+ */
+export function normalizeBiomeId(
+  entry: string | number | null | undefined,
+): string | null {
+  if (entry == null) return null;
+  if (typeof entry === "number") return null;
+  const s = entry.trim();
+  if (!s) return null;
+  if (/^\d+$/.test(s)) return null;
+  if (s.includes(":")) return s;
+  return `minecraft:${s}`;
+}
+
+/**
+ * Look up the surface biome id at a block column from stored wire data.
+ *
+ * @param state - World state.
+ * @param x - Block X.
+ * @param z - Block Z.
+ * @returns namespaced biome id, or null when missing/unknown.
+ */
+export function biomeIdAt(
+  state: WorldState,
+  x: number,
+  z: number,
+): string | null {
+  const col = state.columns.get(columnKey(x >> 4, z >> 4));
+  if (!col?.biomeIndices || !col.biomePalette?.length) return null;
+  const idx = col.biomeIndices[biomeIndex(x & 15, z & 15)]!;
+  return normalizeBiomeId(col.biomePalette[idx]);
+}
+
+/**
+ * Build a {@link BiomeAt} that reads column `biomePalette`/`biomes` from state.
+ *
+ * @param state - World state (captured by reference; call during mesh with current state).
+ * @returns lookup function.
+ */
+export function biomeAtFromState(state: WorldState): BiomeAt {
+  return (x, z) => biomeIdAt(state, x, z);
+}
 
 /**
  * Resolve a tint RGB for a channel at a block column.
@@ -55,19 +110,3 @@ export function tintAt(
   const table = BIOME_TINTS[id];
   return table?.[channel] ?? PLAINS[channel];
 }
-
-/**
- * Go must expose per-column (or per-block) biome ids on the snapshot for tint
- * to light up. Until then, pass `biomeAt: () => null` or omit it.
- *
- * Required wire shape (proposal):
- * - On each `Column`: `"biome": "minecraft:plains"` (single biome per column),
- *   **or** `"biomes": "<base64 uint16[256]>"` + `"biomePalette": ["minecraft:plains", …]`
- *   for 16×16 xz. Height-varying biomes can wait.
- * - Decoder fills a `biomeAt(x,z)` the mesher already accepts.
- */
-export const BIOME_SNAPSHOT_NOTE = `
-Column (or section) must carry biome identity. Minimal: column.biome string.
-Better: 16×2D biome palette like block layers. Viewer already accepts BiomeAt;
-store should build it from the new field. biomes_client.json supplies colours.
-`.trim();
