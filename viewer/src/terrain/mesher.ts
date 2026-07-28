@@ -5,6 +5,7 @@ import { columnKey, sectionIndex } from "../protocol";
 import type { DecodedSection, StoredColumn, WorldState } from "../store";
 import { FALLBACK_TEXTURE, type TerrainAtlas } from "./atlas";
 import { tintAt } from "./biome";
+import { createTerrainMaterial } from "./material";
 import { isAir, isWaterlogFluid, type BlockModelResolver } from "./resolve";
 import type {
   AtlasUv,
@@ -51,8 +52,8 @@ export class TexturedMesher implements Mesher {
   private readonly biomeAt: BiomeAt | null;
   private readonly custom: CustomGeometryHook | null;
   private readonly texture: THREE.CanvasTexture;
-  private readonly matOpaque: THREE.MeshBasicMaterial;
-  private readonly matTransparent: THREE.MeshBasicMaterial;
+  private readonly matOpaque: THREE.RawShaderMaterial;
+  private readonly matTransparent: THREE.RawShaderMaterial;
   /** Last mesh stats (tests / debug). */
   lastStats: EmitStats = {
     quadsBeforeMerge: 0,
@@ -82,20 +83,22 @@ export class TexturedMesher implements Mesher {
     this.texture.magFilter = THREE.NearestFilter;
     this.texture.minFilter = THREE.NearestFilter;
     this.texture.generateMipmaps = false;
-    this.texture.flipY = false;
-    this.texture.colorSpace = THREE.SRGBColorSpace;
+    // flipY=true matches atlas UV math (canvas y=0 at top → GL v=1).
+    this.texture.flipY = true;
+    // RawShaderMaterial samples as-authored; no sRGB→linear darkening.
+    this.texture.colorSpace = THREE.NoColorSpace;
     this.texture.needsUpdate = true;
 
-    this.matOpaque = new THREE.MeshBasicMaterial({
+    this.matOpaque = createTerrainMaterial({
       map: this.texture,
-      vertexColors: true,
+      atlasWidth: atlas.width,
+      atlasHeight: atlas.height,
     });
-    this.matTransparent = new THREE.MeshBasicMaterial({
+    this.matTransparent = createTerrainMaterial({
       map: this.texture,
-      vertexColors: true,
+      atlasWidth: atlas.width,
+      atlasHeight: atlas.height,
       transparent: true,
-      alphaTest: 0.1,
-      depthWrite: false,
     });
   }
 
@@ -134,6 +137,7 @@ export class TexturedMesher implements Mesher {
       du: number;
       dv: number;
       uv: AtlasUv;
+      rotation: 0 | 1 | 2 | 3;
       color: THREE.Color;
       yTop: number;
       yBot: number;
@@ -223,7 +227,8 @@ export class TexturedMesher implements Mesher {
               z,
               du: 1,
               dv: 1,
-              uv: rotateUv(uv, app.rotation),
+              uv,
+              rotation: app.rotation,
               color,
               yTop: 1,
               yBot: 0,
@@ -258,37 +263,27 @@ export class TexturedMesher implements Mesher {
       triangles: merged.length * 2,
     };
 
-    const opaquePos: number[] = [];
-    const opaqueUv: number[] = [];
-    const opaqueCol: number[] = [];
-    const transPos: number[] = [];
-    const transUv: number[] = [];
-    const transCol: number[] = [];
+    const opaque = emptyBuffers();
+    const trans = emptyBuffers();
 
     for (const q of merged) {
       const d = DIRS[q.dir]!;
-      const pos = q.pass === "opaque" ? opaquePos : transPos;
-      const uvs = q.pass === "opaque" ? opaqueUv : transUv;
-      const cols = q.pass === "opaque" ? opaqueCol : transCol;
-      pushMergedQuad(pos, uvs, cols, originX, originY, originZ, q, d);
+      pushMergedQuad(
+        q.pass === "opaque" ? opaque : trans,
+        originX,
+        originY,
+        originZ,
+        q,
+        d,
+      );
     }
 
     const meshes: THREE.Mesh[] = [];
-    if (opaquePos.length > 0) {
-      meshes.push(
-        makeMesh(opaquePos, opaqueUv, opaqueCol, this.matOpaque, "opaque"),
-      );
+    if (opaque.pos.length > 0) {
+      meshes.push(makeMesh(opaque, this.matOpaque, "opaque"));
     }
-    if (transPos.length > 0) {
-      meshes.push(
-        makeMesh(
-          transPos,
-          transUv,
-          transCol,
-          this.matTransparent,
-          "transparent",
-        ),
-      );
+    if (trans.pos.length > 0) {
+      meshes.push(makeMesh(trans, this.matTransparent, "transparent"));
     }
     return { meshes, instanceCount };
   }
@@ -303,20 +298,7 @@ export class TexturedMesher implements Mesher {
     originZ: number,
     tick: number,
     blockAt: (x: number, y: number, z: number) => Block | undefined,
-    emits: Array<{
-      key: string;
-      pass: "opaque" | "transparent";
-      dir: Dir;
-      x: number;
-      y: number;
-      z: number;
-      du: number;
-      dv: number;
-      uv: AtlasUv;
-      color: THREE.Color;
-      yTop: number;
-      yBot: number;
-    }>,
+    emits: MergeQuad[],
     onQuad: () => void,
   ): void {
     if (!section.indices1 || !section.palette1) return;
@@ -348,20 +330,7 @@ export class TexturedMesher implements Mesher {
     wz: number,
     tick: number,
     blockAt: (x: number, y: number, z: number) => Block | undefined,
-    emits: Array<{
-      key: string;
-      pass: "opaque" | "transparent";
-      dir: Dir;
-      x: number;
-      y: number;
-      z: number;
-      du: number;
-      dv: number;
-      uv: AtlasUv;
-      color: THREE.Color;
-      yTop: number;
-      yBot: number;
-    }>,
+    emits: MergeQuad[],
     onQuad: () => void,
   ): void {
     const model = this.resolver.resolveLiquid(block);
@@ -372,7 +341,7 @@ export class TexturedMesher implements Mesher {
     const still = this.atlas.uvFor(model.textureStill, tick, wx, wy, wz);
     const flow = this.atlas.uvFor(model.textureFlow, tick, wx, wy, wz);
     const useFlow = model.flowYaw != null;
-    const topUv = useFlow ? rotateUv(flow, yawToRot(model.flowYaw!)) : still;
+    const flowRot = useFlow ? yawToRot(model.flowYaw!) : 0;
 
     // Top surface always (unless blocked by liquid above).
     const above = blockAt(x, y + 1, z);
@@ -388,7 +357,8 @@ export class TexturedMesher implements Mesher {
         z,
         du: 1,
         dv: 1,
-        uv: topUv,
+        uv: useFlow ? flow : still,
+        rotation: flowRot,
         color,
         yTop: height,
         yBot: 0,
@@ -413,7 +383,8 @@ export class TexturedMesher implements Mesher {
         z,
         du: 1,
         dv: 1,
-        uv: useFlow ? rotateUv(flow, yawToRot(model.flowYaw!)) : flow,
+        uv: flow,
+        rotation: flowRot,
         color,
         yTop: height,
         yBot: 0,
@@ -516,26 +487,6 @@ function yawToRot(yaw: number): 0 | 1 | 2 | 3 {
   return (((Math.round(yaw / 90) % 4) + 4) % 4) as 0 | 1 | 2 | 3;
 }
 
-function rotateUv(uv: AtlasUv, rot: 0 | 1 | 2 | 3): AtlasUv {
-  if (rot === 0) return uv;
-  const corners: Array<[number, number]> = [
-    [uv.u0, uv.v0],
-    [uv.u1, uv.v0],
-    [uv.u1, uv.v1],
-    [uv.u0, uv.v1],
-  ];
-  const r = rot % 4;
-  const c0 = corners[(0 + r) % 4]!;
-  const c2 = corners[(2 + r) % 4]!;
-  return {
-    u0: c0[0],
-    v0: c0[1],
-    u1: c2[0],
-    v1: c2[1],
-    px: uv.px,
-  };
-}
-
 interface MergeQuad {
   key: string;
   pass: "opaque" | "transparent";
@@ -546,9 +497,22 @@ interface MergeQuad {
   du: number;
   dv: number;
   uv: AtlasUv;
+  rotation: 0 | 1 | 2 | 3;
   color: THREE.Color;
   yTop: number;
   yBot: number;
+}
+
+interface MeshBuffers {
+  pos: number[];
+  tileUv: number[];
+  atlasRect: number[];
+  tileRot: number[];
+  col: number[];
+}
+
+function emptyBuffers(): MeshBuffers {
+  return { pos: [], tileUv: [], atlasRect: [], tileRot: [], col: [] };
 }
 
 /**
@@ -635,9 +599,7 @@ function axisDelta(axis: 0 | 1 | 2): [number, number, number] {
 }
 
 function pushMergedQuad(
-  pos: number[],
-  uvs: number[],
-  cols: number[],
+  buf: MeshBuffers,
   originX: number,
   originY: number,
   originZ: number,
@@ -647,35 +609,67 @@ function pushMergedQuad(
   const x0 = originX + q.x;
   const y0 = originY + q.y;
   const z0 = originZ + q.z;
-  const { du, dv, uv, color, yTop, yBot } = q;
+  const { du, dv, uv, color, yTop, yBot, rotation } = q;
 
-  // Build 4 corners in world space for this face direction + merge size.
   const corners = faceCorners(d.dir, x0, y0, z0, du, dv, yBot, yTop);
-  // Two tris: 0,1,2  0,2,3
+  // Tile-space UVs matched to faceCorners order (CCW outward).
+  // +Y uses v along +Z first in the corner list — see faceCorners(dir=2).
+  const tileCorners = tileCornersForDir(d.dir, du, dv);
+  const rect: [number, number, number, number] = [
+    Math.min(uv.u0, uv.u1),
+    Math.min(uv.v0, uv.v1),
+    Math.abs(uv.u1 - uv.u0),
+    Math.abs(uv.v1 - uv.v0),
+  ];
   const order = [0, 1, 2, 0, 2, 3];
-  const uvCorners: Array<[number, number]> = [
-    [uv.u0, uv.v0],
-    [uv.u1, uv.v0],
-    [uv.u1, uv.v1],
-    [uv.u0, uv.v1],
-  ];
-  // Stretch UV across merge.
-  const stretched: Array<[number, number]> = [
-    [uv.u0, uv.v0],
-    [uv.u0 + (uv.u1 - uv.u0) * du, uv.v0],
-    [uv.u0 + (uv.u1 - uv.u0) * du, uv.v0 + (uv.v1 - uv.v0) * dv],
-    [uv.u0, uv.v0 + (uv.v1 - uv.v0) * dv],
-  ];
-  void uvCorners;
   for (const i of order) {
     const c = corners[i]!;
-    pos.push(c[0], c[1], c[2]);
-    const t = stretched[i]!;
-    uvs.push(t[0], t[1]);
-    cols.push(color.r, color.g, color.b);
+    buf.pos.push(c[0], c[1], c[2]);
+    const t = tileCorners[i]!;
+    buf.tileUv.push(t[0], t[1]);
+    buf.atlasRect.push(rect[0], rect[1], rect[2], rect[3]);
+    buf.tileRot.push(rotation);
+    buf.col.push(color.r, color.g, color.b);
   }
 }
 
+/** Tile UV per faceCorners vertex (0..du / 0..dv in face U/V). */
+function tileCornersForDir(
+  dir: Dir,
+  du: number,
+  dv: number,
+): Array<[number, number]> {
+  if (dir === 2) {
+    // faceCorners +Y: (0,0),(0,dv),(du,dv),(du,0) in (u,v)=(x,z)
+    return [
+      [0, 0],
+      [0, dv],
+      [du, dv],
+      [du, 0],
+    ];
+  }
+  if (dir === 3) {
+    // faceCorners -Y: (0,0),(du,0),(du,dv),(0,dv)
+    return [
+      [0, 0],
+      [du, 0],
+      [du, dv],
+      [0, dv],
+    ];
+  }
+  // Side faces: corners listed as (u0,v0),(u1,v0),(u1,v1),(u0,v1)
+  return [
+    [0, 0],
+    [du, 0],
+    [du, dv],
+    [0, dv],
+  ];
+}
+
+/**
+ * Four corners of a merged face, CCW when viewed from outside (outward normal).
+ * Tile UV corners stay `[0,0],[du,0],[du,dv],[0,dv]` in this same order.
+ */
 function faceCorners(
   dir: Dir,
   x: number,
@@ -688,7 +682,7 @@ function faceCorners(
 ): Array<[number, number, number]> {
   const vh = yBot + (yTop - yBot) * dv;
   if (dir === 0) {
-    // +X east: u=Z, v=Y
+    // +X east: u=+Z, v=+Y
     return [
       [x + 1, y + yBot, z],
       [x + 1, y + yBot, z + du],
@@ -697,7 +691,7 @@ function faceCorners(
     ];
   }
   if (dir === 1) {
-    // -X west: u=Z, v=Y
+    // -X west: u=+Z, v=+Y — CCW from -X
     return [
       [x, y + yBot, z + du],
       [x, y + yBot, z],
@@ -706,27 +700,27 @@ function faceCorners(
     ];
   }
   if (dir === 2) {
-    // +Y up: u=X, v=Z
+    // +Y up: u=+X, v=+Z — CCW from +Y (was wound -Y; culled from above)
     const yy = y + yTop;
     return [
       [x, yy, z],
-      [x + du, yy, z],
-      [x + du, yy, z + dv],
       [x, yy, z + dv],
+      [x + du, yy, z + dv],
+      [x + du, yy, z],
     ];
   }
   if (dir === 3) {
-    // -Y down: u=X, v=Z
+    // -Y down: u=+X, v=+Z — CCW from -Y
     const yy = y + yBot;
     return [
-      [x, yy, z + dv],
-      [x + du, yy, z + dv],
-      [x + du, yy, z],
       [x, yy, z],
+      [x + du, yy, z],
+      [x + du, yy, z + dv],
+      [x, yy, z + dv],
     ];
   }
   if (dir === 4) {
-    // +Z south: u=X, v=Y
+    // +Z south: u=+X, v=+Y
     return [
       [x, y + yBot, z + 1],
       [x + du, y + yBot, z + 1],
@@ -734,7 +728,7 @@ function faceCorners(
       [x, y + vh, z + 1],
     ];
   }
-  // -Z north: u=X, v=Y
+  // -Z north: u=+X, v=+Y — CCW from -Z
   return [
     [x + du, y + yBot, z],
     [x, y + yBot, z],
@@ -744,16 +738,19 @@ function faceCorners(
 }
 
 function makeMesh(
-  pos: number[],
-  uv: number[],
-  col: number[],
-  mat: THREE.MeshBasicMaterial,
+  buf: MeshBuffers,
+  mat: THREE.RawShaderMaterial,
   pass: string,
 ): THREE.Mesh {
   const geo = new THREE.BufferGeometry();
-  geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
-  geo.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
-  geo.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
+  geo.setAttribute("position", new THREE.Float32BufferAttribute(buf.pos, 3));
+  geo.setAttribute("tileUv", new THREE.Float32BufferAttribute(buf.tileUv, 2));
+  geo.setAttribute(
+    "atlasRect",
+    new THREE.Float32BufferAttribute(buf.atlasRect, 4),
+  );
+  geo.setAttribute("tileRot", new THREE.Float32BufferAttribute(buf.tileRot, 1));
+  geo.setAttribute("vertColor", new THREE.Float32BufferAttribute(buf.col, 3));
   const mesh = new THREE.Mesh(geo, mat);
   mesh.frustumCulled = false;
   mesh.userData.pass = pass;

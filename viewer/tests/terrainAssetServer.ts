@@ -107,6 +107,34 @@ export function solidPng(
 }
 
 /**
+ * 16×16 tile: left half colour A, right half colour B (for tiling pixel tests).
+ *
+ * @param size - Edge length.
+ * @param left - RGB for x < size/2.
+ * @param right - RGB for x >= size/2.
+ * @returns PNG bytes.
+ */
+export function stripePng(
+  size: number,
+  left: [number, number, number],
+  right: [number, number, number],
+): Uint8Array {
+  const rgba = Buffer.alloc(size * size * 4);
+  const half = size / 2;
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const [r, g, b] = x < half ? left : right;
+      const i = (y * size + x) * 4;
+      rgba[i] = r;
+      rgba[i + 1] = g;
+      rgba[i + 2] = b;
+      rgba[i + 3] = 255;
+    }
+  }
+  return encodePng(size, size, rgba);
+}
+
+/**
  * Vertical flipbook strip: N square frames stacked.
  *
  * @param size - Frame edge.
@@ -172,6 +200,7 @@ export function buildFixturePack(): Map<string, Uint8Array> {
       "minecraft:oak_log": {
         textures: { up: "log_oak_top", down: "log_oak_top", side: "log_oak" },
       },
+      "minecraft:test_stripe": { textures: "stripe" },
     }),
   );
 
@@ -201,6 +230,7 @@ export function buildFixturePack(): Map<string, Uint8Array> {
         log_oak: { textures: "textures/blocks/log_oak" },
         log_oak_top: { textures: "textures/blocks/log_oak_top" },
         big_tile: { textures: "textures/blocks/big_tile" },
+        stripe: { textures: "textures/blocks/stripe" },
         // Intentionally no entry for missing_only — fallback test.
       },
     }),
@@ -232,6 +262,8 @@ export function buildFixturePack(): Map<string, Uint8Array> {
   set("textures/blocks/log_oak.png", solidPng(16, 16, 100, 70, 30));
   set("textures/blocks/log_oak_top.png", solidPng(16, 16, 160, 130, 80));
   set("textures/blocks/big_tile.png", solidPng(32, 32, 255, 128, 0));
+  // Left red / right cyan — pixel test samples same phase one tile apart.
+  set("textures/blocks/stripe.png", stripePng(16, [255, 0, 0], [0, 255, 255]));
   set(
     "textures/blocks/water_still.png",
     flipbookPng(16, [

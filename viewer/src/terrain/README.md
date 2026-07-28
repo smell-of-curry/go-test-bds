@@ -15,6 +15,20 @@ const scene = new Scene(camera, asMesher);
 
 Entry: `createTexturedMesher` → `TexturedMesher` implements `Mesher`.
 
+## Material (what it does / does not)
+
+Unlit GLSL3 `RawShaderMaterial` (`toneMapped: false`, atlas `NoColorSpace`):
+
+- Samples the terrain atlas at **full authored texel brightness**.
+- Multiplies by vertex colour (biome tint when `biomeAt` is wired).
+- Resolves greedy-merged faces in the fragment shader:
+  `atlasUV = rect.xy + wrap(tileUV) * rect.zw` with a half-texel inset.
+- Far-edge fix: `fract(N) == 0` maps to `1.0` so the last pixel of a merge
+  run samples the end of the tile, not the start.
+
+Does **not** do (later stages): block light, sky light, ambient occlusion,
+smooth lighting, direction lights, or fog.
+
 ## What resolves from where
 
 | Need | Source |
@@ -47,9 +61,8 @@ Unnamed non-zero `rid` blocks (registry misses) also get `__missing__`.
 - Opaque full cubes occlude; cutout/translucent do not occlude opaques.
 - Adjacent same glass/leaves cull the shared face.
 - Transparent / cutout / liquid faces → second mesh (`userData.pass = "transparent"`).
-- Coplanar same-texture faces greedy-merged (triangle count down). UV across a
-  merge currently stretches the tile — fine for solid test colours; proper
-  world-pos tiling needs a shader later.
+- Coplanar same-texture faces greedy-merged; tile UVs repeat per block via the
+  shader above (keeps triangle count down without stretching the atlas).
 
 ## Deliberately not handled yet
 
@@ -60,3 +73,4 @@ Unnamed non-zero `rid` blocks (registry misses) also get `__missing__`.
 - Biome-coloured grass/foliage/water until Go adds biome data to the snapshot
   (see `BIOME_SNAPSHOT_NOTE` in `biome.ts`).
 - `blocks1` decode in `store.ts` (mesher already reads it when present).
+- Lighting / AO / smooth lighting (material is intentionally unlit).

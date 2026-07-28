@@ -36,6 +36,7 @@ export {
   neighbourBlock,
   liquidHeight,
 } from "./mesher";
+export { createTerrainMaterial, wrapTileCoord } from "./material";
 export { tintAt, UNTINTED, BIOME_SNAPSHOT_NOTE } from "./biome";
 export type {
   BiomeAt,

@@ -2,6 +2,7 @@ import { expect, test } from "@playwright/test";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createServer, type ViteDevServer } from "vite";
+import { writeFileSync } from "node:fs";
 import {
   flipbookFrameAt,
   facingToFrontFace,
@@ -10,6 +11,7 @@ import {
   pickVariationIndex,
   liquidFlowYaw,
   liquidHeight,
+  wrapTileCoord,
   FALLBACK_TEXTURE,
 } from "../src/terrain";
 import { BlockModelResolver } from "../src/terrain/resolve";
@@ -110,6 +112,7 @@ test.describe("terrain parse / resolve (node)", () => {
       du: 1,
       dv: 1,
       uv,
+      rotation: 0 as const,
       color,
       yTop: 1,
       yBot: 0,
@@ -122,6 +125,14 @@ test.describe("terrain parse / resolve (node)", () => {
     expect(after[0]!.du * after[0]!.dv).toBe(4);
     expect(after.length * 2).toBe(2); // triangles after
     expect(before.length * 2).toBe(8); // triangles before
+  });
+
+  test("wrapTileCoord maps fract(N)==0 far edge to 1", () => {
+    expect(wrapTileCoord(0)).toBe(0);
+    expect(wrapTileCoord(0.25)).toBeCloseTo(0.25);
+    expect(wrapTileCoord(4)).toBe(1);
+    expect(wrapTileCoord(3.0)).toBe(1);
+    expect(wrapTileCoord(2.999999)).toBeGreaterThan(0.9);
   });
 });
 
@@ -545,6 +556,193 @@ test.describe("terrain atlas + mesher (browser)", () => {
       }, assets.url);
 
       expect(ok).toBe(true);
+    } finally {
+      await page.close().catch(() => undefined);
+      await devServer?.close();
+      await assets.close();
+    }
+  });
+
+  test("merged stripe face tiles in pixels; fixture screenshot is bright", async ({
+    page,
+  }) => {
+    test.setTimeout(120_000);
+    const assets = await startTerrainAssetServer();
+    let devServer: ViteDevServer | undefined;
+    try {
+      devServer = await createServer({
+        root: viewerRoot,
+        configFile: join(viewerRoot, "vite.config.ts"),
+        server: { host: "127.0.0.1", port: 5181, strictPort: false },
+      });
+      await devServer.listen();
+      const base = devServer.resolvedUrls?.local[0];
+      if (!base) throw new Error("no vite url");
+      await page.goto(base, { waitUntil: "domcontentloaded" });
+
+      const result = await page.evaluate(async (assetBase) => {
+        const THREE = await import("/node_modules/three/build/three.module.js");
+        const { createTexturedMesher } = await import("/src/terrain/index.ts");
+        const { sectionIndex, columnKey } = await import("/src/protocol.ts");
+
+        const AIR = { name: "minecraft:air", states: {}, rid: 0 };
+        const STRIPE = {
+          name: "minecraft:test_stripe",
+          states: {},
+          rid: 1,
+        };
+        const STONE = { name: "minecraft:stone", states: {}, rid: 2 };
+        const GLASS = { name: "minecraft:glass", states: {}, rid: 3 };
+
+        const indices = new Uint16Array(4096);
+        // 8-wide stripe platform at y=0 (merged run) + stone/glass fixture.
+        for (let x = 0; x < 8; x++) indices[sectionIndex(x, 0, 0)] = 1;
+        for (let x = 0; x < 4; x++) {
+          for (let z = 2; z < 6; z++) indices[sectionIndex(x, 0, z)] = 2;
+        }
+        indices[sectionIndex(6, 1, 4)] = 3;
+
+        const section = {
+          y: 0,
+          indices,
+          palette: [AIR, STRIPE, STONE, GLASS],
+        };
+        const col = {
+          x: 0,
+          z: 0,
+          state: "complete" as const,
+          minY: 0,
+          maxY: 15,
+          sections: new Map([[0, section]]),
+        };
+        const state = {
+          schemaOk: true,
+          schemaError: null,
+          hello: null,
+          tick: 0,
+          bot: "t",
+          world: null,
+          actor: null,
+          columns: new Map([[columnKey(0, 0), col]]),
+          entities: new Map(),
+          ui: null,
+          mark: null,
+          pendingCapture: null,
+          resyncCount: 0,
+          droppedCount: 0,
+          framesReceived: 1,
+          revision: 1,
+          dirtySections: new Set(),
+          dirtyColumns: new Set(),
+          dirtyEntities: new Set(),
+          removedEntities: new Set(),
+          dirtyBlocks: [],
+          fullReset: false,
+        };
+
+        const bundle = await createTexturedMesher({ baseUrl: assetBase });
+        const { meshes } = bundle.mesher.meshSection(
+          section as never,
+          col as never,
+          state as never,
+        );
+        const stats = bundle.mesher.lastStats;
+        if (stats.quadsAfterMerge >= stats.quadsBeforeMerge) {
+          throw new Error("expected greedy merge on stripe run");
+        }
+
+        const W = 256;
+        const H = 64;
+        const renderer = new THREE.WebGLRenderer({
+          antialias: false,
+          preserveDrawingBuffer: true,
+        });
+        renderer.setSize(W, H, false);
+        renderer.setPixelRatio(1);
+        renderer.outputColorSpace = THREE.SRGBColorSpace;
+        renderer.toneMapping = THREE.NoToneMapping;
+        renderer.setClearColor(0x202020, 1);
+        document.body.appendChild(renderer.domElement);
+
+        const scene = new THREE.Scene();
+        for (const m of meshes) scene.add(m);
+
+        // Ortho top-down over the stripe (world x=0..8, z=0..1).
+        const cam = new THREE.OrthographicCamera(-4, 4, 0.5, -0.5, 0.1, 100);
+        cam.up.set(0, 0, -1);
+        cam.position.set(4, 50, 0.5);
+        cam.lookAt(4, 0, 0.5);
+        cam.updateMatrixWorld(true);
+
+        renderer.render(scene, cam);
+        const gl = renderer.getContext() as WebGLRenderingContext;
+        const pick = (px: number, py: number) => {
+          const buf = new Uint8Array(4);
+          gl.readPixels(px, py, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, buf);
+          return [buf[0]!, buf[1]!, buf[2]!] as const;
+        };
+        const midY = Math.floor(H / 2);
+        // Left half of tile 0 and tile 1 → same red; right half tile 0 → cyan.
+        const c0 = pick(Math.floor((0.25 / 8) * W), midY);
+        const c1 = pick(Math.floor((1.25 / 8) * W), midY);
+        const mid = pick(Math.floor((0.75 / 8) * W), midY);
+
+        const isRed = (c: readonly [number, number, number]) =>
+          c[0] > 180 && c[1] < 100 && c[2] < 100;
+        const isCyan = (c: readonly [number, number, number]) =>
+          c[0] < 100 && c[1] > 180 && c[2] > 180;
+
+        const shotW = 640;
+        const shotH = 360;
+        renderer.setSize(shotW, shotH, false);
+        const persp = new THREE.PerspectiveCamera(50, shotW / shotH, 0.1, 100);
+        persp.position.set(6, 8, 10);
+        persp.lookAt(3, 0, 2);
+        renderer.setClearColor(0x87ceeb, 1);
+        renderer.render(scene, persp);
+        const dataUrl = renderer.domElement.toDataURL("image/png");
+
+        const bright =
+          (c0[0] + c0[1] + c0[2]) / 3 > 80 &&
+          (mid[0] + mid[1] + mid[2]) / 3 > 80;
+
+        bundle.mesher.dispose();
+        renderer.dispose();
+        renderer.domElement.remove();
+
+        return {
+          quadsBefore: stats.quadsBeforeMerge,
+          quadsAfter: stats.quadsAfterMerge,
+          c0: [...c0],
+          c1: [...c1],
+          mid: [...mid],
+          samePhase: isRed(c0) && isRed(c1),
+          halfPhaseDiffers: isCyan(mid),
+          bright,
+          dataUrl,
+        };
+      }, assets.url);
+
+      expect(result.quadsAfter).toBeLessThan(result.quadsBefore);
+      expect(result.samePhase).toBe(true);
+      expect(result.halfPhaseDiffers).toBe(true);
+      expect(result.bright).toBe(true);
+
+      const pngPath = join(viewerRoot, "testdata", "terrain-tiling.png");
+      const b64 = result.dataUrl.replace(/^data:image\/png;base64,/, "");
+      writeFileSync(pngPath, Buffer.from(b64, "base64"));
+      console.log(
+        JSON.stringify({
+          tiling: {
+            c0: result.c0,
+            c1: result.c1,
+            mid: result.mid,
+            quadsBefore: result.quadsBefore,
+            quadsAfter: result.quadsAfter,
+          },
+          screenshot: pngPath,
+        }),
+      );
     } finally {
       await page.close().catch(() => undefined);
       await devServer?.close();
