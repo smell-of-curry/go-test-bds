@@ -5,9 +5,11 @@ import type {
 } from "./__generated__/types";
 import {
   decodeStatus,
+  decodeStatusPart,
   encodeInstruction,
   msToTicks,
   type StatusEnvelope,
+  type StatusPart,
 } from "./protocol";
 
 /** Default addon-side deadline for a single instruction, in milliseconds. */
@@ -63,6 +65,47 @@ let nextRequestId = 0;
 let subscribed = false;
 
 /**
+ * Reassembly buffers for chunked status envelopes, keyed by
+ * `<senderId>:<instructionId>`. An entry is dropped as soon as its envelope
+ * completes, or when the owning request settles or times out.
+ */
+const partBuffers = new Map<string, (string | undefined)[]>();
+
+/**
+ * Buffers one fragment of a chunked status envelope and returns the full
+ * payload once every fragment has arrived.
+ *
+ * @param senderId The entity id of the bot that sent the fragment.
+ * @param part The decoded fragment.
+ * @returns The reassembled envelope JSON, or `undefined` while incomplete.
+ */
+function bufferStatusPart(
+  senderId: string,
+  part: StatusPart,
+): string | undefined {
+  const key = `${senderId}:${part.id}`;
+  let parts = partBuffers.get(key);
+  if (!parts || parts.length !== part.total) {
+    parts = new Array<string | undefined>(part.total);
+    partBuffers.set(key, parts);
+  }
+  parts[part.index - 1] = part.fragment;
+  if (parts.some((fragment) => fragment === undefined)) return undefined;
+  partBuffers.delete(key);
+  return parts.join("");
+}
+
+/**
+ * Drops any reassembly buffer belonging to a settled or timed-out request.
+ *
+ * @param botId The entity id of the bot the request targeted.
+ * @param id The request id whose buffer should be discarded.
+ */
+function dropPartBuffer(botId: string, id: string): void {
+  partBuffers.delete(`${botId}:${id}`);
+}
+
+/**
  * Subscribes the single shared status listener.
  *
  * One listener serves every in-flight instruction: statuses are routed by
@@ -74,8 +117,20 @@ function ensureSubscribed(): void {
   subscribed = true;
 
   world.beforeEvents.chatSend.subscribe((event) => {
-    const envelope = decodeStatus(event.message);
-    if (!envelope) return;
+    let envelope = decodeStatus(event.message);
+    if (!envelope) {
+      const part = decodeStatusPart(event.message);
+      if (!part) return;
+      // Keep fragments out of the server's chat even while incomplete.
+      event.cancel = true;
+      const payload = bufferStatusPart(event.sender.id, part);
+      if (payload === undefined) return;
+      try {
+        envelope = JSON.parse(payload) as StatusEnvelope;
+      } catch {
+        return;
+      }
+    }
 
     // Keep bot bookkeeping out of the server's chat, and out of any chat
     // logging the host addon does on top of it.
@@ -128,6 +183,7 @@ function settle(id: string, envelope: StatusEnvelope): void {
   const request = pending.get(id);
   if (!request) return;
   pending.delete(id);
+  dropPartBuffer(request.botId, id);
   system.clearRun(request.timeoutHandle);
   request.resolve(envelope);
 }
@@ -163,6 +219,7 @@ export async function runAction<T extends InstructionAction, TData = unknown>(
     const timeoutHandle = system.runTimeout(
       () => {
         pending.delete(id);
+        dropPartBuffer(botId, id);
         reject(
           new InstructionError(
             action,
@@ -206,21 +263,13 @@ export async function runAction<T extends InstructionAction, TData = unknown>(
  * @returns The action's `data` payload.
  * @throws {InstructionError} if the bot reports a failure or never replies.
  */
-export async function runActionForData<
-  T extends InstructionAction,
-  TData,
->(
+export async function runActionForData<T extends InstructionAction, TData>(
   bot: Player,
   action: T,
   parameters: InstructionParametersByAction[T],
   options: RunActionOptions = {},
 ): Promise<TData> {
-  const envelope = await runAction<T, TData>(
-    bot,
-    action,
-    parameters,
-    options,
-  );
+  const envelope = await runAction<T, TData>(bot, action, parameters, options);
   return envelope.data as TData;
 }
 

@@ -1,6 +1,6 @@
 import { system } from "@minecraft/server";
 import type { Bot } from "./bot";
-import { cancelAllInstructions } from "./client";
+import { cancelAllInstructions, type RunActionOptions } from "./client";
 import {
   ConsoleReporter,
   MultiReporter,
@@ -53,9 +53,14 @@ export interface TestContext {
    * behave identically whether or not anyone is rendering it.
    *
    * @param label Short name for the shot, slugged into the filename.
+   * @param options Timeout overrides, e.g. a longer wait while the viewer is
+   * still downloading and stitching texture packs early in a run.
    * @returns Where the still landed, or null when nothing is watching.
    */
-  screenshot(label: string): Promise<ScreenshotResult | null>;
+  screenshot(
+    label: string,
+    options?: RunActionOptions,
+  ): Promise<ScreenshotResult | null>;
 }
 
 /** A single test case. */
@@ -463,9 +468,12 @@ function createContext(
     track(cleanup: () => void | Promise<void>) {
       cleanups.push(cleanup);
     },
-    async screenshot(label: string): Promise<ScreenshotResult | null> {
+    async screenshot(
+      label: string,
+      options?: RunActionOptions,
+    ): Promise<ScreenshotResult | null> {
       try {
-        return await bots[0].screenshot(label);
+        return await bots[0].screenshot(label, options);
       } catch (error) {
         // Worth a breadcrumb but not a failure: the usual cause is simply that
         // no viewer is attached, which is the normal way this suite runs.

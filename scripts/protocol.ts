@@ -16,6 +16,27 @@ export const INSTRUCTION_PREFIX = "[RUN_ACTION]";
  */
 export const STATUS_PREFIX = "[STATUS]";
 
+/**
+ * Prefix of one fragment of a chunked status message. Large envelopes (e.g. a
+ * form snapshot with dozens of buttons) exceed the chat length BDS accepts,
+ * so the bot splits them into `[STATUSPART]<id>:<index>/<total>:<fragment>`
+ * messages with a 1-based index. Must match `StatusPartPrefix` in the Go
+ * runner.
+ */
+export const STATUS_PART_PREFIX = "[STATUSPART]";
+
+/** One fragment of a chunked status envelope. */
+export interface StatusPart {
+  /** Instruction id the fragment belongs to. */
+  id: string;
+  /** 1-based fragment index. */
+  index: number;
+  /** Total number of fragments in the envelope. */
+  total: number;
+  /** Raw JSON fragment to concatenate. */
+  fragment: string;
+}
+
 /** Outcome of a single instruction, as reported by the bot. */
 export type InstructionStatusKind = "success" | "error" | "timeout";
 
@@ -80,9 +101,33 @@ export function decodeStatus<TData = unknown>(
 ): StatusEnvelope<TData> | undefined {
   if (!message.startsWith(STATUS_PREFIX)) return undefined;
   try {
-    return JSON.parse(message.slice(STATUS_PREFIX.length)) as
-      StatusEnvelope<TData>;
+    return JSON.parse(
+      message.slice(STATUS_PREFIX.length),
+    ) as StatusEnvelope<TData>;
   } catch {
     return undefined;
   }
+}
+
+/**
+ * Parses one fragment of a chunked status message.
+ *
+ * @param message The raw chat message, including the `[STATUSPART]` prefix.
+ * @returns The decoded part, or `undefined` when the message is not a status
+ * fragment or its header is malformed.
+ */
+export function decodeStatusPart(message: string): StatusPart | undefined {
+  if (!message.startsWith(STATUS_PART_PREFIX)) return undefined;
+  const rest = message.slice(STATUS_PART_PREFIX.length);
+  const match = /^([^:]+):(\d+)\/(\d+):/.exec(rest);
+  if (!match) return undefined;
+  const index = Number(match[2]);
+  const total = Number(match[3]);
+  if (index < 1 || total < 1 || index > total) return undefined;
+  return {
+    id: match[1] ?? "",
+    index,
+    total,
+    fragment: rest.slice(match[0].length),
+  };
 }

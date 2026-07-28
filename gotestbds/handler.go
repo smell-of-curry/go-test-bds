@@ -201,10 +201,14 @@ func MarshalStatusEnvelope(id, status, message string, data any) ([]byte, error)
 	})
 }
 
-// broadcastStatus broadcasts status.
+// broadcastStatus broadcasts status. Large envelopes (e.g. a form snapshot
+// with dozens of buttons) are split into chat-sized fragments because BDS
+// silently drops oversized inbound chat.
 func broadcastStatus(id, status, message string, data any, b *bot.Bot) {
 	b.Execute(func(a *actor.Actor) {
 		payload, _ := MarshalStatusEnvelope(id, status, message, data)
-		a.Chat(StatusMessagePrefix + string(payload))
+		for _, msg := range EncodeStatusMessages(id, string(payload)) {
+			a.Chat(msg)
+		}
 	})
 }
