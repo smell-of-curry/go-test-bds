@@ -1,6 +1,12 @@
 package viewer
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/smell-of-curry/go-test-bds/gotestbds/assets"
+)
 
 func installTestLang(t *testing.T, table map[string]string) {
 	t.Helper()
@@ -54,6 +60,59 @@ func TestFlattenRawtextResolvesThroughLangTable(t *testing.T) {
 	in = `{"rawtext":[{"translate":"no.such.key","with":["x"]}]}`
 	if got := flattenRawtext(in); got != "no.such.key x" {
 		t.Fatalf("fallback=%q", got)
+	}
+}
+
+// TestInstallLangTableFromStack drives the production path end to end: a
+// built assets.Stack whose pack ships texts/en_US.lang must install a table
+// that flattenRawtext resolves through. Run 27 shipped raw keys with the
+// table code deployed, so the unit fixtures alone clearly weren't enough.
+func TestInstallLangTableFromStack(t *testing.T) {
+	dir := t.TempDir()
+	writeLangPack(t, dir)
+	st, err := assets.BuildStack([]assets.StackEntry{{ID: "srv", Dir: dir}}, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { activeLang.Store(nil) })
+	installLangTable(st)
+	got, ok := translateKey("models.showdown.switch.actorSentOut", []string{"TestBot", "Bulbasaur"})
+	if !ok {
+		t.Fatal("table not installed from stack")
+	}
+	if got != "TestBot sent out Bulbasaur!" {
+		t.Fatalf("translateKey=%q", got)
+	}
+}
+
+// writeLangPack lays out a minimal resource pack with one lang file.
+//
+// @param t The test.
+// @param dir Pack root to populate.
+func writeLangPack(t *testing.T, dir string) {
+	t.Helper()
+	manifest := `{
+  "format_version": 2,
+  "header": {
+    "name": "Lang Fixture",
+    "description": "test",
+    "uuid": "33333333-3333-3333-3333-333333333333",
+    "version": [1, 0, 0],
+    "min_engine_version": [1, 20, 0]
+  },
+  "modules": [
+    {"type": "resources", "uuid": "33333333-3333-3333-3333-333333333334", "version": [1, 0, 0]}
+  ]
+}`
+	if err := os.WriteFile(filepath.Join(dir, "manifest.json"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "texts"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	lang := "models.showdown.switch.actorSentOut=%1 sent out %2!\n"
+	if err := os.WriteFile(filepath.Join(dir, "texts", "en_US.lang"), []byte(lang), 0o644); err != nil {
+		t.Fatal(err)
 	}
 }
 
