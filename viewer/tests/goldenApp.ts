@@ -108,7 +108,7 @@ export function buildGoldenPack(): Map<string, Uint8Array> {
  *
  * @returns absolute baseline dir, or null to keep solid fixtures.
  */
-function resolveGoldenBaselineDir(): string | null {
+export function resolveGoldenBaselineDir(): string | null {
   if (process.env.GOLDEN_USE_BASELINE === "0") return null;
   const fromEnv = process.env.GOLDEN_BASELINE_DIR?.trim();
   if (fromEnv && existsSync(join(fromEnv, "resource_pack", "blocks.json"))) {
