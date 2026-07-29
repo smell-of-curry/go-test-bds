@@ -52,18 +52,25 @@ type rawtextMessage struct {
 // Without this, a title like the battle sidebar renders as a wall of JSON in
 // the recording.
 //
+// The envelope is located anywhere in the string, not just at the start —
+// titles arrive with formatting codes or label text glued in front of the
+// JSON, and a prefix-only check leaves those unflattened (run 14's finale
+// subtitle).
+//
 // @param text Raw title/chat text from the wire.
-// @returns The flattened text, or the input unchanged.
+// @returns text with any embedded rawtext envelope flattened, or unchanged.
 func flattenRawtext(text string) string {
-	trimmed := strings.TrimSpace(text)
-	if !strings.HasPrefix(trimmed, "{") || !strings.Contains(trimmed, `"rawtext"`) {
+	idx := strings.Index(text, `{"rawtext"`)
+	if idx < 0 {
 		return text
 	}
+	dec := json.NewDecoder(strings.NewReader(text[idx:]))
 	var msg rawtextMessage
-	if err := json.Unmarshal([]byte(trimmed), &msg); err != nil || len(msg.RawText) == 0 {
+	if dec.Decode(&msg) != nil || len(msg.RawText) == 0 {
 		return text
 	}
 	var b strings.Builder
+	b.WriteString(text[:idx])
 	for _, part := range msg.RawText {
 		b.WriteString(part.Text)
 		if part.Translate == "" {
@@ -78,6 +85,7 @@ func flattenRawtext(text string) string {
 			b.WriteString(arg)
 		}
 	}
+	b.WriteString(text[idx+int(dec.InputOffset()):])
 	return b.String()
 }
 

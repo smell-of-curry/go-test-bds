@@ -44,6 +44,13 @@ func TestFlattenRawtext(t *testing.T) {
 			t.Fatalf("flattenRawtext(%q)=%q want unchanged", passthrough, got)
 		}
 	}
+
+	// The envelope must flatten even when text precedes it — run 14's finale
+	// subtitle arrived with a prefix and stayed a JSON wall on screen.
+	prefixed := "§aphone:\n" + `{"rawtext":[{"translate":"a.key"}]}` + " tail"
+	if got := flattenRawtext(prefixed); got != "§aphone:\na.key tail" {
+		t.Fatalf("prefixed=%q", got)
+	}
 }
 
 func TestEncodeUICarriesTitleAndHotbar(t *testing.T) {
