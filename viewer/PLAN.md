@@ -207,6 +207,14 @@ all-air sub-chunk case.
       pure control tokens — and when filtering leaves nothing, the title event
       is not emitted at all, because a real client's HUD would not have
       changed and a clear frame would wipe a visible title.
+- [x] Resolve translate keys the way a client would. The pack stack ships
+      `texts/en_US.lang`; `lang.go` merges it per key in stack order (later
+      packs win) and `flattenRawtext` substitutes `%1`–`%9`/`%s` from the
+      rawtext `with` args. Whole-key lines in form buttons, dialogue, titles
+      and chat resolve too (`resolveLangLines`) — substring translation is
+      deliberately avoided so ordinary text mentioning a key-shaped word is
+      never corrupted. No table or unknown key keeps the readable
+      key-plus-args fallback.
 
 **Check:** `gotestbds/viewer/encode_test.go` drives a synthetic `World` through
 add/modify/remove and asserts the delta sequence reconstructs the same state;
