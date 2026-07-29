@@ -61,6 +61,11 @@ func (h *Hub) handleAsset(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "assets not configured", http.StatusServiceUnavailable)
 		return
 	}
+	// The stream attaches before pack ingest finishes, so its refreshLang can
+	// see a nil stack once and give up (run 26 shipped raw translate keys that
+	// way). Asset requests, by construction, only fire when the stack exists —
+	// re-check here; the pointer compare makes repeats free.
+	h.refreshLang()
 	rel := r.PathValue("path")
 	if rel == "" {
 		http.NotFound(w, r)
