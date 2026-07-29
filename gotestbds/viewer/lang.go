@@ -84,15 +84,17 @@ func translateKey(key string, args []string) (string, bool) {
 }
 
 // substituteLang fills Bedrock lang placeholders: %1–%9 positional, %s
-// sequential over the remaining unused args. Unmatched placeholders stay
-// verbatim so a short "with" is visible rather than silently eaten.
-// ponytail: %%-escapes and %1$s forms are rare in these packs and skipped.
+// sequential over the remaining unused args, %% a literal percent ("lost
+// %s%% of its health!" rendered "20%%" until the escape was handled).
+// Unmatched placeholders stay verbatim so a short "with" is visible rather
+// than silently eaten. ponytail: %1$s forms are rare in these packs and
+// skipped.
 //
 // @param tmpl The lang template.
 // @param args Substitution arguments, possibly short or empty.
 // @returns the template with placeholders replaced.
 func substituteLang(tmpl string, args []string) string {
-	if len(args) == 0 || !strings.Contains(tmpl, "%") {
+	if !strings.Contains(tmpl, "%") {
 		return tmpl
 	}
 	var b strings.Builder
@@ -105,6 +107,10 @@ func substituteLang(tmpl string, args []string) string {
 		}
 		n := tmpl[i+1]
 		switch {
+		case n == '%':
+			b.WriteByte('%')
+			i++
+			continue
 		case n == 's':
 			if next < len(args) {
 				b.WriteString(args[next])

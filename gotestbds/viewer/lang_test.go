@@ -39,7 +39,9 @@ func TestSubstituteLang(t *testing.T) {
 		{"Turn %1", nil, "Turn %1"},
 		{"%2 then %1", []string{"a", "b"}, "b then a"},
 		{"%1 and %s", []string{"x", "y"}, "x and y"},
-		{"100%% plain", []string{"z"}, "100%% plain"},
+		// %% is the lang escape for a literal percent, args or not.
+		{"lost %s%% of its health!", []string{"20"}, "lost 20% of its health!"},
+		{"100%% plain", nil, "100% plain"},
 	}
 	for _, c := range cases {
 		if got := substituteLang(c.tmpl, c.args); got != c.want {
