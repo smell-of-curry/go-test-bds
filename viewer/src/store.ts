@@ -2,6 +2,7 @@ import {
   type Actor,
   type Block,
   type CaptureFrame,
+  type CameraWire,
   type ChatFrame,
   type BlockEntityWire,
   type Column,
@@ -11,6 +12,7 @@ import {
   type HelloFrame,
   type KeyframeFrame,
   type MarkFrame,
+  type ParticleFrame,
   type Registries,
   type TitleFrame,
   type UI,
@@ -84,8 +86,17 @@ export interface WorldState {
   removedEntities: Set<number>;
   /** Block positions changed since last drain (layer 0); for highlight outlines. */
   dirtyBlocks: Array<[number, number, number]>;
+  /** Pending `particle` event-lane spawns since last drain. */
+  pendingParticles: ParticleFrame[];
   /** True after a wholesale wipe (keyframe or dimension change). */
   fullReset: boolean;
+  /**
+   * Absolute world time ticks when SetTime was received. Null = fixed noon
+   * sky (Stage 10b goldens unchanged).
+   */
+  time: number | null;
+  /** Server camera override; null = default follow / first-person. */
+  camera: CameraWire | null;
 }
 
 export type StoreListener = (state: WorldState) => void;
@@ -114,7 +125,10 @@ function emptyState(): WorldState {
     dirtyEntities: new Set(),
     removedEntities: new Set(),
     dirtyBlocks: [],
+    pendingParticles: [],
     fullReset: false,
+    time: null,
+    camera: null,
   };
 }
 
@@ -243,6 +257,9 @@ export class Store {
       case "title":
         this.applyTitle(frame);
         break;
+      case "particle":
+        this.applyParticle(frame);
+        break;
       default:
         return;
     }
@@ -257,6 +274,7 @@ export class Store {
     this.state.dirtyEntities.clear();
     this.state.removedEntities.clear();
     this.state.dirtyBlocks.length = 0;
+    this.state.pendingParticles.length = 0;
     this.state.fullReset = false;
   }
 
@@ -276,6 +294,16 @@ export class Store {
     while (msgs.length > 20) msgs.shift();
     ui.messages = msgs;
     this.state.ui = ui;
+  }
+
+  /**
+   * Queue a particle spawn from the event lane.
+   *
+   * @param frame - Event-lane particle frame.
+   */
+  private applyParticle(frame: ParticleFrame): void {
+    this.state.tick = frame.tick;
+    this.state.pendingParticles.push(frame);
   }
 
   /**
@@ -333,6 +361,7 @@ export class Store {
     this.state.dirtyEntities.clear();
     this.state.removedEntities.clear();
     this.state.dirtyBlocks.length = 0;
+    this.state.pendingParticles.length = 0;
     this.state.fullReset = true;
 
     this.state.bot = frame.bot;
@@ -342,6 +371,8 @@ export class Store {
     this.state.ui = frame.ui ?? null;
     // Registries are join-static; keyframe replaces, deltas never clear.
     this.state.registries = frame.registries ?? null;
+    this.state.time = frame.time ?? null;
+    this.state.camera = frame.camera ?? null;
 
     for (const col of frame.columns) {
       const stored = decodeColumn(col);
@@ -381,6 +412,9 @@ export class Store {
 
     if (frame.actor) this.state.actor = frame.actor;
     if (frame.ui !== undefined) this.state.ui = frame.ui ?? null;
+    if (frame.time !== undefined) this.state.time = frame.time;
+    if (frame.cameraCleared) this.state.camera = null;
+    else if (frame.camera !== undefined) this.state.camera = frame.camera;
 
     if (frame.columnsRemoved) {
       for (const [x, z] of frame.columnsRemoved) {

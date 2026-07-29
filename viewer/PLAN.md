@@ -39,15 +39,16 @@ palette blocks (geometry + `material_instances`, permutations, transforms;
 cube fallback when `.geo.json` missing). Stage 7 draws textured entity models from client
 entity defs + render controllers; Stage 9 plays animations/controllers/scripts
 on those bones (`EntityAnimator`) and applies motion-lerped poses. Stage 11's
-form panel and player HUD DOM (chat/title/hotbar/health + break bursts) are
-done; JSON UI / font atlas / full particles remain open. Stage 12's golden
+form panel, player HUD DOM, and particle JSON runtime are done; JSON UI /
+font atlas remain open. Stage 12's golden
 suite + `viewer-golden` workflow are in, including vanilla-baseline bump
 wiring (`baseline-bump.yml` → golden fetch + `GOLDEN_USE_BASELINE`). Stage 10a
 (Go light fill + biome export) and 10b (viewer lighting, biome tint, gradient
-sky + distance fog) are in; time-of-day / weather / fog JSON remain open.
-Attachables and the rest of 7/11 still have open boxes below. Capture
-presentation is deliberate: a loading screen until the atlas settles, stills
-gated on asset readiness, then the gradient sky once the world shows.
+sky + distance fog) are in; Stage 10 camera + time-of-day sky (sun/moon/stars)
+landed — weather / fog JSON / clouds remain open. Attachables and the rest of
+7/11 still have open boxes below. Capture presentation is deliberate: a loading
+screen until the atlas settles, stills gated on asset readiness, then the
+gradient sky once the world shows.
 
 Getting the picture right cost a run of bugs worth naming, because each was
 invisible from outside and each looked like a different problem:
@@ -609,31 +610,48 @@ series. ✓ `tests/entity.animation.spec.ts`
       as re-encoded `columnsAdded` sections (Go refill) — store decode remeshes.
 - [x] Wire column `biomePalette` + `biomes` into the existing `biomeAt` / tint
       path (`plains` → `minecraft:plains`; numeric ids → untinted fallback).
-- [ ] Implement the sky: time of day, sun and moon, star field, clouds, and the
-      horizon gradient per dimension. **Partial (10b):** gradient sky dome
-      (zenith deeper blue, horizon lighter) + `THREE.Fog` tuned to stream radius.
-      Time-of-day / sun / moon / stars / clouds **punted**.
+- [~] Implement the sky: time of day, sun and moon, star field, clouds, and the
+      horizon gradient per dimension. **Partial:** gradient sky dome + distance
+      fog (10b); when snapshot `time` is present — 4-keyframe palette lerp
+      (sunrise/noon/sunset/midnight), sun + moon quads (`textures/environment/`),
+      seeded star field, ambient/dir light scale. **Absent `time` = fixed noon
+      look (goldens unchanged).** Clouds punted (flat drifting plane not worth
+      the atlas cost for captures). Per-dimension horizon tables still open.
 - [ ] Implement fog from client biome definitions and `fog` JSON, including
       distance fog, water fog and the dimension defaults. **Partial (10b):**
-      basic distance fog only (horizon colour, near/far from chunk radius).
+      basic distance fog only (horizon colour follows sky palette when `time`
+      present; near/far from chunk radius). Water fog / fog JSON **punted**.
 - [ ] Implement weather: rain, snow, and their effect on lighting. **Punted.**
-- [ ] Implement camera state: field of view and its modifiers, view bobbing,
+- [x] Implement camera state: field of view and its modifiers, view bobbing,
       third-person offsets, and the camera instruction packets a server can send
-      to override any of it.
+      to override any of it. Go handles `CameraPresets` / `CameraInstruction` /
+      `SetTime`; snapshot exports additive `camera` + `time`. Viewer: server
+      pos/rot override with ease lerp; FOV sprint widen + instruction FOV;
+      follow offset = Bedrock 4-block third-person + single-ray occlusion
+      pull-in; view bobbing opt-in via `?bobbing=1` (default OFF for goldens).
+      Base FOV stays 70° (current PerspectiveCamera) — Bedrock ~66 would shift
+      goldens. Fade export only (no overlay draw yet).
 
 **Check:** golden images at fixed times of day and weather states. Stage 12
-goldens regenerated after 10b shading/sky landed.
+goldens regenerated after 10b shading/sky landed; 10c keeps absent-`time`
+noon so goldens need no regen.
 
 ---
 
 ## Stage 11 — effects and interface
 
-- [ ] Implement the particle system from particle JSON: emitters, curves, and
+- [x] Implement the particle system from particle JSON: emitters, curves, and
       the Molang-driven components, matching the documented component set.
-- [~] Render server-triggered effects: block-break particle bursts (simple
-      THREE.Points, gray) trigger off delta `blocks` / highlight dirty cells.
-      Damage flash, death animation, `packet.ActorEvent` and `packet.LevelEvent`
-      decoding are punted — recordings only needed the break burst.
+      (`viewer/src/particles/`: parse + curves + runtime Points; components =
+      rate instant/steady/manual, lifetime once/looping/expression, shapes
+      point/sphere/box/disc, lifetime/speed/spin, motion dynamic/parametric,
+      billboard + tinting, kill_plane; lighting no-op; collision/events/custom
+      shape/manual-only path recorded-unsupported. Cap 4096, injectable RNG.
+      `SpawnParticleEffect` → event-lane `particle` frame.)
+- [~] Render server-triggered effects: block-break particle bursts go through
+      the particle system (vanilla `breaking_item_terrain` when resolvable and
+      non-atlas; else built-in gray fallback). Damage flash, death animation,
+      `packet.ActorEvent` and `packet.LevelEvent` decoding are punted.
 - [x] Render the heads-up display as a plain DOM overlay (`viewer/src/ui/hud.ts`):
       chat (last ~8 lines, `§` colour codes, fade after ~10s), title/subtitle +
       action bar (fadeIn/stay/fadeOut from SetTitle ticks), hotbar (short-name

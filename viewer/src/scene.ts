@@ -16,9 +16,21 @@ import {
   type ItemSprite,
   type NameTagSprite,
 } from "./entity";
+import type { ParticleSystem } from "./particles";
 import type { Block, Entity } from "./protocol";
 import { columnKey, sectionIndex } from "./protocol";
 import type { DecodedSection, StoredColumn, WorldState } from "./store";
+import {
+  dayCount,
+  moonDirection,
+  moonPhase,
+  NOON_HORIZON,
+  NOON_ZENITH,
+  skyPaletteAt,
+  starFieldPositions,
+  sunDirection,
+  ticksOfDay,
+} from "./sky";
 
 /** Soft budget for remeshing work per animation frame (ms). */
 export const REMESH_BUDGET_MS = 4;
@@ -40,12 +52,12 @@ export const LOADING_CLEAR = 0x0b0e14;
 
 /**
  * Horizon band of the gradient sky dome (also fog colour).
- * Zenith is deeper — see {@link SKY_ZENITH}. Time-of-day / sun / stars: punt.
+ * Matches noon keyframe — used when snapshot `time` is absent.
  */
-export const SKY_HORIZON = 0xa8d4f0;
+export const SKY_HORIZON = NOON_HORIZON;
 
-/** Zenith colour of the gradient sky dome. */
-export const SKY_ZENITH = 0x3a6ea5;
+/** Zenith colour of the gradient sky dome (fixed noon when time absent). */
+export const SKY_ZENITH = NOON_ZENITH;
 
 /**
  * @deprecated Prefer {@link SKY_HORIZON}; kept so older call sites compile.
@@ -398,6 +410,15 @@ export class ViewerScene {
   private actorWantedVisible = false;
   private skyMesh: THREE.Mesh | null = null;
   private envRadiusBlocks = 128;
+  private ambientLight: THREE.AmbientLight | null = null;
+  private sunLight: THREE.DirectionalLight | null = null;
+  private sunMesh: THREE.Mesh | null = null;
+  private moonMesh: THREE.Mesh | null = null;
+  private starsPoints: THREE.Points | null = null;
+  private celestialRoot: THREE.Group | null = null;
+  /** Null = fixed noon look (no sun/moon/stars drawn). */
+  private worldTime: number | null = null;
+  private assetBaseUrl = "";
   private readonly nameTagScratch = new THREE.Vector3();
   private static readonly highlightGeo = new THREE.EdgesGeometry(
     new THREE.BoxGeometry(1.02, 1.02, 1.02),
@@ -405,6 +426,8 @@ export class ViewerScene {
 
   blockInstanceCount = 0;
   sectionMeshCount = 0;
+  /** Stage 11 particle runtime (set from main once constructed). */
+  particles: ParticleSystem | null = null;
 
   constructor(
     canvas: HTMLCanvasElement,
@@ -431,10 +454,10 @@ export class ViewerScene {
     // Start dark (loading). main.ts enables sky dome + fog once assets settle.
     this.scene.background = new THREE.Color(LOADING_CLEAR);
 
-    const ambient = new THREE.AmbientLight(0xffffff, 0.55);
-    const sun = new THREE.DirectionalLight(0xffffff, 0.85);
-    sun.position.set(0.6, 1, 0.3);
-    this.scene.add(ambient, sun);
+    this.ambientLight = new THREE.AmbientLight(0xffffff, 0.55);
+    this.sunLight = new THREE.DirectionalLight(0xffffff, 0.85);
+    this.sunLight.position.set(0.6, 1, 0.3);
+    this.scene.add(this.ambientLight, this.sunLight);
 
     this.actorGroup = new THREE.Group();
     this.actorGroup.visible = false;
@@ -597,24 +620,50 @@ export class ViewerScene {
    *
    * @param opts.enabled - When false, flat loading clear (caller sets colour).
    * @param opts.radiusChunks - Stream/view radius in chunks (fog far ≈ radius×16).
+   * @param opts.assetBaseUrl - Origin for `/asset/…` celestial textures.
    */
-  setEnvironment(opts: { enabled: boolean; radiusChunks?: number }): void {
+  setEnvironment(opts: {
+    enabled: boolean;
+    radiusChunks?: number;
+    assetBaseUrl?: string;
+  }): void {
     if (opts.radiusChunks != null && opts.radiusChunks > 0) {
       this.envRadiusBlocks = opts.radiusChunks * 16;
     }
+    if (opts.assetBaseUrl != null) this.assetBaseUrl = opts.assetBaseUrl;
     if (!opts.enabled) {
       this.removeSkyDome();
+      this.removeCelestials();
       this.scene.fog = null;
       this.applyFogToMesher(null);
       return;
     }
     this.ensureSkyDome();
-    // Fallback clear behind the dome (zenith) if a seam shows.
-    this.scene.background = new THREE.Color(SKY_ZENITH);
-    const far = this.envRadiusBlocks;
-    const fog = new THREE.Fog(SKY_HORIZON, far * 0.5, far * 0.92);
-    this.scene.fog = fog;
-    this.applyFogToMesher(fog);
+    this.applySkyTime(this.worldTime);
+  }
+
+  /**
+   * Drive sky colours / sun / moon / stars from absolute world time.
+   * `null` restores the fixed noon gradient (no celestial meshes) so goldens
+   * match Stage 10b.
+   *
+   * @param time - Absolute ticks from SetTime, or null.
+   */
+  setWorldTime(time: number | null): void {
+    if (this.worldTime === time) return;
+    this.worldTime = time;
+    if (this.skyMesh) this.applySkyTime(time);
+  }
+
+  /**
+   * Section mesh roots for follow-camera occlusion raycasts.
+   *
+   * @returns live terrain groups.
+   */
+  terrainMeshes(): THREE.Object3D[] {
+    const out: THREE.Object3D[] = [];
+    for (const node of this.sections.values()) out.push(node.group);
+    return out;
   }
 
   /**
@@ -688,6 +737,8 @@ export class ViewerScene {
       }
       this.syncEntityGear(node, ent);
     }
+    // Stage 11 particle emitters (additive hook; null until main wires it).
+    this.particles?.tick(dtSec);
   }
 
   /** Continue draining the remesh queue under the per-frame budget. */
@@ -1242,21 +1293,13 @@ export class ViewerScene {
   private ensureSkyDome(): void {
     if (this.skyMesh) return;
     const geo = new THREE.SphereGeometry(800, 24, 16);
-    const cols = new Float32Array(geo.attributes.position!.count * 3);
-    const zenith = new THREE.Color(SKY_ZENITH);
-    const horizon = new THREE.Color(SKY_HORIZON);
-    const pos = geo.attributes.position!;
-    const tmp = new THREE.Color();
-    for (let i = 0; i < pos.count; i++) {
-      // y/radius ∈ [-1,1]; high y (zenith) → blend 1 toward zenith colour.
-      const ny = pos.getY(i) / 800;
-      const blend = Math.min(1, Math.max(0, (ny + 0.15) / 1.15));
-      tmp.copy(horizon).lerp(zenith, blend);
-      cols[i * 3] = tmp.r;
-      cols[i * 3 + 1] = tmp.g;
-      cols[i * 3 + 2] = tmp.b;
-    }
-    geo.setAttribute("color", new THREE.BufferAttribute(cols, 3));
+    geo.setAttribute(
+      "color",
+      new THREE.BufferAttribute(
+        new Float32Array(geo.attributes.position!.count * 3),
+        3,
+      ),
+    );
     const mat = new THREE.MeshBasicMaterial({
       vertexColors: true,
       side: THREE.BackSide,
@@ -1267,6 +1310,202 @@ export class ViewerScene {
     this.skyMesh.name = "sky-dome";
     this.skyMesh.frustumCulled = false;
     this.scene.add(this.skyMesh);
+    this.paintSkyDome(SKY_ZENITH, SKY_HORIZON);
+  }
+
+  /**
+   * Recolour sky dome vertices + fog/lights; spawn celestials only when time known.
+   *
+   * @param time - Absolute ticks, or null for fixed noon.
+   */
+  private applySkyTime(time: number | null): void {
+    const far = this.envRadiusBlocks;
+    if (time == null) {
+      this.paintSkyDome(SKY_ZENITH, SKY_HORIZON);
+      this.scene.background = new THREE.Color(SKY_ZENITH);
+      const fog = new THREE.Fog(SKY_HORIZON, far * 0.5, far * 0.92);
+      this.scene.fog = fog;
+      this.applyFogToMesher(fog);
+      if (this.ambientLight) this.ambientLight.intensity = 0.55;
+      if (this.sunLight) {
+        this.sunLight.intensity = 0.85;
+        this.sunLight.position.set(0.6, 1, 0.3);
+      }
+      this.removeCelestials();
+      return;
+    }
+
+    const tod = ticksOfDay(time);
+    const pal = skyPaletteAt(tod);
+    this.paintSkyDome(pal.zenith, pal.horizon);
+    this.scene.background = new THREE.Color(pal.zenith);
+    const fog = new THREE.Fog(pal.fog, far * 0.5, far * 0.92);
+    this.scene.fog = fog;
+    this.applyFogToMesher(fog);
+    if (this.ambientLight) this.ambientLight.intensity = pal.ambient;
+    const [sx, sy, sz] = sunDirection(tod);
+    if (this.sunLight) {
+      this.sunLight.intensity = pal.sun;
+      this.sunLight.position.set(sx, sy, sz);
+    }
+    this.ensureCelestials();
+    this.placeCelestials(time, pal.stars);
+  }
+
+  /**
+   * @param zenith - Packed zenith colour.
+   * @param horizon - Packed horizon colour.
+   */
+  private paintSkyDome(zenith: number, horizon: number): void {
+    if (!this.skyMesh) return;
+    const geo = this.skyMesh.geometry;
+    const pos = geo.attributes.position!;
+    const colAttr = geo.attributes.color as THREE.BufferAttribute;
+    const zc = new THREE.Color(zenith);
+    const hc = new THREE.Color(horizon);
+    const tmp = new THREE.Color();
+    for (let i = 0; i < pos.count; i++) {
+      const ny = pos.getY(i) / 800;
+      const blend = Math.min(1, Math.max(0, (ny + 0.15) / 1.15));
+      tmp.copy(hc).lerp(zc, blend);
+      colAttr.setXYZ(i, tmp.r, tmp.g, tmp.b);
+    }
+    colAttr.needsUpdate = true;
+  }
+
+  private ensureCelestials(): void {
+    if (this.celestialRoot) return;
+    const root = new THREE.Group();
+    root.name = "celestials";
+    const sunMat = new THREE.MeshBasicMaterial({
+      color: 0xfff2a8,
+      transparent: true,
+      depthWrite: false,
+      fog: false,
+      side: THREE.DoubleSide,
+    });
+    const moonMat = new THREE.MeshBasicMaterial({
+      color: 0xe8e8f0,
+      transparent: true,
+      depthWrite: false,
+      fog: false,
+      side: THREE.DoubleSide,
+    });
+    this.sunMesh = new THREE.Mesh(new THREE.PlaneGeometry(60, 60), sunMat);
+    this.moonMesh = new THREE.Mesh(new THREE.PlaneGeometry(40, 40), moonMat);
+    this.sunMesh.frustumCulled = false;
+    this.moonMesh.frustumCulled = false;
+    root.add(this.sunMesh, this.moonMesh);
+
+    const starPos = starFieldPositions(400);
+    const starGeo = new THREE.BufferGeometry();
+    starGeo.setAttribute("position", new THREE.BufferAttribute(starPos, 3));
+    // Scale out to sky radius.
+    const arr = starGeo.attributes.position!.array as Float32Array;
+    for (let i = 0; i < arr.length; i++) arr[i]! *= 780;
+    this.starsPoints = new THREE.Points(
+      starGeo,
+      new THREE.PointsMaterial({
+        color: 0xffffff,
+        size: 2.5,
+        sizeAttenuation: false,
+        transparent: true,
+        opacity: 0,
+        depthWrite: false,
+        fog: false,
+      }),
+    );
+    this.starsPoints.frustumCulled = false;
+    root.add(this.starsPoints);
+    this.scene.add(root);
+    this.celestialRoot = root;
+
+    // Best-effort pack textures; solid colour fallbacks stay if 404.
+    const base = this.assetBaseUrl.replace(/\/$/, "");
+    if (base) {
+      const loader = new THREE.TextureLoader();
+      loader.load(
+        `${base}/asset/textures/environment/sun.png`,
+        (tex) => {
+          tex.colorSpace = THREE.SRGBColorSpace;
+          if (this.sunMesh) {
+            const m = this.sunMesh.material as THREE.MeshBasicMaterial;
+            m.map = tex;
+            m.color.set(0xffffff);
+            m.needsUpdate = true;
+          }
+        },
+        undefined,
+        () => undefined,
+      );
+      loader.load(
+        `${base}/asset/textures/environment/moon_phases.png`,
+        (tex) => {
+          tex.colorSpace = THREE.SRGBColorSpace;
+          tex.wrapS = THREE.ClampToEdgeWrapping;
+          tex.wrapT = THREE.ClampToEdgeWrapping;
+          if (this.moonMesh) {
+            const m = this.moonMesh.material as THREE.MeshBasicMaterial;
+            m.map = tex;
+            m.color.set(0xffffff);
+            m.needsUpdate = true;
+          }
+        },
+        undefined,
+        () => undefined,
+      );
+    }
+  }
+
+  /**
+   * @param time - Absolute world ticks.
+   * @param starOpacity - 0..1.
+   */
+  private placeCelestials(time: number, starOpacity: number): void {
+    if (!this.celestialRoot) return;
+    const tod = ticksOfDay(time);
+    const [sx, sy, sz] = sunDirection(tod);
+    const [mx, my, mz] = moonDirection(tod);
+    const R = 700;
+    if (this.sunMesh) {
+      this.sunMesh.position.set(sx * R, sy * R, sz * R);
+      this.sunMesh.lookAt(0, 0, 0);
+      this.sunMesh.visible = sy > -0.05;
+    }
+    if (this.moonMesh) {
+      this.moonMesh.position.set(mx * R, my * R, mz * R);
+      this.moonMesh.lookAt(0, 0, 0);
+      this.moonMesh.visible = my > -0.05;
+      const phase = moonPhase(dayCount(time));
+      const mat = this.moonMesh.material as THREE.MeshBasicMaterial;
+      if (mat.map) {
+        // moon_phases.png is typically 4×2 tiles.
+        mat.map.repeat.set(0.25, 0.5);
+        mat.map.offset.set((phase % 4) * 0.25, phase < 4 ? 0.5 : 0);
+        mat.map.needsUpdate = true;
+      }
+    }
+    if (this.starsPoints) {
+      const mat = this.starsPoints.material as THREE.PointsMaterial;
+      mat.opacity = starOpacity;
+      this.starsPoints.visible = starOpacity > 0.01;
+    }
+  }
+
+  private removeCelestials(): void {
+    if (!this.celestialRoot) return;
+    this.scene.remove(this.celestialRoot);
+    this.celestialRoot.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (m.geometry) m.geometry.dispose();
+      const mat = m.material as THREE.Material | THREE.Material[] | undefined;
+      if (Array.isArray(mat)) mat.forEach((x) => x.dispose());
+      else mat?.dispose();
+    });
+    this.celestialRoot = null;
+    this.sunMesh = null;
+    this.moonMesh = null;
+    this.starsPoints = null;
   }
 
   private removeSkyDome(): void {

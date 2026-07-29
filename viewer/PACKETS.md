@@ -65,7 +65,7 @@ Handled = registered in `Bot.registerHandlers()`.
 | `packet.PlayerSkin` | unhandled | render-relevant — entity pose/appearance/presence |
 | `packet.SetLastHurtBy` | unhandled | render-relevant — entity pose/appearance/presence |
 | `packet.MoveActorDelta` | unhandled | render-relevant — entity pose/appearance/presence |
-| `packet.SpawnParticleEffect` | unhandled | render-relevant — entity pose/appearance/presence |
+| `packet.SpawnParticleEffect` | handled | event-lane `particle` frame → viewer particle system |
 | `packet.Emote` | unhandled | render-relevant — entity pose/appearance/presence |
 | `packet.PlayerArmourDamage` | unhandled | render-relevant — entity pose/appearance/presence |
 | `packet.EmoteList` | unhandled | render-relevant — entity pose/appearance/presence |

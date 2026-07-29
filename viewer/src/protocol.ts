@@ -136,6 +136,22 @@ export interface WorldMeta {
   maxY: number;
 }
 
+/** Server CameraInstruction override. Absent = default client camera. */
+export interface CameraWire {
+  preset?: string;
+  pos?: [number, number, number];
+  /** `[yaw, pitch]` degrees. */
+  rot?: [number, number];
+  easeDurationMs?: number;
+  fov?: number;
+  fade?: {
+    fadeInSec?: number;
+    waitSec?: number;
+    fadeOutSec?: number;
+    colour?: [number, number, number];
+  };
+}
+
 export interface UI {
   form?: {
     type: string;
@@ -283,6 +299,10 @@ export interface KeyframeFrame {
   ui?: UI;
   /** Join-static custom blocks / items / actor props; omit on deltas. */
   registries?: Registries;
+  /** Absolute world time ticks (SetTime). Absent = fixed noon sky. */
+  time?: number;
+  /** Server camera override. Absent = default client camera. */
+  camera?: CameraWire;
 }
 
 export interface BlockChange {
@@ -314,6 +334,12 @@ export interface DeltaFrame {
   entitiesRemoved?: number[];
   actor?: Actor;
   ui?: UI;
+  /** Absolute world time when it changed. Absent = unchanged. */
+  time?: number;
+  /** Camera override when it changed. */
+  camera?: CameraWire;
+  /** True when an active override was cleared. */
+  cameraCleared?: boolean;
 }
 
 export interface MarkFrame {
@@ -364,6 +390,22 @@ export interface TitleFrame {
   clear?: boolean;
 }
 
+/** Event-lane particle spawn from `packet.SpawnParticleEffect`. */
+export interface ParticleFrame {
+  v: number;
+  type: "particle";
+  bot: string;
+  tick: number;
+  /** Effect identifier (e.g. `minecraft:basic_smoke_particle`). */
+  name: string;
+  /** World position (or entity-relative when `entityId` is set). */
+  pos: [number, number, number];
+  /** Dimension id from the packet (informational). */
+  dimension?: number;
+  /** Entity unique id when the position is relative; omitted / -1 = absolute. */
+  entityId?: number;
+}
+
 export type Frame =
   | HelloFrame
   | KeyframeFrame
@@ -371,7 +413,8 @@ export type Frame =
   | MarkFrame
   | CaptureFrame
   | ChatFrame
-  | TitleFrame;
+  | TitleFrame
+  | ParticleFrame;
 
 export function columnKey(x: number, z: number): string {
   return `${x},${z}`;

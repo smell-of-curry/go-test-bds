@@ -1,4 +1,4 @@
-import type * as THREE from "three";
+import type { ParticleRegistry, ParticleSystem } from "../particles";
 import type { Actor, Item, UI } from "../protocol";
 import type { WorldState } from "../store";
 import { BlockBreakEffects } from "./effects";
@@ -42,10 +42,14 @@ export interface HudHandle {
  *
  * Self-contained: creates its own root under `document.body`.
  *
- * @param opts.threeScene - THREE.Scene for particle bursts.
+ * @param opts.particles - Shared Stage 11 particle runtime.
+ * @param opts.particleRegistry - Optional pack registry for vanilla break FX.
  * @returns handle wired into the paint / store loops.
  */
-export function initHud(opts: { threeScene: THREE.Scene }): HudHandle {
+export function initHud(opts: {
+  particles: ParticleSystem;
+  getParticleRegistry?: () => ParticleRegistry | null;
+}): HudHandle {
   const root = document.createElement("div");
   root.id = "player-hud";
   root.innerHTML = `
@@ -83,7 +87,10 @@ export function initHud(opts: { threeScene: THREE.Scene }): HudHandle {
   let lastVitalsKey = "";
   let lastMessagesKey = "";
 
-  const effects = new BlockBreakEffects(opts.threeScene);
+  const effects = new BlockBreakEffects(
+    opts.particles,
+    opts.getParticleRegistry ?? (() => null),
+  );
 
   function pushChat(text: string, nowMs: number): void {
     if (!text) return;

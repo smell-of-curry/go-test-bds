@@ -33,6 +33,9 @@ type actorData struct {
 	lastDialogue *Dialogue
 	messages     *messageRing
 	title        *titleState
+	camera       *cameraState
+	worldTime    *worldTimeState
+	particles    *particleRing
 
 	container *Container
 

@@ -75,6 +75,9 @@ type viewState struct {
 	actor    Actor
 	uiBytes  []byte
 	tick     uint64
+	time     *int32
+	camera   *Camera
+	camSeq   uint64
 }
 
 func newEncoder(botName string, radius, sectionRadius int) *encoder {
@@ -121,6 +124,8 @@ func (e *encoder) frame(a *actor.Actor) (event string, payload []byte, err error
 			Entities:   entitiesSlice(cur.entities),
 			UI:         mustDecodeUI(cur.uiBytes),
 			Registries: encodeRegistries(a.WireRegistries()),
+			Time:       cur.time,
+			Camera:     cur.camera,
 		}
 		b, err := json.Marshal(kf)
 		return "keyframe", b, err
@@ -211,6 +216,13 @@ func (e *encoder) project(a *actor.Actor) (*viewState, error) {
 		return nil, err
 	}
 
+	var timePtr *int32
+	if t, ok := a.WorldTime(); ok {
+		tt := t
+		timePtr = &tt
+	}
+	cam, camSeq := encodeCamera(a)
+
 	return &viewState{
 		world:    worldMeta,
 		columns:  columns,
@@ -222,6 +234,9 @@ func (e *encoder) project(a *actor.Actor) (*viewState, error) {
 		actor:    act,
 		uiBytes:  uiBytes,
 		tick:     a.CurrentTick(),
+		time:     timePtr,
+		camera:   cam,
+		camSeq:   camSeq,
 	}, nil
 }
 
@@ -257,6 +272,11 @@ func (e *encoder) delta(cur *viewState) Delta {
 		d.Actor = &act
 		ui := mustDecodeUI(cur.uiBytes)
 		d.UI = &ui
+		d.Time = cur.time
+		d.Camera = cur.camera
+		if cur.camera == nil && e.prev.camera != nil {
+			d.CameraCleared = true
+		}
 		return d
 	}
 
@@ -314,7 +334,62 @@ func (e *encoder) delta(cur *viewState) Delta {
 		ui := mustDecodeUI(cur.uiBytes)
 		d.UI = &ui
 	}
+
+	if !timeEqual(cur.time, e.prev.time) {
+		d.Time = cur.time
+	}
+	if cur.camSeq != e.prev.camSeq {
+		if cur.camera == nil && e.prev.camera != nil {
+			d.CameraCleared = true
+		} else {
+			d.Camera = cur.camera
+		}
+	}
 	return d
+}
+
+func timeEqual(a, b *int32) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	return *a == *b
+}
+
+// encodeCamera projects the actor's camera override; nil when inactive.
+func encodeCamera(a *actor.Actor) (*Camera, uint64) {
+	o := a.CameraOverride()
+	if !o.Active && o.Fade == nil {
+		return nil, o.Seq
+	}
+	c := &Camera{
+		Preset:         o.Preset,
+		EaseDurationMs: o.EaseDurationMs,
+	}
+	if o.Pos != nil {
+		p := [3]float64{float64(o.Pos[0]), float64(o.Pos[1]), float64(o.Pos[2])}
+		c.Pos = &p
+	}
+	if o.Rot != nil {
+		r := [2]float64{float64(o.Rot[0]), float64(o.Rot[1])}
+		c.Rot = &r
+	}
+	if o.FOV != nil {
+		f := float64(*o.FOV)
+		c.FOV = &f
+	}
+	if o.Fade != nil {
+		col := [3]uint8{o.Fade.R, o.Fade.G, o.Fade.B}
+		c.Fade = &CameraFade{
+			FadeInSec:  float64(o.Fade.FadeInSec),
+			WaitSec:    float64(o.Fade.WaitSec),
+			FadeOutSec: float64(o.Fade.FadeOutSec),
+			Colour:     &col,
+		}
+	}
+	return c, o.Seq
 }
 
 // diffBlocks compares two encodings of the same column and returns per-block

@@ -38,6 +38,11 @@ type Keyframe struct {
 	// property defs). Present on every keyframe (including after hello); omitted
 	// on deltas because it does not change during a run.
 	Registries *Registries `json:"registries,omitempty"`
+	// Time is absolute world time ticks when SetTime was received. Absent =
+	// client uses its fixed noon sky (goldens unchanged).
+	Time *int32 `json:"time,omitempty"`
+	// Camera is a server CameraInstruction override. Absent = default client camera.
+	Camera *Camera `json:"camera,omitempty"`
 }
 
 // Delta carries only keys that changed since the previous frame.
@@ -60,6 +65,30 @@ type Delta struct {
 	EntitiesRemoved []uint64 `json:"entitiesRemoved,omitempty"`
 	Actor           *Actor   `json:"actor,omitempty"`
 	UI              *UI      `json:"ui,omitempty"`
+	// Time is absolute world time ticks when it changed. Absent = unchanged.
+	Time *int32 `json:"time,omitempty"`
+	// Camera is present when the override changed. CameraCleared is true when
+	// an active override was cleared (absent Camera alone means unchanged).
+	Camera        *Camera `json:"camera,omitempty"`
+	CameraCleared bool    `json:"cameraCleared,omitempty"`
+}
+
+// Camera is a server-driven camera override (CameraInstruction). Additive.
+type Camera struct {
+	Preset         string     `json:"preset,omitempty"`
+	Pos            *[3]float64 `json:"pos,omitempty"`
+	Rot            *[2]float64 `json:"rot,omitempty"` // [yaw, pitch] degrees
+	EaseDurationMs int        `json:"easeDurationMs,omitempty"`
+	FOV            *float64   `json:"fov,omitempty"`
+	Fade           *CameraFade `json:"fade,omitempty"`
+}
+
+// CameraFade is a screen fade from CameraInstruction.
+type CameraFade struct {
+	FadeInSec  float64  `json:"fadeInSec,omitempty"`
+	WaitSec    float64  `json:"waitSec,omitempty"`
+	FadeOutSec float64  `json:"fadeOutSec,omitempty"`
+	Colour     *[3]uint8 `json:"colour,omitempty"`
 }
 
 // Mark is a run-lifecycle event broadcast to every bot stream.
@@ -393,6 +422,19 @@ type TitleFrame struct {
 	FadeOutTicks int32  `json:"fadeOutTicks,omitempty"`
 	// Clear is true when the packet cleared/reset the title surfaces.
 	Clear bool `json:"clear,omitempty"`
+}
+
+// ParticleFrame is one SpawnParticleEffect on the event lane.
+type ParticleFrame struct {
+	V         int        `json:"v"`
+	Type      string     `json:"type"`
+	Bot       string     `json:"bot"`
+	Tick      uint64     `json:"tick"`
+	Name      string     `json:"name"`
+	Pos       [3]float32 `json:"pos"`
+	Dimension byte       `json:"dimension,omitempty"`
+	// EntityID is the attached entity unique id; omitted when absolute (-1).
+	EntityID int64 `json:"entityId,omitempty"`
 }
 
 // UIForm is an open server form.

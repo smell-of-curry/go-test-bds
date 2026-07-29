@@ -147,9 +147,14 @@ reach the bot and do not change the stream.
 | `bot` | bot name | (required when not using `stream`) | Selects which bot's `/stream` to open |
 | `stream` | absolute SSE URL | derived from `bot` | Used by the Vite dev server / tests |
 | `camera` | `follow` \| `first` \| `firstPerson` \| `orbit` | `firstPerson` | Initial camera mode. Capture harness opens with `camera=follow` so the bot body and surroundings are in frame; press **C** to cycle first-person → follow → orbit |
+| `bobbing` | `1` / `true` / `on` | off | Opt-in view bobbing in follow mode. Default off so goldens/captures stay deterministic |
 
-Follow mode sits behind and slightly above the observed actor (over-the-shoulder).
+Follow mode sits behind and slightly above the observed actor (over-the-shoulder;
+Bedrock third-person distance = 4 blocks, with a single terrain occlusion ray).
 First-person stays locked to `eyePos`/`rot`. Orbit is the free inspection camera.
+A present snapshot `camera` object overrides follow/first-person with the
+server-driven position/rotation (eased over `easeDurationMs`); `cameraCleared`
+on a delta restores the client default.
 
 ---
 
@@ -190,10 +195,17 @@ chunks — first batch on the keyframe, the rest on later `delta.columnsAdded`.
   "columnsPending": 77,
   "entities": [ { "...": "see Entity" } ],
   "ui": { "...": "see UI" },
-  "registries": { "...": "see Registries" }
+  "registries": { "...": "see Registries" },
+  "time": 6000,
+  "camera": { "...": "see Camera" }
 }
 ```
 
+- `time` is absolute world time ticks from `packet.SetTime`. Absent means the
+  client keeps its fixed noon sky (Stage 10b goldens). Present → ticks-of-day
+  `time % 24000`, day count `floor(time / 24000)` for moon phase.
+- `camera` is a server `CameraInstruction` override. Absent means the client's
+  default follow / first-person / orbit mode. See *Camera* below.
 - `columns` holds at most `ColumnBudget` columns (config; default 4), nearest the
   actor first. It may be empty when the radius holds nothing yet.
 - `columnsPending` is how many columns in the stream radius have **not** been
@@ -233,13 +245,20 @@ means "unchanged", never "empty".
   "entitiesUpdated": [ { "...": "see Entity" } ],
   "entitiesRemoved": [ 41, 42 ],
   "actor": { "...": "see Actor" },
-  "ui": { "...": "see UI" }
+  "ui": { "...": "see UI" },
+  "time": 18000,
+  "camera": { "...": "see Camera" },
+  "cameraCleared": false
 }
 ```
 
 - `world` present at all means the dimension changed: the client must drop every
   column and entity it holds before applying the rest of the frame. (Dimension
   changes are delivered as a fresh paced keyframe, not a delta with `world`.)
+- `time` present means world time changed; absent means unchanged.
+- `camera` present means the override changed; `cameraCleared: true` means an
+  active override was cleared (return to the client default). Absent both =
+  camera unchanged.
 - `columnsAdded` is both "chunk entered the radius" and "next batch of a paced
   keyframe catch-up". At most `ColumnBudget` columns per frame. An unchanged
   column that the subscriber already has is never re-sent.
@@ -499,6 +518,33 @@ on keyframes; absent on deltas.
 - Precedence vs resource-pack `blocks.json`: palette components win for
   geometry and materials (`viewer/FINDINGS-wire.md`).
 
+### Camera
+
+Server-driven camera override from `packet.CameraInstruction` (+ presets from
+`packet.CameraPresets`). Additive — absent on frames that have no active
+override. Does **not** change `[GOTESTBDS]` stdout.
+
+```json
+{
+  "preset": "free",
+  "pos": [12.5, 72.0, -4.0],
+  "rot": [90.0, 15.0],
+  "easeDurationMs": 500,
+  "fov": 50,
+  "fade": {
+    "fadeInSec": 0.5, "waitSec": 1.0, "fadeOutSec": 0.5,
+    "colour": [0, 0, 0]
+  }
+}
+```
+
+- `rot` is `[yaw, pitch]` degrees (same convention as Actor).
+- `pos` / `rot` absent → keep prior override values for those axes; a clear
+  (`cameraCleared` or keyframe without `camera`) drops the whole override.
+- `fade` is exported for consumers; the web viewer does not draw it yet.
+- Client FOV default stays 70° (PerspectiveCamera); sprint widens slightly when
+  no instruction FOV is set.
+
 ### Actor
 
 The observed bot. A superset of `Entity` for the fields a first-person camera
@@ -588,6 +634,24 @@ never-drop queue as `chat`.
 
 `clear` is true when the packet cleared/reset every title surface.
 
+### `particle` (event lane)
+
+One `packet.SpawnParticleEffect` spawn. Same never-drop queue as `chat` /
+`title`. LevelEvent-based vanilla particles are **not** on this lane.
+
+```json
+{
+  "v": 1, "type": "particle", "bot": "TestBot", "tick": 1025,
+  "name": "minecraft:basic_smoke_particle",
+  "pos": [1.5, 64.0, -3.25],
+  "dimension": 0,
+  "entityId": -1
+}
+```
+
+`entityId` is omitted (or absent) when the position is absolute; when present
+and not `-1`, `pos` is relative to that entity's unique id.
+
 ---
 
 ## Backpressure
@@ -598,8 +662,8 @@ never reach it.
 - World state is projected once per tick on the bot goroutine. Each subscriber
   then gets its own paced frame (column bookkeeping differs per connection).
 - Each subscriber keeps at most one pending world frame: a newer frame replaces
-  an unread one. Events (`mark` / `capture` / `chat` / `title`) queue separately
-  and never drop for world backpressure.
+  an unread one. Events (`mark` / `capture` / `chat` / `title` / `particle`)
+  queue separately and never drop for world backpressure.
 - Superseding an unsent catch-up `delta` re-queues only that frame's columns
   (its `columnsAdded` batch plus any columns it patched in place). The client
   keeps every column already delivered — a full keyframe restart here is what

@@ -1,8 +1,13 @@
-import { CameraController, cameraModeFromSearch } from "./camera";
+import {
+  bobbingFromSearch,
+  CameraController,
+  cameraModeFromSearch,
+} from "./camera";
 import { installViewerHandle } from "./debug";
 import { EntityModelRegistry } from "./entity";
 import { MotionLerp } from "./motion";
 import { Overlay } from "./overlay";
+import { ParticleRegistry, ParticleSystem } from "./particles";
 import type { Actor } from "./protocol";
 import { LOADING_CLEAR, ViewerScene } from "./scene";
 import { SnapshotStream, streamUrlFromSearch } from "./stream";
@@ -49,7 +54,14 @@ function setLoadingVisible(visible: boolean, detail?: string): void {
 function showWorld(): void {
   setLoadingVisible(false);
   const radiusChunks = store.getState().hello?.radius ?? 8;
-  scene.setEnvironment({ enabled: true, radiusChunks });
+  let assetBaseUrl = location.origin;
+  try {
+    assetBaseUrl = new URL(streamUrlFromSearch(location.search)).origin;
+  } catch {
+    /* keep location.origin */
+  }
+  scene.setEnvironment({ enabled: true, radiusChunks, assetBaseUrl });
+  scene.setWorldTime(store.getState().time);
   scene.setWorldVisible(true);
 }
 
@@ -105,6 +117,7 @@ void firstKeyframe
         : `entities: ${msg}`;
       paintOverlay();
     }
+    particleRegistry = new ParticleRegistry(bundle.client);
   })
   .catch((err: unknown) => {
     assetError = err instanceof Error ? err.message : String(err);
@@ -147,9 +160,16 @@ const camera = new CameraController(
   (canvas.clientWidth || window.innerWidth) /
     (canvas.clientHeight || window.innerHeight),
   cameraModeFromSearch(location.search),
+  bobbingFromSearch(location.search),
 );
 const overlay = new Overlay(overlayEl, errorEl, captionEl, uiEl);
-const hud = initHud({ threeScene: scene.scene });
+const particles = new ParticleSystem(scene.scene);
+scene.particles = particles;
+let particleRegistry: ParticleRegistry | null = null;
+const hud = initHud({
+  particles,
+  getParticleRegistry: () => particleRegistry,
+});
 const motion = new MotionLerp();
 
 installViewerHandle(
@@ -211,6 +231,8 @@ store.subscribe((state) => {
   }
 
   scene.sync(state, showActorBody());
+  scene.setWorldTime(state.time);
+  camera.setServerOverride(state.camera, performance.now());
 
   // Pose samples only when the world pose actually changed — mark/capture
   // frames must not restart the lerp.
@@ -226,9 +248,32 @@ store.subscribe((state) => {
   }
 
   hud.onFrame(state);
+  if (state.pendingParticles.length) {
+    for (const pf of state.pendingParticles) {
+      void spawnStreamParticle(pf.name, pf.pos);
+    }
+  }
   store.clearDirty();
   paintOverlay();
 });
+
+/**
+ * Resolve a stream particle effect and spawn it (no-op when packs unavailable).
+ *
+ * @param name - Effect identifier.
+ * @param pos - World position.
+ */
+async function spawnStreamParticle(
+  name: string,
+  pos: [number, number, number],
+): Promise<void> {
+  const reg = particleRegistry;
+  if (!reg) return;
+  const effect = await reg.get(name);
+  if (!effect) return;
+  await reg.bindTexture(particles, effect);
+  particles.spawn(effect, pos);
+}
 
 const streamUrl = streamUrlFromSearch(location.search);
 const stream = new SnapshotStream(streamUrl, {
@@ -278,7 +323,8 @@ function frame(): void {
     // MotionLerp (~inter-arrival / ~3 ticks) + Stage 9 bone animation.
     scene.tickEntities(dtSec > 0 ? dtSec : PAINT_INTERVAL_MS / 1000, entities);
 
-    camera.update(actor);
+    camera.setOccludeMeshes(scene.terrainMeshes());
+    camera.update(actor, dtSec > 0 ? dtSec : PAINT_INTERVAL_MS / 1000, now);
     scene.setActorVisible(
       showActorBody(),
       actor ? actor.pos : null,

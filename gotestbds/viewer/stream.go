@@ -41,10 +41,11 @@ type Stream struct {
 	healthAt time.Time
 	lastDim  atomic.Int32
 
-	// Hud event cursors — bot goroutine only. Chat/title ride the event lane
-	// so a slow world subscriber cannot lose a line that a recording needs.
-	lastMsgSeq   uint64
-	lastTitleSeq uint64
+	// Hud event cursors — bot goroutine only. Chat/title/particle ride the
+	// event lane so a slow world subscriber cannot lose a line a recording needs.
+	lastMsgSeq      uint64
+	lastTitleSeq    uint64
+	lastParticleSeq uint64
 
 	// lastEncodeAt throttles the world projection — bot goroutine only.
 	lastEncodeAt time.Time
@@ -758,8 +759,8 @@ func (s *Stream) emitMark(m Mark) {
 	s.emitRaw("mark", data)
 }
 
-// emitHudEvents fans chat/title changes on the event lane (never dropped for
-// world backpressure). Protocol noise is filtered here and in encodeUI.
+// emitHudEvents fans chat/title/particle changes on the event lane (never
+// dropped for world backpressure). Protocol noise is filtered here and in encodeUI.
 //
 // @param a Live actor on the bot goroutine.
 func (s *Stream) emitHudEvents(a *actor.Actor) {
@@ -785,36 +786,56 @@ func (s *Stream) emitHudEvents(a *actor.Actor) {
 	}
 
 	titleSeq := a.TitleSeq()
-	if titleSeq == 0 || titleSeq == s.lastTitleSeq {
-		return
+	if titleSeq != 0 && titleSeq != s.lastTitleSeq {
+		s.lastTitleSeq = titleSeq
+		st := a.ScreenTitle()
+		// The event lane must sanitize like encodeUI: run 15 shipped raw
+		// "&_phone:" tokens and rawtext JSON here, and the HUD drew them.
+		title := filterHudControlText(flattenRawtext(st.Title))
+		subtitle := filterHudControlText(flattenRawtext(st.Subtitle))
+		actionBar := filterHudControlText(flattenRawtext(st.ActionBar))
+		rawEmpty := st.Title == "" && st.Subtitle == "" && st.ActionBar == ""
+		if !rawEmpty && title == "" && subtitle == "" && actionBar == "" {
+			// Pure control-token traffic: a real client's HUD would not change,
+			// so neither may ours — emitting a clear frame here would wipe a
+			// visible title every time the sidebar updates.
+		} else {
+			tf := TitleFrame{
+				V:            SchemaVersion,
+				Type:         "title",
+				Bot:          s.name,
+				Tick:         tick,
+				Title:        title,
+				Subtitle:     subtitle,
+				ActionBar:    actionBar,
+				FadeInTicks:  st.FadeInTicks,
+				StayTicks:    st.StayTicks,
+				FadeOutTicks: st.FadeOutTicks,
+				Clear:        rawEmpty,
+			}
+			data, _ := json.Marshal(tf)
+			s.emitRaw("title", data)
+		}
 	}
-	s.lastTitleSeq = titleSeq
-	st := a.ScreenTitle()
-	// The event lane must sanitize like encodeUI: run 15 shipped raw
-	// "&_phone:" tokens and rawtext JSON here, and the HUD drew them.
-	title := filterHudControlText(flattenRawtext(st.Title))
-	subtitle := filterHudControlText(flattenRawtext(st.Subtitle))
-	actionBar := filterHudControlText(flattenRawtext(st.ActionBar))
-	rawEmpty := st.Title == "" && st.Subtitle == "" && st.ActionBar == ""
-	if !rawEmpty && title == "" && subtitle == "" && actionBar == "" {
-		// Pure control-token traffic: a real client's HUD would not change,
-		// so neither may ours — emitting a clear frame here would wipe a
-		// visible title every time the sidebar updates.
-		return
+
+	spawns := a.ParticlesFromSeq(s.lastParticleSeq)
+	if seq := a.ParticleSeq(); seq > s.lastParticleSeq {
+		s.lastParticleSeq = seq
 	}
-	tf := TitleFrame{
-		V:            SchemaVersion,
-		Type:         "title",
-		Bot:          s.name,
-		Tick:         tick,
-		Title:        title,
-		Subtitle:     subtitle,
-		ActionBar:    actionBar,
-		FadeInTicks:  st.FadeInTicks,
-		StayTicks:    st.StayTicks,
-		FadeOutTicks: st.FadeOutTicks,
-		Clear:        rawEmpty,
+	for _, p := range spawns {
+		pf := ParticleFrame{
+			V:         SchemaVersion,
+			Type:      "particle",
+			Bot:       s.name,
+			Tick:      tick,
+			Name:      p.Name,
+			Pos:       [3]float32{p.Position[0], p.Position[1], p.Position[2]},
+			Dimension: p.Dimension,
+		}
+		if p.EntityUniqueID != -1 {
+			pf.EntityID = p.EntityUniqueID
+		}
+		data, _ := json.Marshal(pf)
+		s.emitRaw("particle", data)
 	}
-	data, _ := json.Marshal(tf)
-	s.emitRaw("title", data)
 }
