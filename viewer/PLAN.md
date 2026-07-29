@@ -199,6 +199,13 @@ all-air sub-chunk case.
       a dropped frame is followed by a keyframe resync, and the count is on the
       overlay. Event frames (mark, capture) wait briefly instead of dropping,
       because losing one strands a capture request.
+- [x] Sanitize every HUD lane the same way, including the eventful one.
+      `flattenRawtext` locates the rawtext JSON anywhere in a string;
+      `filterHudControlText` shows the value of display-worthy PHUD tokens
+      (`loadingScreen`, `battleWait`, `evolutionWait`, `currency`) and blanks
+      pure control tokens — and when filtering leaves nothing, the title event
+      is not emitted at all, because a real client's HUD would not have
+      changed and a clear frame would wipe a visible title.
 
 **Check:** `gotestbds/viewer/encode_test.go` drives a synthetic `World` through
 add/modify/remove and asserts the delta sequence reconstructs the same state;
@@ -283,6 +290,12 @@ suites are waiting on.
       Playwright's recorder does not take one; the app paints on rAF with pose
       interpolation, so quiet stretches still compress in the webm — read the
       caption elapsed time and overlay tick for real timing.
+- [x] Never let a busy mesher cost a still. The `__viewer.settled` gate is
+      best-effort with a 10s grace (a world still streaming keeps meshing
+      indefinitely — runs 13–15 lost their opening shot to it), Chromium runs
+      with backgrounding/timer-throttling disabled, and `waitForFunction`
+      polls on a timer rather than rAF. The capture error message carries the
+      underlying Playwright error, not a summary that hides it.
 
 **Check:** `viewer/tests/capture.spec.ts` runs the harness against a fake bot
 server and asserts a PNG (magic bytes and all) of the requested size at a tick at
