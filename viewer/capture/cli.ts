@@ -19,8 +19,16 @@ Options:
   --max-segment-seconds <n>      Cap run recording length (default 900)
   --browser <path>               Chromium executable path
   --video-out <file>             Write the run video here instead of POSTing it
+  --timelapse <factor>           Speed-up for marked walking segments
+                                 (default GOTESTBDS_TIMELAPSE or 8; 1 disables)
+  --keep-raw                     Keep the real-time original as run-full.webm
   --log-level <level>            debug | info | warn | error (default info)
   --help                         Show this help
+
+ffmpeg for --timelapse is resolved from the FFMPEG env var, then PATH, then
+Playwright's bundled build, and must carry the trim/setpts/concat/fps filters
+(Playwright's bundled ffmpeg is filter-stripped and gets skipped). Without a
+capable ffmpeg the video is left real-time with a warning.
 `;
 
 interface ParsedArgs {
@@ -33,6 +41,8 @@ interface ParsedArgs {
     maxSegmentSeconds?: number;
     browser?: string;
     videoOut?: string;
+    timelapse?: number;
+    keepRaw?: boolean;
     logLevel?: LogLevel;
   };
 }
@@ -89,6 +99,14 @@ export function parseArgs(argv: string[]): ParsedArgs {
     }
     if (a === "--video-out") {
       options.videoOut = next();
+      continue;
+    }
+    if (a === "--timelapse") {
+      options.timelapse = Number(next());
+      continue;
+    }
+    if (a === "--keep-raw") {
+      options.keepRaw = true;
       continue;
     }
     if (a === "--log-level") {
@@ -164,6 +182,18 @@ async function main(): Promise<void> {
     return;
   }
 
+  // Flag beats env beats the 8x default; anything not a positive number
+  // (including an unset env) falls through, and 1 disables the pass.
+  const envFactor = Number(process.env.GOTESTBDS_TIMELAPSE ?? "");
+  const timelapse =
+    parsed.options.timelapse ??
+    (Number.isFinite(envFactor) && envFactor > 0 ? envFactor : 8);
+  if (!Number.isFinite(timelapse) || timelapse < 1) {
+    console.error(`invalid --timelapse factor: ${String(timelapse)}`);
+    process.exitCode = 1;
+    return;
+  }
+
   const opts: HarnessOptions = {
     stream: stream.replace(/\/+$/, ""),
     bot,
@@ -172,6 +202,8 @@ async function main(): Promise<void> {
     maxSegmentSeconds: parsed.options.maxSegmentSeconds ?? 900,
     browserPath,
     logLevel: parsed.options.logLevel ?? "info",
+    timelapse,
+    keepRaw: parsed.options.keepRaw ?? false,
     ...(parsed.options.videoOut ? { videoOut: parsed.options.videoOut } : {}),
   };
 

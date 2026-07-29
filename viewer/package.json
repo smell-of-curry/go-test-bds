@@ -10,6 +10,7 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "test": "playwright test",
+    "test:capture": "tsx --test capture/*.test.ts",
     "generate:fixture": "tsx testdata/generate.ts",
     "diagnose:terrain": "node tools/diagnose-terrain-packs.mjs",
     "test:golden": "playwright test --project=golden"

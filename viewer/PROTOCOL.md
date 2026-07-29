@@ -293,6 +293,14 @@ This is the source of the burnt-in caption (suite/test/phase). The capture
 harness records **one** continuous video for the whole run; marks do not start
 or stop recording.
 
+Suites may additionally emit `phase: "segment"` marks to annotate spans of the
+run timeline. The one convention so far: `message: "walk:start"` /
+`message: "walk:end"` bracket a long walking leg. The harness times these
+against the run video and, after the recording is written, re-times the walking
+intervals to play sped-up (`--timelapse <factor>`, default 8, env
+`GOTESTBDS_TIMELAPSE`; requires a full ffmpeg — see the capture CLI help).
+`segment` marks never update the caption or run lifecycle.
+
 ### `capture`
 
 A request for a still. Emitted when the `screenshot` instruction runs.
