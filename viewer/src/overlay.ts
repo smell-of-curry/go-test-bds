@@ -1,6 +1,7 @@
 import type { WorldState } from "./store";
 import type { CameraMode } from "./camera";
 import type { UI } from "./protocol";
+import { formatCodesToFragment } from "./ui/formatCodes";
 
 /**
  * DOM diagnostic HUD + burnt-in caption band + open-UI panel.
@@ -211,16 +212,18 @@ function panelBlock(
   kindEl.className = "ui-kind";
   kindEl.textContent = kind;
   root.appendChild(kindEl);
+  // formatCodesToFragment, not textContent: form text carries § formatting
+  // codes ("§lBulbasaur§r §7No. 001") that should color like a real client.
   if (title) {
     const t = document.createElement("div");
     t.className = "ui-title";
-    t.textContent = title;
+    t.appendChild(formatCodesToFragment(title));
     root.appendChild(t);
   }
   if (body) {
     const b = document.createElement("div");
     b.className = "ui-body";
-    b.textContent = body;
+    b.appendChild(formatCodesToFragment(body));
     root.appendChild(b);
   }
   if (buttons.length) {
@@ -229,7 +232,7 @@ function panelBlock(
     for (const label of buttons) {
       const btn = document.createElement("div");
       btn.className = "ui-button";
-      btn.textContent = label;
+      btn.appendChild(formatCodesToFragment(label));
       list.appendChild(btn);
     }
     root.appendChild(list);
