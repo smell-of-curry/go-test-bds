@@ -114,18 +114,42 @@ func rawtextWithArgs(raw json.RawMessage) []string {
 	return args
 }
 
-// filterHudControlText blanks title/subtitle/actionbar text that is a JSON-UI
-// control token rather than visible text. Resource packs (PokeBedrock's PHUD
-// convention) smuggle UI state through SetTitle as "&_token:value" strings; a
-// real client's JSON UI intercepts them, so they are never drawn as titles.
+// hudTokenValueShown lists PHUD tokens whose value is real display text a
+// real client would show through its JSON UI (the battle log, the tutorial
+// objective, the completion card). The viewer has no JSON UI, so it shows the
+// value as plain title text. Tokens absent here carry animation/layout state
+// (phone poses, packed sidebar data, ping colors) and are dropped.
+var hudTokenValueShown = map[string]bool{
+	"loadingScreen": true,
+	"battleWait":    true,
+	"evolutionWait": true,
+	"currency":      true,
+}
+
+// filterHudControlText resolves title/subtitle/actionbar text that is a PHUD
+// control token ("&_token:value", PokeBedrock's SetTitle smuggling convention)
+// rather than plain visible text: display-worthy token values pass through,
+// control-state tokens become "". Flatten rawtext BEFORE calling this — the
+// rawtext form ({"rawtext":[{"text":"&_battleWait:"},…]}) only exposes its
+// token once flattened.
 //
-// @param text Raw title text from the wire.
-// @returns text unchanged, or "" for control tokens.
+// @param text Flattened title text from the wire.
+// @returns The visible text for the HUD, or "" for control state.
 func filterHudControlText(text string) string {
-	// Plain-string form, and the rawtext-JSON form whose first part is the
-	// token ({"rawtext":[{"text":"&_currency:"},…]}).
-	if strings.HasPrefix(text, "&_") || strings.Contains(text, `"&_`) {
+	if !strings.HasPrefix(text, "&_") {
+		// Unflattened rawtext-form tokens must never reach the screen raw.
+		if strings.Contains(text, `"&_`) {
+			return ""
+		}
+		return text
+	}
+	rest := text[2:]
+	i := strings.Index(rest, ":")
+	if i < 0 {
 		return ""
 	}
-	return text
+	if hudTokenValueShown[rest[:i]] {
+		return rest[i+1:]
+	}
+	return ""
 }

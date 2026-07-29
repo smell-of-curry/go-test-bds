@@ -100,6 +100,13 @@ const LEVEL_RANK: Record<LogLevel, number> = {
 // instruction and rides on the capture frame; giving up sooner than the waiting
 // Go side would fail a capture it was still willing to wait for.
 const DEFAULT_CAPTURE_TIMEOUT_MS = 5_000;
+
+/**
+ * How long a still may wait for the scene to finish meshing after its target
+ * tick has rendered. Best-effort: a busy mesher (world still streaming) must
+ * not cost the still entirely.
+ */
+const SETTLE_GRACE_MS = 10_000;
 const GL_ARGS = [
   "--use-gl=angle",
   "--use-angle=swiftshader",
@@ -452,13 +459,24 @@ async function handleCapture(
         window as unknown as { __viewer?: { flush: () => void } }
       ).__viewer?.flush();
     });
-    await stillsPage.waitForFunction(
-      () =>
-        (window as unknown as { __viewer?: { settled: boolean } }).__viewer
-          ?.settled === true,
-      undefined,
-      { polling: 250 },
-    );
+    // Settling is best-effort: while the world is still streaming columns the
+    // mesher never goes idle, so a hard wait here starved run 15's subway
+    // still for its whole budget ("Timeout 30000ms exceeded" — the Playwright
+    // default, not ours). The first gate already proved the wanted tick was
+    // rendered; a still with a few unmeshed far columns beats no still.
+    await stillsPage
+      .waitForFunction(
+        () =>
+          (window as unknown as { __viewer?: { settled: boolean } }).__viewer
+            ?.settled === true,
+        undefined,
+        { polling: 250, timeout: SETTLE_GRACE_MS },
+      )
+      .catch(() => {
+        log.warn(
+          `capture: scene still meshing after ${SETTLE_GRACE_MS}ms; capturing anyway`,
+        );
+      });
 
     const tick = await stillsPage.evaluate(
       () => (window as unknown as { __viewer: { tick: number } }).__viewer.tick,
@@ -480,8 +498,12 @@ async function handleCapture(
     });
     log.info(`capture: uploaded still id=${frame.id} tick=${tick}`);
   } catch (err) {
-    const message = `no canvas frame reached tick ${minTick} within ${timeoutMs}ms`;
-    log.warn(`capture: ${message} (${String(err)})`);
+    // Carry the real error: run 15 reported "within 239999ms" for a failure
+    // that was actually a 30s default timeout on a different wait.
+    const message =
+      `no canvas frame reached tick ${minTick} within ${timeoutMs}ms ` +
+      `(${String(err).split("\n")[0]?.slice(0, 160)})`;
+    log.warn(`capture: ${message}`);
     await postCaptureError(opts.stream, frame.id, message).catch((e) =>
       log.warn(`capture: error POST failed: ${String(e)}`),
     );

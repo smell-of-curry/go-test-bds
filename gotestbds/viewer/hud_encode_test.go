@@ -53,6 +53,36 @@ func TestFlattenRawtext(t *testing.T) {
 	}
 }
 
+func TestFilterHudControlText(t *testing.T) {
+	cases := map[string]string{
+		// Display-worthy PHUD tokens surface their value.
+		"&_loadingScreen:§l§6TUTORIAL COMPLETE!": "§l§6TUTORIAL COMPLETE!",
+		"&_currency:Go see Professor Oak":        "Go see Professor Oak",
+		"&_battleWait:Bulbasaur used Growl":      "Bulbasaur used Growl",
+		// Control-state tokens vanish.
+		"&_phone:ring":       "",
+		"&_phone:":           "",
+		"&_sidebar:HP: 20|…": "",
+		"&_playerPing:§a1":   "",
+		// Plain text passes through.
+		"Level Up!": "Level Up!",
+		"":          "",
+	}
+	for in, want := range cases {
+		if got := filterHudControlText(in); got != want {
+			t.Fatalf("filterHudControlText(%q)=%q want %q", in, got, want)
+		}
+	}
+
+	// The rawtext battle-log title as the wire carries it: flatten exposes the
+	// token, the filter keeps the log text a real client's battle UI shows.
+	wire := `{"rawtext":[{"text":"&_battleWait:"},{"translate":"models.showdown.move.used","with":{"rawtext":[{"text":"Bulbasaur"},{"text":"Growl"}]}}]}`
+	got := filterHudControlText(flattenRawtext(wire))
+	if got != "models.showdown.move.used Bulbasaur Growl" {
+		t.Fatalf("battle log title=%q", got)
+	}
+}
+
 func TestEncodeUICarriesTitleAndHotbar(t *testing.T) {
 	a := testActor(t, "HudBot")
 	a.ApplyTitleAction(packet.TitleActionSetDurations, "", 8, 60, 12)

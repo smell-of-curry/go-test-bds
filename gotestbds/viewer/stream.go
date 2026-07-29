@@ -778,7 +778,7 @@ func (s *Stream) emitHudEvents(a *actor.Actor) {
 			Type: "chat",
 			Bot:  s.name,
 			Tick: tick,
-			Text: m.Text,
+			Text: flattenRawtext(m.Text),
 		}
 		data, _ := json.Marshal(cf)
 		s.emitRaw("chat", data)
@@ -790,18 +790,30 @@ func (s *Stream) emitHudEvents(a *actor.Actor) {
 	}
 	s.lastTitleSeq = titleSeq
 	st := a.ScreenTitle()
+	// The event lane must sanitize like encodeUI: run 15 shipped raw
+	// "&_phone:" tokens and rawtext JSON here, and the HUD drew them.
+	title := filterHudControlText(flattenRawtext(st.Title))
+	subtitle := filterHudControlText(flattenRawtext(st.Subtitle))
+	actionBar := filterHudControlText(flattenRawtext(st.ActionBar))
+	rawEmpty := st.Title == "" && st.Subtitle == "" && st.ActionBar == ""
+	if !rawEmpty && title == "" && subtitle == "" && actionBar == "" {
+		// Pure control-token traffic: a real client's HUD would not change,
+		// so neither may ours — emitting a clear frame here would wipe a
+		// visible title every time the sidebar updates.
+		return
+	}
 	tf := TitleFrame{
 		V:            SchemaVersion,
 		Type:         "title",
 		Bot:          s.name,
 		Tick:         tick,
-		Title:        st.Title,
-		Subtitle:     st.Subtitle,
-		ActionBar:    st.ActionBar,
+		Title:        title,
+		Subtitle:     subtitle,
+		ActionBar:    actionBar,
 		FadeInTicks:  st.FadeInTicks,
 		StayTicks:    st.StayTicks,
 		FadeOutTicks: st.FadeOutTicks,
-		Clear:        st.Title == "" && st.Subtitle == "" && st.ActionBar == "",
+		Clear:        rawEmpty,
 	}
 	data, _ := json.Marshal(tf)
 	s.emitRaw("title", data)
