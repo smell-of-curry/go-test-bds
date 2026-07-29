@@ -34,8 +34,18 @@ export {
   sampleAnimation,
   sampleAnimationPoses,
   sampleChannel,
+  setBoneLocalPose,
   type BoneAnimPose,
+  type BoneRestPose,
 } from "./animation";
+export {
+  addLocomotionPoses,
+  classifyLimb,
+  createLocomotion,
+  tickLocomotion,
+  type LimbClass,
+  type LocomotionState,
+} from "./locomotion";
 export {
   buildAnimationBindings,
   EntityAnimator,

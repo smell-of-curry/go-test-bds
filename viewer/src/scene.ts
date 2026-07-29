@@ -1,8 +1,11 @@
 import * as THREE from "three";
 import type { CameraController } from "./camera";
 import {
+  addLocomotionPoses,
+  applyBonePoses,
   applyEntityYaw,
   buildItemSprite,
+  createLocomotion,
   createNameTag,
   EntityAnimator,
   nameTagAnchor,
@@ -11,9 +14,12 @@ import {
   selectArmourLayers,
   selectHeldItem,
   tickDroppedItem,
+  tickLocomotion,
+  type BoneAnimPose,
   type BuiltEntityModel,
   type EntityModelRegistry,
   type ItemSprite,
+  type LocomotionState,
   type NameTagSprite,
 } from "./entity";
 import type { ParticleSystem } from "./particles";
@@ -366,6 +372,8 @@ interface EntityNode {
   model: BuiltEntityModel | null;
   /** Stage 9 per-instance animation / Molang state. */
   animator: EntityAnimator | null;
+  /** Procedural walk-cycle / arm-swing state (viewer-side). */
+  loco: LocomotionState;
   /** In-flight model load token — bumped to ignore stale async results. */
   loadToken: number;
   type: string;
@@ -401,6 +409,10 @@ export class ViewerScene {
   private readonly actorWire: THREE.LineSegments;
   private actorModel: BuiltEntityModel | null = null;
   private actorLoadToken = 0;
+  /** Walk-cycle state for the observed bot body. */
+  private readonly actorLoco = createLocomotion();
+  private lastActorPos: [number, number, number] | null = null;
+  private lastActorTickMs = 0;
   private entityRegistry: EntityModelRegistry | null = null;
   private readonly pendingSections: string[] = [];
   private pendingSet = new Set<string>();
@@ -589,7 +601,27 @@ export class ViewerScene {
     }
     this.actorGroup.position.set(actorPos[0], actorPos[1], actorPos[2]);
     if (rot && this.actorModel) {
-      this.entityRegistry?.applyPose(this.actorModel, rot);
+      // Walk cycle from frame-to-frame position delta (actor vel is not
+      // sampled through MotionLerp).
+      const now = performance.now();
+      const dtSec = this.lastActorTickMs
+        ? Math.min(0.25, (now - this.lastActorTickMs) / 1000)
+        : 0;
+      this.lastActorTickMs = now;
+      let speed = 0;
+      if (this.lastActorPos && dtSec > 0) {
+        speed =
+          Math.hypot(
+            actorPos[0] - this.lastActorPos[0],
+            actorPos[2] - this.lastActorPos[2],
+          ) / dtSec;
+      }
+      this.lastActorPos = [actorPos[0], actorPos[1], actorPos[2]];
+      tickLocomotion(this.actorLoco, dtSec, speed, 0);
+      const poses = new Map<string, BoneAnimPose>();
+      addLocomotionPoses(this.actorLoco, this.actorModel.bones.keys(), poses);
+      applyBonePoses(this.actorModel.bones, poses, rot[1] ?? 0);
+      applyEntityYaw(this.actorModel.root, rot[0]);
     } else if (rot) {
       // Wireframe-only: yaw the whole actor group.
       this.actorGroup.rotation.order = "YXZ";
@@ -728,9 +760,19 @@ export class ViewerScene {
       node.group.position.set(ent.pos[0], ent.pos[1], ent.pos[2]);
       if (ent.type === "minecraft:item" && node.itemSprite) {
         tickDroppedItem(node.itemSprite.root, node.lifeSec, 0);
-      } else if (node.animator && node.model) {
-        // Animator owns bone + head pitch; only yaw the model root here.
-        node.animator.tick(dtSec, ent, node.model);
+      } else if (node.model) {
+        // Pack animations (when bound) + procedural walk / arm swing.
+        const poses: Map<string, BoneAnimPose> = node.animator
+          ? node.animator.tick(dtSec, ent, null)
+          : new Map();
+        tickLocomotion(
+          node.loco,
+          dtSec,
+          Math.hypot(ent.vel[0], ent.vel[2]),
+          ent.swing ?? 0,
+        );
+        addLocomotionPoses(node.loco, node.model.bones.keys(), poses);
+        applyBonePoses(node.model.bones, poses, ent.rot[1] ?? 0);
         applyEntityYaw(node.model.root, ent.rot[0]);
       } else {
         this.setEntityPos(rid, ent.pos, ent.rot);
@@ -938,6 +980,7 @@ export class ViewerScene {
         wire,
         model: null,
         animator: null,
+        loco: createLocomotion(),
         loadToken: 0,
         type: ent.type,
         nameTag,

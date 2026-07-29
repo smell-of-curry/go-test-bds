@@ -92,6 +92,8 @@ export interface Entity {
   attributes: Record<string, number>;
   held: { main: Item | null; off: Item | null };
   armour: [Item | null, Item | null, Item | null, Item | null];
+  /** Arm-swing counter (increments per Animate swing). Absent = never swung. */
+  swing?: number;
 }
 
 export interface LookingAt {
