@@ -87,6 +87,12 @@ export interface GeometryDescription {
   identifier: string;
   textureWidth: number;
   textureHeight: number;
+  /**
+   * False when the file omitted texture_width/height (vanilla
+   * humanoid.custom does) — the engine then uses the actual texture size,
+   * so the mesher must too. Absent/true = declared sizes are authoritative.
+   */
+  textureSizeExplicit?: boolean;
   visibleBoundsWidth?: number;
   visibleBoundsHeight?: number;
   visibleBoundsOffset?: Vec3;

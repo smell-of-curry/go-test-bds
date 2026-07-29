@@ -120,10 +120,14 @@ interface MutableMesh {
  * chain and get the posed vertex. `texture_meshes` are not expanded.
  *
  * @param geometry - Parsed geometry.
+ * @param actualTextureSize - Loaded texture pixel size; used when the file
+ * omitted texture_width/height (the engine falls back to the real texture,
+ * e.g. vanilla humanoid.custom with a 64×64 skin).
  * @returns One buffer set per bone that contributed any triangles.
  */
 export function buildGeometryMeshes(
   geometry: ParsedGeometry,
+  actualTextureSize?: { width: number; height: number },
 ): BoneMeshBuffers[] {
   const meshes = new Map<string, MutableMesh>();
   const ensure = (name: string): MutableMesh => {
@@ -142,8 +146,17 @@ export function buildGeometryMeshes(
     return m;
   };
 
-  const tw = geometry.description.textureWidth;
-  const th = geometry.description.textureHeight;
+  const useActual =
+    geometry.description.textureSizeExplicit === false &&
+    actualTextureSize !== undefined &&
+    actualTextureSize.width > 0 &&
+    actualTextureSize.height > 0;
+  const tw = useActual
+    ? actualTextureSize.width
+    : geometry.description.textureWidth;
+  const th = useActual
+    ? actualTextureSize.height
+    : geometry.description.textureHeight;
 
   for (const bone of geometry.bones) {
     for (const cube of bone.cubes) {
@@ -206,11 +219,6 @@ function appendCube(
   const x1 = ox + sw + inflate;
   const y1 = oy + sh + inflate;
   const z1 = oz + sd + inflate;
-  const sizeWithInflate: [number, number, number] = [
-    sw + inflate * 2,
-    sh + inflate * 2,
-    sd + inflate * 2,
-  ];
 
   const hasCubeRot =
     cube.rotation[0] !== 0 || cube.rotation[1] !== 0 || cube.rotation[2] !== 0;
@@ -220,7 +228,10 @@ function appendCube(
     : null;
 
   for (const face of FACE_NAMES) {
-    const uv = resolveFaceUv(face, cube.uv, sizeWithInflate, tw, th, mirror);
+    // Box UV maps by the AUTHORED cube size — inflate grows the vertices
+    // around the centre but never shifts texels (vanilla hat layers break
+    // otherwise: a 9×9×9 inflated head samples past the skin edge).
+    const uv = resolveFaceUv(face, cube.uv, cube.size, tw, th, mirror);
     if (uv === null) continue;
 
     let verts = faceVerts(face, x0, y0, z0, x1, y1, z1);

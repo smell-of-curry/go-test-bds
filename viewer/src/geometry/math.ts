@@ -39,18 +39,21 @@ export function rotateAboutPivot(pivot: Vec3, rotation: Vec3): Matrix4 {
 
 /**
  * Compose one bone's local affine matrix in Bedrock model space:
- * `T(pivot) * R(rotation) * R(bindPose?) * T(-pivot)`.
- * Bind-pose rotation (when present) is applied to the point before `rotation`.
+ * `T(pivot) * R(rotation) * R(bindPose?) * S(scale?) * T(-pivot)`.
+ * Bind-pose rotation (when present) is applied to the point before `rotation`;
+ * scale (when present) applies about the pivot before any rotation.
  *
  * @param pivot - Bone pivot.
  * @param rotation - Bone rest rotation degrees.
  * @param bindPoseRotation - Optional bind-pose rotation.
- * @returns Affine matrix `T*R*T^-1` for this bone alone.
+ * @param scale - Optional per-axis scale about the pivot (animation channel).
+ * @returns Affine matrix `T*R*S*T^-1` for this bone alone.
  */
 export function boneLocalMatrix(
   pivot: Vec3,
   rotation: Vec3,
   bindPoseRotation?: Vec3,
+  scale?: Vec3,
 ): Matrix4 {
   const [px, py, pz] = pivot;
   const t = new Matrix4().makeTranslation(px, py, pz);
@@ -59,6 +62,9 @@ export function boneLocalMatrix(
   if (bindPoseRotation) {
     // Point sees bindPose first, then rotation: R_rot * R_bind
     r = r.multiply(rotationMatrixXYZ(bindPoseRotation));
+  }
+  if (scale && (scale[0] !== 1 || scale[1] !== 1 || scale[2] !== 1)) {
+    r = r.multiply(new Matrix4().makeScale(scale[0], scale[1], scale[2]));
   }
   return t.multiply(r).multiply(tInv);
 }

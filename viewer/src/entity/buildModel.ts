@@ -6,6 +6,7 @@ import {
   parseGeometryDocument,
   type ParsedGeometry,
 } from "../geometry";
+import { emptyBonePose, setBoneLocalPose } from "./animation";
 import {
   createEntityMaterial,
   DEFAULT_ENTITY_MATERIAL,
@@ -112,6 +113,15 @@ export function buildEntityModel(
     g.matrixWorldNeedsUpdate = true;
     // Stage 9 animation resets to this bind pose each frame.
     g.userData.restMatrix = g.matrix.clone();
+    // Pivot/rest rotation so animation rotates about the pivot (JSON-safe —
+    // survives Object3D.clone's JSON round-trip of userData).
+    g.userData.bedrockPose = {
+      pivot: [...node.pivot],
+      rotation: [...node.rotation],
+      ...(node.bindPoseRotation
+        ? { bindPoseRotation: [...node.bindPoseRotation] }
+        : {}),
+    };
   }
 
   for (const root of roots) {
@@ -122,7 +132,15 @@ export function buildEntityModel(
     ? partVisibility.get("*")!
     : true;
 
-  const meshes = buildGeometryMeshes(geometry);
+  // Files that omit texture_width/height resolve UVs against the real skin
+  // size (vanilla humanoid.custom + a 64×64 skin).
+  const img = texture.image as { width?: number; height?: number } | undefined;
+  const meshes = buildGeometryMeshes(
+    geometry,
+    img && typeof img.width === "number" && typeof img.height === "number"
+      ? { width: img.width, height: img.height }
+      : undefined,
+  );
   const scratch = new THREE.Vector3();
   for (const boneMesh of meshes) {
     const boneGroup = boneGroups.get(boneMesh.boneName);
@@ -256,6 +274,7 @@ export function applyEntityYaw(root: THREE.Object3D, yawDeg: number): void {
 
 /**
  * Apply Bedrock pitch to a head bone when present (positive = look down).
+ * Rotates about the head bone's pivot (see {@link setBoneLocalPose}).
  *
  * @param bones - Bone map from {@link buildEntityModel}.
  * @param pitchDeg - Bedrock pitch degrees (`rot[1]`).
@@ -266,14 +285,7 @@ export function applyHeadPitch(
 ): void {
   const head = bones.get("head") ?? bones.get("Head");
   if (!head) return;
-  if (!head.userData.restMatrix) {
-    head.userData.restMatrix = head.matrix.clone();
-  }
-  const base = head.userData.restMatrix as THREE.Matrix4;
-  const pitch = THREE.MathUtils.degToRad(pitchDeg);
-  const pitchMat = new THREE.Matrix4().makeRotationX(pitch);
-  head.matrix.copy(base).multiply(pitchMat);
-  head.matrixWorldNeedsUpdate = true;
+  setBoneLocalPose(head, emptyBonePose(), pitchDeg);
 }
 
 /**

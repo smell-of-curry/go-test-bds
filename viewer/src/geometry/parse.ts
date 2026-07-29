@@ -117,19 +117,19 @@ function parseLegacyGeometry(
   if (!isObject(value)) {
     throw new GeometryParseError(`${key} must be an object`);
   }
-  const textureWidth =
+  const declaredWidth =
     optionalNumber(value.texturewidth, `${key}.texturewidth`) ??
-    optionalNumber(value.texture_width, `${key}.texture_width`) ??
-    16;
-  const textureHeight =
+    optionalNumber(value.texture_width, `${key}.texture_width`);
+  const declaredHeight =
     optionalNumber(value.textureheight, `${key}.textureheight`) ??
-    optionalNumber(value.texture_height, `${key}.texture_height`) ??
-    16;
+    optionalNumber(value.texture_height, `${key}.texture_height`);
 
   const description: GeometryDescription = {
     identifier: key,
-    textureWidth,
-    textureHeight,
+    textureWidth: declaredWidth ?? 16,
+    textureHeight: declaredHeight ?? 16,
+    textureSizeExplicit:
+      declaredWidth !== undefined || declaredHeight !== undefined,
     visibleBoundsWidth: optionalNumber(
       value.visible_bounds_width,
       `${key}.visible_bounds_width`,
@@ -166,12 +166,20 @@ function parseDescription(raw: unknown, path: string): GeometryDescription {
     throw new GeometryParseError(`${path} must be an object`);
   }
   const identifier = requiredString(raw.identifier, `${path}.identifier`);
+  const declaredWidth = optionalNumber(
+    raw.texture_width,
+    `${path}.texture_width`,
+  );
+  const declaredHeight = optionalNumber(
+    raw.texture_height,
+    `${path}.texture_height`,
+  );
   return {
     identifier,
-    textureWidth:
-      optionalNumber(raw.texture_width, `${path}.texture_width`) ?? 16,
-    textureHeight:
-      optionalNumber(raw.texture_height, `${path}.texture_height`) ?? 16,
+    textureWidth: declaredWidth ?? 16,
+    textureHeight: declaredHeight ?? 16,
+    textureSizeExplicit:
+      declaredWidth !== undefined || declaredHeight !== undefined,
     visibleBoundsWidth: optionalNumber(
       raw.visible_bounds_width,
       `${path}.visible_bounds_width`,

@@ -17,13 +17,23 @@
 import * as THREE from "three";
 import { evaluate, type MolangHost } from "../molang";
 import { asNumber } from "../molang/value";
-import { MODEL_UNITS_PER_BLOCK } from "../geometry";
+import { bedrockMatrixToThree, boneLocalMatrix, type Vec3 } from "../geometry";
 import type {
   AnimBoneChannels,
   AnimChannel,
   ChannelExpr,
   ParsedAnimation,
 } from "./parseAnimation";
+
+/** Rest-pose bone data stashed on each THREE group's userData (JSON-safe). */
+export interface BoneRestPose {
+  /** Bone pivot in Bedrock model units. */
+  pivot: Vec3;
+  /** Rest rotation, extrinsic XYZ degrees. */
+  rotation: Vec3;
+  /** Optional bind-pose rotation (legacy 1.8 geometry). */
+  bindPoseRotation?: Vec3;
+}
 
 /** Accumulated additive pose for one bone (model units / degrees). */
 export interface BoneAnimPose {
@@ -236,10 +246,12 @@ export function catmullRom(
 }
 
 /**
- * Apply accumulated poses onto Stage-7 bone groups (rest matrix in userData).
+ * Apply accumulated poses onto Stage-7 bone groups.
  *
- * Animation position is Bedrock model units (÷16, X flipped) — same as geometry.
- * Rotation is additive extrinsic XYZ degrees after rest.
+ * Rotations/scales are composed **about each bone's pivot** in Bedrock model
+ * space (`T(p)·R(rest+anim)·S·T(-p)`), matching Blockbench/vanilla: animation
+ * rotation adds to the rest rotation per axis and swings the bone around its
+ * pivot, never the model origin. Animation position is Bedrock model units.
  *
  * @param bones - Bone name → THREE group.
  * @param poses - Accumulated additive poses.
@@ -250,48 +262,61 @@ export function applyBonePoses(
   poses: Map<string, BoneAnimPose>,
   headPitchDeg = 0,
 ): void {
+  const head = bones.get("head") ?? bones.get("Head");
   for (const [name, group] of bones) {
-    ensureRestMatrix(group);
-    const rest = group.userData.restMatrix as THREE.Matrix4;
     const pose = poses.get(name) ?? emptyBonePose();
+    const extraPitch = group === head ? headPitchDeg : 0;
+    setBoneLocalPose(group, pose, extraPitch);
+  }
+}
 
-    // Bedrock → three translation (geometry/math.ts bedrockToThree).
-    const tx = -pose.position[0] / MODEL_UNITS_PER_BLOCK;
-    const ty = pose.position[1] / MODEL_UNITS_PER_BLOCK;
-    const tz = pose.position[2] / MODEL_UNITS_PER_BLOCK;
-
-    const deg = Math.PI / 180;
-    // Extrinsic XYZ = intrinsic ZYX Euler (same as geometry/math.ts).
-    const rot = new THREE.Matrix4().makeRotationFromEuler(
-      new THREE.Euler(
-        pose.rotation[0] * deg,
-        pose.rotation[1] * deg,
-        pose.rotation[2] * deg,
-        "ZYX",
-      ),
-    );
-    const scl = new THREE.Matrix4().makeScale(
-      pose.scale[0],
-      pose.scale[1],
-      pose.scale[2],
-    );
-    const tr = new THREE.Matrix4().makeTranslation(tx, ty, tz);
-
-    // Local = rest * T * R * S  (docs: translate, then rotate, then scale on verts;
-    // for bone local TRS we compose anim after rest bind).
-    group.matrix.copy(rest).multiply(tr).multiply(rot).multiply(scl);
+/**
+ * Rebuild one bone group's local matrix from its rest pose plus an additive
+ * animation pose, rotating about the bone pivot.
+ *
+ * Falls back to the stored rest matrix when the group carries no
+ * {@link BoneRestPose} (models built before Stage 7 stashed it).
+ *
+ * @param group - Bone THREE group (userData.bedrockPose from buildEntityModel).
+ * @param pose - Additive animation pose.
+ * @param extraPitchDeg - Extra X rotation degrees (head look pitch).
+ */
+export function setBoneLocalPose(
+  group: THREE.Group,
+  pose: BoneAnimPose,
+  extraPitchDeg = 0,
+): void {
+  const rest = group.userData.bedrockPose as BoneRestPose | undefined;
+  ensureRestMatrix(group);
+  if (!rest) {
+    // No pivot data — keep the rest matrix (never rotate about the origin).
+    group.matrix.copy(group.userData.restMatrix as THREE.Matrix4);
     group.matrixWorldNeedsUpdate = true;
+    return;
   }
 
-  if (headPitchDeg !== 0) {
-    const head = bones.get("head") ?? bones.get("Head");
-    if (head) {
-      const pitch = THREE.MathUtils.degToRad(headPitchDeg);
-      const pitchMat = new THREE.Matrix4().makeRotationX(pitch);
-      head.matrix.multiply(pitchMat);
-      head.matrixWorldNeedsUpdate = true;
-    }
+  const rotation: Vec3 = [
+    rest.rotation[0] + pose.rotation[0] + extraPitchDeg,
+    rest.rotation[1] + pose.rotation[1],
+    rest.rotation[2] + pose.rotation[2],
+  ];
+  let local = boneLocalMatrix(
+    rest.pivot,
+    rotation,
+    rest.bindPoseRotation,
+    pose.scale,
+  );
+  if (
+    pose.position[0] !== 0 ||
+    pose.position[1] !== 0 ||
+    pose.position[2] !== 0
+  ) {
+    local = new THREE.Matrix4()
+      .makeTranslation(pose.position[0], pose.position[1], pose.position[2])
+      .multiply(local);
   }
+  group.matrix.copy(bedrockMatrixToThree(local));
+  group.matrixWorldNeedsUpdate = true;
 }
 
 /**

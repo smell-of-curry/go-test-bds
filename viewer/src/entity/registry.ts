@@ -566,12 +566,18 @@ async function evalScale(scaleExpr: string | undefined): Promise<number> {
  * @returns three.js texture.
  */
 async function bitmapToTexture(bitmap: ImageBitmap): Promise<THREE.Texture> {
-  const tex = new THREE.Texture(bitmap as unknown as HTMLImageElement);
+  // WebGL ignores UNPACK_FLIP_Y for ImageBitmap uploads (three's flipY is a
+  // silent no-op), so flip at decode time to keep the texelToGl convention
+  // (V grows up; image top → V=1). Rendered every skin V-flipped otherwise.
+  const flipped = await createImageBitmap(bitmap, {
+    imageOrientation: "flipY",
+  });
+  const tex = new THREE.Texture(flipped as unknown as HTMLImageElement);
+  tex.flipY = false;
   tex.magFilter = THREE.NearestFilter;
   tex.minFilter = THREE.NearestFilter;
   tex.generateMipmaps = false;
   tex.colorSpace = THREE.SRGBColorSpace;
-  // Default flipY=true matches geo `texelToGl` (V grows up; image top → V=1).
   tex.needsUpdate = true;
   return tex;
 }
