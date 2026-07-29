@@ -1,0 +1,92 @@
+# Stage 5 — automate Mojang/bedrock-samples pin bumps.
+#
+# Mojang's version.json at the repo root maps "latest" → { version, date }.
+# Release tags are "v" + that version (e.g. version "1.26.30.5" → tag v1.26.30.5).
+# Preview tags (v*-preview) are ignored; only version.json "latest" is considered.
+#
+# When the pin moves, viewer-golden.yml runs (paths: viewer/**) with a real
+# baseline fetch — review image diffs, then accept with GOLDEN_UPDATE=1 (see
+# viewer-golden.yml comments / viewer/FINDINGS-assets.md).
+name: Baseline bump
+
+on:
+  schedule:
+    # Weekly Monday 06:00 UTC
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve latest bedrock-samples tag
+        id: pin
+        shell: bash
+        run: |
+          set -euo pipefail
+          CURRENT=$(tr -d '[:space:]' < viewer/baseline.tag)
+          echo "current=${CURRENT}" >> "$GITHUB_OUTPUT"
+          curl -fsSL \
+            "https://raw.githubusercontent.com/Mojang/bedrock-samples/main/version.json" \
+            -o /tmp/version.json
+          LATEST=$(jq -r '.latest.version // empty' /tmp/version.json)
+          if [ -z "$LATEST" ] || [ "$LATEST" = "null" ]; then
+            echo "version.json missing latest.version" >&2
+            cat /tmp/version.json >&2
+            exit 1
+          fi
+          # Pin / git tags use a leading v; version.json does not.
+          NEXT="v${LATEST#v}"
+          echo "latest_version=${LATEST}" >> "$GITHUB_OUTPUT"
+          echo "next=${NEXT}" >> "$GITHUB_OUTPUT"
+          if [ "$CURRENT" = "$NEXT" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "Pin already at ${CURRENT}"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "Bump ${CURRENT} → ${NEXT}"
+          fi
+
+      - name: Write pin
+        if: steps.pin.outputs.changed == 'true'
+        run: |
+          printf '%s\n' "${{ steps.pin.outputs.next }}" > viewer/baseline.tag
+          cat viewer/baseline.tag
+
+      - name: Open pull request
+        if: steps.pin.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "chore(viewer): bump vanilla baseline to ${{ steps.pin.outputs.next }}"
+          branch: chore/baseline-${{ steps.pin.outputs.next }}
+          delete-branch: true
+          title: "chore(viewer): bump vanilla baseline to ${{ steps.pin.outputs.next }}"
+          body: |
+            Automated pin bump for `Mojang/bedrock-samples`.
+
+            | | |
+            | --- | --- |
+            | previous | `${{ steps.pin.outputs.current }}` |
+            | latest (`version.json`) | `${{ steps.pin.outputs.latest_version }}` |
+            | new pin | `${{ steps.pin.outputs.next }}` |
+
+            ## Review
+            `viewer-golden` runs on this PR (`viewer/**` path filter) and fetches
+            the new baseline for golden shots (`GOLDEN_BASELINE_DIR`).
+
+            1. Inspect the golden job / `viewer-golden-results` artefact diffs.
+            2. If the Mojang texture change is intentional, accept CI goldens:
+               re-run **Viewer golden** with `GOLDEN_UPDATE=1` (workflow_dispatch),
+               or locally: `GOLDEN_UPDATE=1 GOLDEN_BASELINE_DIR=<cache> npx playwright test --project=golden`
+               then commit `viewer/testdata/goldens/*.png` (prefer SwiftShader/CI renders).
+            3. Merge.
+
+            See `viewer/FINDINGS-assets.md` (Bump automation).

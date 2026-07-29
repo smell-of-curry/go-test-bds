@@ -43,7 +43,8 @@ smooth lighting, direction lights, or fog.
 | Winning PNG bytes | `GET /asset/<path>` |
 | Merged JSON | `GET /pack/<id>/blocks.json` etc. from **every** pack, then merge |
 | Block → texture short-names | Merged `blocks.json` (`textures` preserved when a later pack only sets `sound`) |
-| Custom blocks | Keyframe `registries.blocks` → `components.materialInstances` face textures |
+| Custom blocks | Keyframe `registries.blocks` → permutations → geometry + `materialInstances` |
+| Custom geometry | Pack `models/**/*.geo.json` by identifier (`BlockGeometryCache`); else cube |
 | Short-name → PNG path(s) | Merged `terrain_texture.json` (`texture_data`, all entry shapes) |
 | Animated tiles | Merged `flipbook_textures.json` (frame from **snapshot tick**) |
 | Image pixels | Via `/asset` — `.png`, `_opaque.png`, then `.tga` (many foliage tiles) |
@@ -62,8 +63,9 @@ bare keys to `minecraft:…` so lookups hit.
 
 **Palette vs pack (renderer):** when `blocks.json` has a `textures` field, that
 pack path wins. The network palette covers names the pack cannot paint (typical
-`pokeb:*` custom blocks). Geometry from the palette is still a **textured unit
-cube** this round — see ponytail note in `resolve.ts`.
+`pokeb:*` custom blocks). When the palette carries `minecraft:geometry` and the
+pack has that `.geo.json`, the mesher emits that mesh (per-instance materials,
+no greedy merge); otherwise it falls back to a textured unit cube.
 
 No behaviour pack. Nothing vendored. Vanilla baseline arrives as pack id `vanilla`.
 
@@ -110,13 +112,8 @@ vanilla pack is absent (CI without the cache).
 
 ## Deliberately not handled yet
 
-- Block entities with dedicated geometry (chests, signs, banners, beds, skulls).
-- Full custom block geometry from the network palette — cube approximation with
-  `material_instances` textures; seam remains `CustomGeometryHook` /
-  `CubeModel.customGeometryKey` for stage 7's `.geo.json` parser.
-- Permutations / transformation / light_emission appearance.
+- Banner pattern compositing / per-skull geo variants (coloured boxes for now).
 - Non-cube vanilla shapes (slabs, stairs, fences, doors as meshes).
-- Biome-coloured grass/foliage/water until Go adds biome data to the snapshot
-  (see `BIOME_SNAPSHOT_NOTE` in `biome.ts`).
+- Biome tint wiring from column `biomePalette`/`biomes` into `biomeAt` (decode
+  landed; finish the lookup hook).
 - `blocks1` decode in `store.ts` (mesher already reads it when present).
-- Lighting / AO / smooth lighting (material is intentionally unlit).

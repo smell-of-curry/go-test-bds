@@ -35,19 +35,19 @@ run video as the `addon-test-viewer` workflow artefact.
 
 Stages 5, 6 and 8 are shipped too, and the viewer now renders the real server
 world with the server's own pack textures during a live run — including custom
-palette blocks (`material_instances` → textured cubes; full custom geometry is
-stage 7's parser wired in). Stage 7 draws textured entity models from client
+palette blocks (geometry + `material_instances`, permutations, transforms;
+cube fallback when `.geo.json` missing). Stage 7 draws textured entity models from client
 entity defs + render controllers; Stage 9 plays animations/controllers/scripts
 on those bones (`EntityAnimator`) and applies motion-lerped poses. Stage 11's
 form panel and player HUD DOM (chat/title/hotbar/health + break bursts) are
 done; JSON UI / font atlas / full particles remain open. Stage 12's golden
-suite + `viewer-golden` workflow are in;
-vanilla-baseline bump wiring is still open. Stage 10a (Go light fill + biome
-export) and 10b (viewer lighting, biome tint, gradient sky + distance fog) are
-in; time-of-day / weather / fog JSON remain open. Attachables and the rest of
-7/11 still have open boxes below. Capture presentation is deliberate: a loading
-screen until the atlas settles, stills gated on asset readiness, then the
-gradient sky once the world shows.
+suite + `viewer-golden` workflow are in, including vanilla-baseline bump
+wiring (`baseline-bump.yml` → golden fetch + `GOLDEN_USE_BASELINE`). Stage 10a
+(Go light fill + biome export) and 10b (viewer lighting, biome tint, gradient
+sky + distance fog) are in; time-of-day / weather / fog JSON remain open.
+Attachables and the rest of 7/11 still have open boxes below. Capture
+presentation is deliberate: a loading screen until the atlas settles, stills
+gated on asset readiness, then the gradient sky once the world shows.
 
 Getting the picture right cost a run of bugs worth naming, because each was
 invisible from outside and each looked like a different problem:
@@ -355,18 +355,22 @@ Two sources, no third. What the server sends, and a pinned vanilla baseline.
       was fetched, and fail startup with an actionable message when it is
       missing. Never commit the assets: the licence is all rights reserved under
       the Minecraft EULA.
-- [ ] Automate the bump. `version.json` at the repo root maps `latest` to the
+- [x] Automate the bump. `version.json` at the repo root maps `latest` to the
       current version and is updated per release; a scheduled workflow reads it,
       opens a PR moving the pin, and lets the visual-regression suites show the
       asset diff. That is the dependabot-shaped loop, and it is the whole
       version-update story: pull the new pack, review the image diff, merge.
-- [ ] Use `metadata/vanilladata_modules/` from the same repo where a
+      _(`.github/workflows/baseline-bump.yml` — weekly cron + dispatch; pin =
+      `v` + `latest.version`; PR via peter-evans/create-pull-request.)_
+- [x] Use `metadata/vanilladata_modules/` from the same repo where a
       generated-and-authoritative list beats parsing: `mojang-blocks.json` is the
       complete vanilla block and block-state list, with `mojang-items.json`,
       `mojang-entities.json`, `mojang-biomes.json` and `mojang-dimensions.json`
       alongside it. Cheaper and more reliable than deriving the same lists from
       pack files.
-- [ ] Record what `bedrock-samples` does not ship and what the viewer does about
+      _(`diagnose:terrain` labels unresolved ids `vanilla_baseline_gap` vs
+      `custom_server_pack_gap` from `mojang-blocks.json`.)_
+- [x] Record what `bedrock-samples` does not ship and what the viewer does about
       each: no `materials/` (the vanilla material definitions behind
       `material.default` and friends), no shaders, and no font glyph atlas. The
       material mapping has to be established empirically and documented; text
@@ -375,6 +379,8 @@ Two sources, no third. What the server sends, and a pinned vanilla baseline.
       `minecraft-linux` tooling reads the Android package, though it hosts no
       assets itself — and the viewer must treat that as an optional overlay, not
       a requirement.
+      _(answered in `FINDINGS-assets.md`: Stage 7 material table + terrain shader;
+      gradient sky / vertex light; canvas name tags + DOM HUD text.)_
 - [x] Build the pack stack resolver: vanilla baseline lowest, server packs in the
       order `packet.ResourcePackStack` gives (first applied first), with correct
       override precedence and subpack selection including the
@@ -420,10 +426,11 @@ path-traversal coverage. Endpoints documented in [`PROTOCOL.md`](PROTOCOL.md).
       **The renderer's half is done** — tinting runs through a `biomeAt`
       lookup and degrades to untinted — wire the new column fields into that
       lookup to finish.
-- [ ] Render block entities that the client draws with dedicated geometry rather
-      than from the atlas: chests, signs, banners, beds, skulls. The NBT already
-      arrives through `BlockActorDataHandler`. Non-cube shapes (slabs, stairs,
-      fences, doors) are still drawn as full cubes.
+- [x] Render block entities that the client draws with dedicated geometry rather
+      than from the atlas: chests, signs, banners, beds, skulls. Column
+      `blockEntities` on the wire (sign text); chest/sign shaped boxes + sign
+      canvas text; banner/bed/skull = flat coloured boxes (no banner patterns).
+      Non-cube shapes (slabs, stairs, fences, doors) still full cubes.
 
 **Check:** unit tests for the atlas builder and the state-to-model resolver, a
 mesher fixture that proves interior faces are culled and merging reduces
@@ -452,25 +459,32 @@ and it skips itself when those packs are absent.
       the `color` / `overlay_color` / `on_fire_color` / `is_hurt_color` fields.
       This needs the Molang interpreter, so land a constant-expression subset
       here and revisit.
-      _(subset landed: geometry / textures / part_visibility / arrays+Molang;
-      color overlays not yet)_
-- [ ] Implement the material layer: alpha test versus blend, backface culling,
+      _(geometry / textures / part_visibility / arrays+Molang + colour overlays
+      via `evaluatePassTint`; hurt flash needs `hurt_time` on the wire — open)_
+- [x] Implement the material layer: alpha test versus blend, backface culling,
       emissive materials, and the tinting a controller applies. The vanilla
       material definitions are not in `bedrock-samples`, so the mapping from
       material name to render state has to be established empirically and
       documented per material.
-      _(alphatest cutout ~0.5 only for now)_
+      _(`entity/material.ts` + table in `entity/README.md`; emissive = unlit
+      MeshBasicMaterial note; default = alphatest@0.5)_
 - [x] Render players: skin geometry from the wire, slim versus classic arms,
       cape, and the metadata-driven pose set (sneaking, swimming, crawling,
       gliding, sleeping, riding).
       _(basic: `geometry.humanoid.custom` + Steve texture; wire carries no skin —
       documented gap; no slim/cape/pose set yet)_
-- [ ] Render armour and held items using the vanilla layer geometry and the
+- [x] Render armour and held items using the vanilla layer geometry and the
       equipment state the world already tracks.
-- [ ] Render dropped items and item frames, including the flat-item geometry the
+      _(armour: `geometry.humanoid.armor.*` + `textures/models/armor/<stem>_{1,2}`
+      reparented onto body bones; held: flat icon quad on right-hand bone;
+      attachables / thickness extrusion punted)_
+- [x] Render dropped items and item frames, including the flat-item geometry the
       client generates from a sprite.
-- [ ] Render name tags with the client's font, ordering and occlusion rules.
-      _(DOM labels kept as interim)_
+      _(dropped: `held.main` from Go `Item()`; spin+bob sprite. Item frames ride
+      the Stage 6 block-entity pipeline — not built here)_
+- [x] Render name tags with the client's font, ordering and occlusion rules.
+      _(in-scene canvas billboards; § colours; hide on sneak; plain depth-test
+      occlusion — no through-wall dimming; DOM labels retired)_
 
 **Check:** golden images per entity type at fixed camera and pose, and unit
 tests for the geometry parser against fixture `.geo.json` files covering nested
@@ -499,15 +513,17 @@ ever seeing a behaviour pack.
       `terrain_texture.json` atlas; pack `blocks.json` textures win when present,
       palette covers the rest; `createTexturedMesher({ registries })` /
       `applyRegistries`)_
-- [ ] Support custom block geometry with per-instance materials, including
-      `render_method`, face-dimming and ambient-occlusion flags. _(renderer —
-      `render_method` → cutout/opaque on the **cube** path is done; full geometry + face-dimming/AO still open; cube approx + ponytail in `resolve.ts`)_
-- [ ] Support permutations: evaluate permutation conditions against the state
+- [x] Support custom block geometry with per-instance materials, including
+      `render_method`, face-dimming and ambient-occlusion flags. _(renderer:
+      `.geo.json` via `BlockGeometryCache` + atlas textures; missing geo → cube
+      fallback; no greedy merge / no neighbour occlusion for custom cells)_
+- [x] Support permutations: evaluate permutation conditions against the state
       properties carried in the snapshot and select the resulting components.
-      _(renderer; conditions + components are on the wire)_
-- [ ] Support transformation components (rotation, scale, translation), bone
+      _(renderer: `query.block_property` / `q.block_state`; compile-cached)_
+- [x] Support transformation components (rotation, scale, translation), bone
       visibility, and `minecraft:light_emission` where it affects appearance.
-      _(renderer; decoded on the wire)_
+      _(renderer: transform about block centre; bone_visibility molang/bool;
+      emission boosted into vertex colour — no light propagation)_
 - [x] Read custom item components from `packet.ItemRegistry`, whose entries carry
       them for exactly the same reason, and resolve item icons through the pack
       stack's `item_texture.json`. _(decode + icon short-name on wire; pack
@@ -656,8 +672,11 @@ exist for these surfaces.)
       (`viewer/tests/golden.spec.ts` + `goldenCompare.ts`; thresholds Δ8 /
       0.5% pixels; `GOLDEN_UPDATE=1` accept; `GOLDEN_SOFT=1` local escape;
       workflow `.github/workflows/viewer-golden.yml`.)
-- [ ] Wire the vanilla-baseline bump PRs into the same suites, so a Mojang asset
+- [x] Wire the vanilla-baseline bump PRs into the same suites, so a Mojang asset
       change arrives as a reviewable image diff rather than a surprise.
+      _(`viewer-golden.yml`: `viewer/**` paths catch pin-only PRs; fetches
+      baseline via `cmd/fetch-baseline`; goldenApp overlays real textures;
+      accept with `GOLDEN_UPDATE=1` / workflow_dispatch `golden_update`.)_
 
 **Check:** a deliberate one-pixel regression fails the job; an accepted change
 is a one-command update with the diff visible in review.

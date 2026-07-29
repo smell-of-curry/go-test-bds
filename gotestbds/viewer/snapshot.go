@@ -244,6 +244,17 @@ type Column struct {
 	// Biomes is base64 of 256 uint8 palette indices, one per column (x,z) at the
 	// surface (top non-air). Index order is (x << 4) | z. Absent when unknown.
 	Biomes string `json:"biomes,omitempty"`
+	// BlockEntities carries NBT-backed tile entities the client draws with
+	// dedicated geometry (chests, signs, …). Additive field — omitted when empty.
+	BlockEntities []BlockEntity `json:"blockEntities,omitempty"`
+}
+
+// BlockEntity is a minimal projection of a column tile entity for the viewer.
+type BlockEntity struct {
+	Pos       [3]int   `json:"pos"`
+	ID        string   `json:"id"`
+	TextFront []string `json:"textFront,omitempty"`
+	TextBack  []string `json:"textBack,omitempty"`
 }
 
 // ColumnState reports a column's load-progress change without resending blocks.

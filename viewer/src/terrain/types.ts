@@ -1,4 +1,4 @@
-import type { Block } from "../protocol";
+import type { Block, RegistryMaterial, RegistryTransform } from "../protocol";
 import type { DecodedSection } from "../store";
 
 /** Face names used in blocks.json / meshing. */
@@ -67,10 +67,18 @@ export interface CubeModel {
   >;
   renderClass: RenderClass;
   /**
-   * Stage-8 seam: when set, mesher skips the cube path for this cell.
-   * Geometry module owns the real implementation.
+   * When set and {@link BlockGeometryCache} has the id, mesher emits that
+   * geometry instead of the unit cube (still carries faces for atlas / fallback).
    */
   customGeometryKey?: string;
+  transformation?: RegistryTransform;
+  lightEmission?: number;
+  /** material_instances face_dimming (default true). */
+  faceDimming?: boolean;
+  /** material_instances ambient_occlusion (default true). */
+  ambientOcclusion?: boolean;
+  boneVisibility?: Record<string, unknown>;
+  materialInstances?: Record<string, RegistryMaterial>;
 }
 
 /** Liquid surface model (layer 0 liquid or layer-1 waterlogging). */

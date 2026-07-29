@@ -50,6 +50,23 @@ export interface Column {
    * base64 of 256 uint8 indices into {@link biomePalette}, order `(x<<4)|z`.
    */
   biomes?: string;
+  /**
+   * Block entities in this column (chests, signs, …). Optional; absent on older
+   * encoders. Additive — not a schema `v` bump.
+   */
+  blockEntities?: BlockEntityWire[];
+}
+
+/** Minimal block-entity projection for dedicated geometry (sign text, etc.). */
+export interface BlockEntityWire {
+  /** World block position `[x,y,z]`. */
+  pos: [number, number, number];
+  /** Block / tile id, e.g. `minecraft:chest` or Bedrock `Chest`. */
+  id: string;
+  /** Sign front lines (format codes may be present). */
+  textFront?: string[];
+  /** Sign back lines. */
+  textBack?: string[];
 }
 
 export interface Item {

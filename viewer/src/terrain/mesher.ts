@@ -4,7 +4,17 @@ import type { Block } from "../protocol";
 import { columnKey, sectionIndex } from "../protocol";
 import type { DecodedSection, StoredColumn, WorldState } from "../store";
 import { FALLBACK_TEXTURE, type TerrainAtlas } from "./atlas";
+import {
+  blockEntityKind,
+  indexBlockEntities,
+  meshBlockEntity,
+} from "./blockEntities";
 import { biomeAtFromState, tintAt } from "./biome";
+import {
+  emitCustomBlockTris,
+  type BlockGeometryCache,
+  type CustomBlockTri,
+} from "./customGeometry";
 import { aoFactor, combinedLight, FACE_SHADE, lightBrightness } from "./light";
 import { createTerrainMaterial } from "./material";
 import { isAir, isWaterlogFluid, type BlockModelResolver } from "./resolve";
@@ -52,6 +62,7 @@ export class TexturedMesher implements Mesher {
   private readonly resolver: BlockModelResolver;
   private readonly biomeAt: BiomeAt | null;
   private readonly custom: CustomGeometryHook | null;
+  private geoCache: BlockGeometryCache | null;
   /** Smooth lighting + AO; default on (goldens regenerate with this path). */
   readonly smoothLighting: boolean;
   /** Daylight factor 0..1 applied to sky light (1 = noon). */
@@ -77,6 +88,8 @@ export class TexturedMesher implements Mesher {
     opts?: {
       biomeAt?: BiomeAt | null;
       customGeometry?: CustomGeometryHook | null;
+      /** Preloaded custom-block geometry cache. */
+      geometryCache?: BlockGeometryCache | null;
       /** Per-vertex light + AO. Default true. */
       smoothLighting?: boolean;
       /** Sky daylight factor 0..1. Default 1 (noon). */
@@ -87,6 +100,7 @@ export class TexturedMesher implements Mesher {
     this.resolver = resolver;
     this.biomeAt = opts?.biomeAt ?? null;
     this.custom = opts?.customGeometry ?? null;
+    this.geoCache = opts?.geometryCache ?? null;
     this.smoothLighting = opts?.smoothLighting !== false;
     this.skyDarken = opts?.skyDarken ?? 1;
 
@@ -111,6 +125,15 @@ export class TexturedMesher implements Mesher {
       atlasHeight: atlas.height,
       transparent: true,
     });
+  }
+
+  /**
+   * Replace the geometry cache (after registry preload).
+   *
+   * @param cache - Cache or null.
+   */
+  setGeometryCache(cache: BlockGeometryCache | null): void {
+    this.geoCache = cache;
   }
 
   /**
@@ -167,23 +190,19 @@ export class TexturedMesher implements Mesher {
     let quadsBefore = 0;
     let instanceCount = 0;
 
-    type FaceEmit = {
-      key: string;
-      pass: "opaque" | "transparent";
-      dir: Dir;
-      x: number;
-      y: number;
-      z: number;
-      du: number;
-      dv: number;
-      uv: AtlasUv;
-      rotation: 0 | 1 | 2 | 3;
-      color: THREE.Color;
-      yTop: number;
-      yBot: number;
-    };
+    type FaceEmit = MergeQuad;
 
     const emits: FaceEmit[] = [];
+    const customTris: Array<{
+      tri: CustomBlockTri;
+      lx: number;
+      ly: number;
+      lz: number;
+      emission: number;
+      tick: number;
+    }> = [];
+    const beByPos = indexBlockEntities(column.blockEntities ?? []);
+    const beMeshes: THREE.Mesh[] = [];
 
     const blockAt = (lx: number, ly: number, lz: number): Block | undefined => {
       return neighbourBlock(state, cx, cz, sy, lx, ly, lz);
@@ -230,6 +249,16 @@ export class TexturedMesher implements Mesher {
 
           if (this.custom?.tryMesh(block, wx, wy, wz)) continue;
 
+          // Vanilla chests/signs/… → dedicated meshes (not atlas cubes).
+          if (blockEntityKind(block.name)) {
+            const be = beByPos.get(`${wx},${wy},${wz}`);
+            for (const m of meshBlockEntity(block, be, wx, wy, wz)) {
+              beMeshes.push(m);
+            }
+            instanceCount++;
+            continue;
+          }
+
           const rc = this.resolver.renderClassOf(block);
           if (rc === "liquid") {
             this.emitLiquidCell(
@@ -255,9 +284,61 @@ export class TexturedMesher implements Mesher {
           const cube = this.resolver.resolveCube(block, wx, wy, wz);
           if (!cube) continue;
 
+          // Custom .geo.json path — not greedy-merged; neighbours not occluded.
+          if (
+            cube.customGeometryKey &&
+            this.geoCache?.has(cube.customGeometryKey)
+          ) {
+            const tris = emitCustomBlockTris({
+              cache: this.geoCache,
+              geometryId: cube.customGeometryKey,
+              materials: cube.materialInstances,
+              boneVisibility: cube.boneVisibility,
+              transformation: cube.transformation,
+              states: block.states,
+              wx,
+              wy,
+              wz,
+            });
+            if (tris && tris.length) {
+              for (const tri of tris) {
+                customTris.push({
+                  tri,
+                  lx: x,
+                  ly: y,
+                  lz: z,
+                  emission: cube.lightEmission ?? 0,
+                  tick,
+                });
+                quadsBefore++;
+              }
+              instanceCount++;
+              this.emitLayer1(
+                terrainSec,
+                x,
+                y,
+                z,
+                originX,
+                originY,
+                originZ,
+                tick,
+                blockAt,
+                biomeAt,
+                emits,
+                () => {
+                  quadsBefore++;
+                },
+              );
+              continue;
+            }
+          }
+
           let exposed = false;
           const pass: "opaque" | "transparent" =
             cube.renderClass === "opaque" ? "opaque" : "transparent";
+          const faceDim = cube.faceDimming !== false;
+          const skipAo = cube.ambientOcclusion === false;
+          const emission = cube.lightEmission ?? 0;
 
           for (const d of DIRS) {
             const nb = blockAt(x + d.dx, y + d.dy, z + d.dz);
@@ -269,7 +350,13 @@ export class TexturedMesher implements Mesher {
             const uv = this.atlas.uvFor(texName, tick, wx, wy, wz);
             const tint = tintAt(biomeAt, app.tint, wx, wz);
             const color = new THREE.Color(tint.r, tint.g, tint.b);
-            const key = `${pass}|${d.dir}|${texName}|${app.tint}|${app.rotation}|${uv.u0},${uv.v0},${uv.u1},${uv.v1}`;
+            if (emission > 0) {
+              const e = Math.min(1, emission);
+              color.r = Math.min(1, color.r + e);
+              color.g = Math.min(1, color.g + e);
+              color.b = Math.min(1, color.b + e);
+            }
+            const key = `${pass}|${d.dir}|${texName}|${app.tint}|${app.rotation}|${uv.u0},${uv.v0},${uv.u1},${uv.v1}|${faceDim ? 1 : 0}|${skipAo ? 0 : 1}`;
             emits.push({
               key,
               pass,
@@ -284,6 +371,8 @@ export class TexturedMesher implements Mesher {
               color,
               yTop: 1,
               yBot: 0,
+              skipFaceShade: !faceDim,
+              skipAo,
             });
           }
           if (exposed) instanceCount++;
@@ -309,11 +398,13 @@ export class TexturedMesher implements Mesher {
     }
 
     // Smooth lighting needs per-unit-face corners; skip greedy merge when on.
-    const merged = this.smoothLighting ? emits : greedyMerge(emits);
+    const merged = this.smoothLighting
+      ? (emits as MergeQuad[])
+      : greedyMerge(emits as MergeQuad[]);
     this.lastStats = {
       quadsBeforeMerge: quadsBefore,
-      quadsAfterMerge: merged.length,
-      triangles: merged.length * 2,
+      quadsAfterMerge: merged.length + customTris.length,
+      triangles: merged.length * 2 + customTris.length,
     };
 
     const opaque = emptyBuffers();
@@ -332,6 +423,20 @@ export class TexturedMesher implements Mesher {
       );
     }
 
+    for (const c of customTris) {
+      pushCustomTri(
+        c.tri.pass === "opaque" ? opaque : trans,
+        c.tri,
+        c.lx,
+        c.ly,
+        c.lz,
+        c.emission,
+        c.tick,
+        this.atlas,
+        lightCtx,
+      );
+    }
+
     const meshes: THREE.Mesh[] = [];
     if (opaque.pos.length > 0) {
       meshes.push(makeMesh(opaque, this.matOpaque, "opaque"));
@@ -339,6 +444,7 @@ export class TexturedMesher implements Mesher {
     if (trans.pos.length > 0) {
       meshes.push(makeMesh(trans, this.matTransparent, "transparent"));
     }
+    for (const m of beMeshes) meshes.push(m);
     return { meshes, instanceCount };
   }
 
@@ -583,6 +689,10 @@ interface MergeQuad {
   color: THREE.Color;
   yTop: number;
   yBot: number;
+  /** When true, skip FACE_SHADE (material face_dimming: false). */
+  skipFaceShade?: boolean;
+  /** When true, skip AO bake (material ambient_occlusion: false). */
+  skipAo?: boolean;
 }
 
 interface MeshBuffers {
@@ -714,7 +824,7 @@ function pushMergedQuad(
     Math.abs(uv.u1 - uv.u0),
     Math.abs(uv.v1 - uv.v0),
   ];
-  const shade = FACE_SHADE[d.dir] ?? 1;
+  const shade = q.skipFaceShade ? 1 : (FACE_SHADE[d.dir] ?? 1);
   // Corner brightness multipliers (tint × face shade × light × AO).
   const cornerMul = vertexLightMultipliers(q, d, light, shade);
   const order = [0, 1, 2, 0, 2, 3];
@@ -782,9 +892,59 @@ function vertexLightMultipliers(
     const o1 = cellOccludes(light, nx + sx, ny + sy, nz + sz);
     const o2 = cellOccludes(light, nx + tx, ny + ty, nz + tz);
     const o3 = cellOccludes(light, nx + sx + tx, ny + sy + ty, nz + sz + tz);
-    out[i] = lightBrightness(avg) * aoFactor(o1, o2, o3) * shade;
+    const ao = q.skipAo ? 1 : aoFactor(o1, o2, o3);
+    out[i] = lightBrightness(avg) * ao * shade;
   }
   return out;
+}
+
+/**
+ * Emit one custom-geometry triangle into terrain atlas buffers.
+ *
+ * @param buf - Target buffers.
+ * @param tri - World-space triangle.
+ * @param lx - Section-local X (lighting).
+ * @param ly - Section-local Y.
+ * @param lz - Section-local Z.
+ * @param emission - light_emission 0..1.
+ * @param tick - Snapshot tick (flipbook).
+ * @param atlas - Terrain atlas.
+ * @param light - Light context.
+ */
+function pushCustomTri(
+  buf: MeshBuffers,
+  tri: CustomBlockTri,
+  lx: number,
+  ly: number,
+  lz: number,
+  emission: number,
+  tick: number,
+  atlas: TerrainAtlas,
+  light: LightCtx,
+): void {
+  const uv = atlas.uvFor(tri.texture, tick, lx, ly, lz);
+  const rect: [number, number, number, number] = [
+    Math.min(uv.u0, uv.u1),
+    Math.min(uv.v0, uv.v1),
+    Math.abs(uv.u1 - uv.u0),
+    Math.abs(uv.v1 - uv.v0),
+  ];
+  const shade = tri.faceDimming ? (FACE_SHADE[tri.dir] ?? 1) : 1;
+  const level = sampleCombined(light, lx, ly, lz);
+  let bright = lightBrightness(level) * shade;
+  if (emission > 0) bright = Math.max(bright, Math.min(1, emission));
+  for (let i = 0; i < 3; i++) {
+    buf.pos.push(
+      tri.positions[i * 3]!,
+      tri.positions[i * 3 + 1]!,
+      tri.positions[i * 3 + 2]!,
+    );
+    // Geometry UVs are 0..1 over the texture; feed as tile UV with unit rect.
+    buf.tileUv.push(tri.uvs[i * 2]!, tri.uvs[i * 2 + 1]!);
+    buf.atlasRect.push(rect[0], rect[1], rect[2], rect[3]);
+    buf.tileRot.push(0);
+    buf.col.push(bright, bright, bright);
+  }
 }
 
 /**

@@ -89,6 +89,53 @@ if (!existsSync(join(vanillaDir, "blocks.json"))) {
   process.exit(0);
 }
 
+/**
+ * Authoritative vanilla block id set from metadata/vanilladata_modules.
+ * Lives next to resource_pack/ in the extracted bedrock-samples tree.
+ *
+ * @returns namespaced ids (minecraft:stone), or null when the file is absent.
+ */
+function loadVanillaBlockIds(resourcePackDir) {
+  const metaPath = join(
+    resourcePackDir,
+    "..",
+    "metadata",
+    "vanilladata_modules",
+    "mojang-blocks.json",
+  );
+  if (!existsSync(metaPath)) return null;
+  try {
+    const doc = JSON.parse(readFileSync(metaPath, "utf8"));
+    const items = Array.isArray(doc?.data_items) ? doc.data_items : [];
+    /** @type {Set<string>} */
+    const ids = new Set();
+    for (const item of items) {
+      if (typeof item?.name === "string" && item.name) ids.add(item.name);
+    }
+    return { path: metaPath, ids };
+  } catch (err) {
+    console.warn(`mojang-blocks.json unreadable at ${metaPath}: ${err}`);
+    return null;
+  }
+}
+
+const vanillaBlocks = loadVanillaBlockIds(vanillaDir);
+
+/**
+ * Label an unresolved blocks.json key using the vanilladata module list.
+ *
+ * @param {string} id - Bare or namespaced block id from merged blocks.json.
+ * @returns {"vanilla_baseline_gap"|"custom_server_pack_gap"|"unknown"}
+ */
+function gapKind(id) {
+  if (!vanillaBlocks) return "unknown";
+  const namespaced = id.includes(":") ? id : `minecraft:${id}`;
+  if (vanillaBlocks.ids.has(namespaced) || vanillaBlocks.ids.has(id)) {
+    return "vanilla_baseline_gap";
+  }
+  return "custom_server_pack_gap";
+}
+
 const packs = [
   { id: "vanilla", priority: 0, name: "baseline", dir: vanillaDir },
 ];
@@ -175,6 +222,8 @@ try {
       const fbUv = atlas.uvRect(FALLBACK_TEXTURE, 0);
       /** @type {Array<{ id: string, reason: string, detail?: string }>} */
       const failures = [];
+      /** @type {string[]} */
+      const failIds = [];
       let ok = 0;
       let fail = 0;
       let noTextures = 0;
@@ -188,6 +237,7 @@ try {
         ];
         if (shorts.length === 0) {
           noTextures++;
+          failIds.push(id);
           // sound-only is fine for pokeb custom blocks without models yet —
           // still count as "no atlas tile from textures field"
           if (failures.length < 10) {
@@ -242,6 +292,7 @@ try {
 
         if (reasons.length) {
           fail++;
+          failIds.push(id);
           if (failures.length < 10) {
             failures.push({
               id,
@@ -293,6 +344,7 @@ try {
         ok,
         fail,
         noTextures,
+        failIds,
         failures,
         palette: palette
           ? {
@@ -333,14 +385,38 @@ try {
     { assetBase: assetServer.url, registries: registriesJson },
   );
 
+  // Classify unresolved ids via mojang-blocks.json (Node-side; browser can't see the file).
+  let vanillaBaselineGap = 0;
+  let customServerPackGap = 0;
+  let unknownGap = 0;
+  const labeledFailures = result.failures.map((f) => {
+    const gap = gapKind(f.id);
+    return { ...f, gap };
+  });
+  for (const id of result.failIds ?? []) {
+    const gap = gapKind(id);
+    if (gap === "vanilla_baseline_gap") vanillaBaselineGap++;
+    else if (gap === "custom_server_pack_gap") customServerPackGap++;
+    else unknownGap++;
+  }
+
   mkdirSync(outDir, { recursive: true });
   const pngPath = join(outDir, "atlas.png");
   writeFileSync(
     pngPath,
     Buffer.from(result.atlas.pngBase64, "base64"),
   );
+  const { failIds: _failIds, ...resultRest } = result;
   const report = {
-    ...result,
+    ...resultRest,
+    failures: labeledFailures,
+    gaps: {
+      mojangBlocksPath: vanillaBlocks?.path ?? null,
+      vanillaBlockCount: vanillaBlocks?.ids.size ?? null,
+      vanilla_baseline_gap: vanillaBaselineGap,
+      custom_server_pack_gap: customServerPackGap,
+      unknown: unknownGap,
+    },
     atlas: {
       ...result.atlas,
       pngBase64: undefined,

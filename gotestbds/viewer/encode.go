@@ -497,7 +497,74 @@ func (e *encoder) encodeColumn(w *gw.World, pos dfworld.ChunkPos, col *gw.Column
 	if lit {
 		out.BiomePalette, out.Biomes = encodeColumnBiomes(col)
 	}
+	out.BlockEntities = encodeColumnBlockEntities(col)
 	return out
+}
+
+// encodeColumnBlockEntities projects dragonfly NBTer blocks into the wire list.
+//
+// @param col - World column.
+// @returns block entities (nil when none).
+func encodeColumnBlockEntities(col *gw.Column) []BlockEntity {
+	if col == nil || len(col.BlockEntities) == 0 {
+		return nil
+	}
+	out := make([]BlockEntity, 0, len(col.BlockEntities))
+	for pos, bl := range col.BlockEntities {
+		if bl == nil {
+			continue
+		}
+		name, _ := bl.EncodeBlock()
+		be := BlockEntity{
+			Pos: [3]int{pos[0], pos[1], pos[2]},
+			ID:  name,
+		}
+		if nbter, ok := bl.(dfworld.NBTer); ok {
+			nbt := nbter.EncodeNBT()
+			be.TextFront = signSideLines(nbt, "FrontText")
+			be.TextBack = signSideLines(nbt, "BackText")
+			if id, ok := nbt["id"].(string); ok && id != "" && be.ID == "" {
+				be.ID = id
+			}
+		}
+		if be.ID == "" {
+			be.ID = "unknown"
+		}
+		out = append(out, be)
+	}
+	return out
+}
+
+// signSideLines extracts up to four lines from a sign-side NBT value.
+func signSideLines(nbt map[string]any, key string) []string {
+	if nbt == nil {
+		return nil
+	}
+	raw, ok := nbt[key]
+	if !ok {
+		return nil
+	}
+	text := ""
+	switch v := raw.(type) {
+	case string:
+		text = v
+	case map[string]any:
+		if t, ok := v["Text"].(string); ok {
+			text = t
+		}
+	}
+	if text == "" {
+		return nil
+	}
+	var lines []string
+	start := 0
+	for i := 0; i <= len(text) && len(lines) < 4; i++ {
+		if i == len(text) || text[i] == '\n' {
+			lines = append(lines, text[start:i])
+			start = i + 1
+		}
+	}
+	return lines
 }
 
 func absInt(v int) int {
@@ -670,6 +737,10 @@ func (e *encoder) encodeEntity(ent gw.Entity) Entity {
 	st := ent.State()
 	box := st.Box()
 	main, off := ent.HeldItems()
+	// Dropped items store their stack on Item(), not HeldItems.
+	if itemEnt, ok := ent.(interface{ Item() item.Stack }); ok {
+		main = itemEnt.Item()
+	}
 	attrs := ent.Attributes()
 	out := Entity{
 		RID:    ent.RuntimeID(),

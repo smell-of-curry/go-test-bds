@@ -30,16 +30,46 @@ Locked by `TestSubpackMemoryPerformanceTier` (tier 1 → `lite`) and
 
 ## What `bedrock-samples` does not ship
 
-Still open for stage 6+:
-
-| Gap | Impact | Planned answer |
+| Gap | Impact | What the viewer does |
 | --- | --- | --- |
-| `materials/` | no `material.default` definitions | empirical mapping; optional install overlay |
-| shaders | no client shader sources | not required for software/WebGL placeholder path |
-| font glyph atlas | no bitmap font pages | stage 11 owns text rendering |
+| `materials/` | no `material.default` definitions | **Answered (Stage 7):** name→state table in `entity/material.ts` + `entity/README.md` (alpha_test / blend / opaque, cull, emissive) + RC tint lerp. Terrain still uses `terrain/material.ts`. Optional install overlay remains an escape hatch. |
+| shaders | no client shader sources | Not needed. Gradient sky dome + `THREE.Fog` (Stage 10b); lighting is vertex-baked into `vertColor`, not a Bedrock shader port. |
+| font glyph atlas | no bitmap font pages | Stage 7 name tags = canvas + `Courier New` + `§` colours; Stage 11 HUD/forms stay DOM. JSON UI + real glyph pages stay a fidelity track. |
+
+## `metadata/vanilladata_modules`
+
+`mojang-blocks.json` is the complete vanilla block+state list (`data_items[].name`
+are namespaced ids). `npm run diagnose:terrain` loads it from
+`<baseline>/metadata/vanilladata_modules/` (sibling of `resource_pack/`) and
+labels each unresolved `blocks.json` id as `vanilla_baseline_gap` vs
+`custom_server_pack_gap` in the report's `gaps` object.
 
 ## Bump automation
 
-Pin lives in `viewer/baseline.tag`. Mojang's `version.json` maps `latest` →
-current version. Scheduled PR workflow to bump the pin is not implemented yet
-(stage 5 remainder).
+Pin lives in `viewer/baseline.tag` (git tag form, e.g. `v1.26.30.5`).
+
+Mojang's `https://raw.githubusercontent.com/Mojang/bedrock-samples/main/version.json`
+maps `"latest"` → `{ "version": "1.26.30.5", "date": "…" }` (no leading `v`).
+Release tags are `v` + that version. Preview tags (`v*-preview`) are ignored;
+only `latest` is considered.
+
+Workflow `.github/workflows/baseline-bump.yml` (weekly cron + `workflow_dispatch`):
+
+1. Read current pin from `viewer/baseline.tag`.
+2. Fetch `version.json`; compute `next = "v" + latest.version`.
+3. If changed, open a PR via `peter-evans/create-pull-request` that only updates
+   the pin.
+
+### Bump → golden review loop
+
+1. The bump PR touches `viewer/baseline.tag` → `viewer-golden.yml` path filter
+   `viewer/**` runs the golden job.
+2. That job runs `go run ./cmd/fetch-baseline .cache`, sets
+   `GOLDEN_BASELINE_DIR`, and paints real Mojang textures into the golden
+   fixture pack (`viewer/tests/goldenApp.ts` — also auto-detects
+   `.cache/baseline/<pin>` locally; `GOLDEN_USE_BASELINE=0` forces fixtures).
+3. Review image diffs in the job / `viewer-golden-results` artefact.
+4. Accept intentional changes: **Viewer golden** `workflow_dispatch` with
+   `golden_update=true` (sets `GOLDEN_UPDATE=1`), download
+   `viewer-goldens-updated`, commit `viewer/testdata/goldens/*.png`. Prefer CI
+   SwiftShader renders; locally `GOLDEN_SOFT=1` inspects without failing.

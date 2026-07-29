@@ -63,11 +63,18 @@ export function textureNamesFromRegistries(
 ): Set<string> {
   const out = new Set<string>();
   if (!registries?.blocks) return out;
-  for (const b of registries.blocks) {
-    const mats = b.components?.materialInstances;
-    if (!mats) continue;
+  const addMats = (
+    mats: Record<string, RegistryMaterial> | undefined,
+  ): void => {
+    if (!mats) return;
     for (const m of Object.values(mats)) {
       if (m?.texture) out.add(m.texture);
+    }
+  };
+  for (const b of registries.blocks) {
+    addMats(b.components?.materialInstances);
+    for (const perm of b.permutations ?? []) {
+      addMats(perm.components?.materialInstances);
     }
   }
   return out;

@@ -1,4 +1,8 @@
-import type { RenderControllerArrays, RenderControllerDef } from "./types";
+import type {
+  RenderControllerArrays,
+  RenderControllerColor,
+  RenderControllerDef,
+} from "./types";
 
 /**
  * Parse a render_controllers JSON document into named controller defs.
@@ -76,7 +80,30 @@ function parseOne(
     materials,
     partVisibility,
     arrays: parseArrays(raw.arrays),
+    color: parseColor(raw.color),
+    overlayColor: parseColor(raw.overlay_color),
+    onFireColor: parseColor(raw.on_fire_color),
+    isHurtColor: parseColor(raw.is_hurt_color),
   };
+}
+
+/**
+ * @param raw - RC colour object (`r`/`g`/`b`/`a` Molang or number).
+ * @returns normalised colour or undefined.
+ */
+function parseColor(raw: unknown): RenderControllerColor | undefined {
+  if (!isObject(raw)) return undefined;
+  const out: RenderControllerColor = {};
+  for (const k of ["r", "g", "b", "a"] as const) {
+    const v = raw[k];
+    if (typeof v === "string" || typeof v === "number") out[k] = v;
+  }
+  return out.r !== undefined ||
+    out.g !== undefined ||
+    out.b !== undefined ||
+    out.a !== undefined
+    ? out
+    : undefined;
 }
 
 /**

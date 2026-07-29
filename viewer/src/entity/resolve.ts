@@ -1,4 +1,5 @@
 import { compile, type MolangValue } from "../molang";
+import { composeControllerTint, evalColor, WHITE, type Rgba } from "./material";
 import { createEntityMolangHost } from "./queries";
 import type {
   ClientEntityDef,
@@ -108,12 +109,107 @@ export function resolveOnePass(
     }
   }
 
+  const materialName = resolveMaterialName(rc, host, def);
+  const tint = evaluatePassTint(rc, inputs);
+
   return {
     controllerName: rc.name,
     geometryId: geometryRef,
     texturePaths,
     partVisibility,
+    materialName,
+    tint,
+    colorExprs: {
+      color: rc.color,
+      overlayColor: rc.overlayColor,
+      onFireColor: rc.onFireColor,
+      isHurtColor: rc.isHurtColor,
+    },
   };
+}
+
+/**
+ * Resolve the `*` (or first) material entry to a concrete material name.
+ *
+ * @param rc - Controller.
+ * @param host - Molang host.
+ * @param def - Client entity material short-name map.
+ * @returns material name (e.g. `entity_alphatest`).
+ */
+export function resolveMaterialName(
+  rc: RenderControllerDef,
+  host: ReturnType<typeof createEntityMolangHost>,
+  def: ClientEntityDef,
+): string {
+  let ref = "Material.default";
+  for (const row of rc.materials) {
+    if (typeof row["*"] === "string") {
+      ref = row["*"]!;
+      break;
+    }
+    const first = Object.values(row)[0];
+    if (typeof first === "string") {
+      ref = first;
+      break;
+    }
+  }
+  return expandMaterialRef(ref, host, def);
+}
+
+/**
+ * Expand `Material.foo` / Array / bare name through the client entity map.
+ *
+ * @param ref - Material expression or short ref.
+ * @param host - Molang host.
+ * @param def - Client entity.
+ * @returns concrete material name.
+ */
+export function expandMaterialRef(
+  ref: string,
+  host: ReturnType<typeof createEntityMolangHost>,
+  def: ClientEntityDef,
+): string {
+  const trimmed = ref.trim();
+  if (!trimmed) return "entity_alphatest";
+
+  if (/^Material\.[A-Za-z0-9_]+$/i.test(trimmed)) {
+    const short = trimmed.slice("Material.".length);
+    return def.materials[short] ?? def.materials.default ?? short;
+  }
+
+  const value = evalMolang(trimmed, host);
+  if (typeof value === "string") {
+    const s = value.trim();
+    const mat = /^Material\.(.+)$/i.exec(s);
+    if (mat) {
+      const short = mat[1]!;
+      return def.materials[short] ?? def.materials.default ?? short;
+    }
+    return def.materials[s] ?? s;
+  }
+  return def.materials.default ?? "entity_alphatest";
+}
+
+/**
+ * Evaluate RC colour fields and compose the hurt/fire overlay lerp.
+ *
+ * @param rc - Controller (or colorExprs subset).
+ * @param inputs - Entity inputs.
+ * @returns composed tint.
+ */
+export function evaluatePassTint(
+  rc: Pick<
+    RenderControllerDef,
+    "color" | "overlayColor" | "onFireColor" | "isHurtColor"
+  >,
+  inputs: EntityRenderInputs,
+): Rgba {
+  return composeControllerTint({
+    color: rc.color ? evalColor(rc.color, inputs) : WHITE,
+    overlay: rc.overlayColor ? evalColor(rc.overlayColor, inputs) : undefined,
+    onFire: rc.onFireColor ? evalColor(rc.onFireColor, inputs) : undefined,
+    isHurt: rc.isHurtColor ? evalColor(rc.isHurtColor, inputs) : undefined,
+  });
 }
 
 /**

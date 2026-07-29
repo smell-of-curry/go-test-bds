@@ -4,6 +4,7 @@ import { normalizePath } from "../terrain/assetClient";
 import {
   applyEntityYaw,
   applyHeadPitch,
+  buildEntityModel,
   buildFromPass,
   geometryById,
   type BuiltEntityModel,
@@ -12,6 +13,7 @@ import {
   buildAnimationBindings,
   type AnimationBindings,
 } from "./controllerRuntime";
+import { ItemIconResolver } from "./itemIcons";
 import { parseAnimControllers } from "./parseAnimController";
 import { parseAnimations, type ParsedAnimation } from "./parseAnimation";
 import type { ParsedAnimController } from "./parseAnimController";
@@ -30,6 +32,11 @@ export interface EntityLike {
   player: boolean;
   props: Record<string, string | number | boolean>;
   flags: Record<string, boolean>;
+  held?: {
+    main: { name: string; count: number } | null;
+    off: { name: string; count: number } | null;
+  };
+  armour?: Array<{ name: string; count: number } | null>;
 }
 
 /**
@@ -57,13 +64,19 @@ export class EntityModelRegistry {
     string,
     Promise<BuiltEntityModel | null>
   >();
+  private readonly layerCache = new Map<
+    string,
+    Promise<BuiltEntityModel | null>
+  >();
   private geoIndexBuilt = false;
+  readonly itemIcons: ItemIconResolver;
 
   /**
    * @param client - Shared {@link AssetClient} (same pack stack as terrain).
    */
   constructor(client: AssetClient) {
     this.client = client;
+    this.itemIcons = new ItemIconResolver(client);
   }
 
   /**
@@ -174,6 +187,59 @@ export class EntityModelRegistry {
   }
 
   /**
+   * Build a one-off geometry+texture layer (armour pieces).
+   *
+   * @param geometryId - `geometry.*` id.
+   * @param texturePath - Pack texture path (no extension).
+   * @returns built model or null.
+   */
+  async getLayerModel(
+    geometryId: string,
+    texturePath: string,
+  ): Promise<BuiltEntityModel | null> {
+    try {
+      await this.load();
+      const key = `${geometryId}|${texturePath}`;
+      let pending = this.layerCache.get(key);
+      if (!pending) {
+        pending = (async () => {
+          const geoJson = await this.loadGeometryJson(geometryId);
+          if (!geoJson) return null;
+          const geometry = geometryById(geoJson, geometryId);
+          if (!geometry) return null;
+          const bitmap = await this.client.fetchImage(texturePath);
+          if (!bitmap) return null;
+          const texture = await bitmapToTexture(bitmap);
+          return buildEntityModel({
+            geometry,
+            texture,
+            materialName: "entity_alphatest",
+          });
+        })();
+        this.layerCache.set(key, pending);
+      }
+      const model = await pending;
+      return model ? cloneBuiltModel(model) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Load an item-icon texture for held / dropped sprites.
+   *
+   * @param itemName - Namespaced item id.
+   * @returns THREE texture or null.
+   */
+  async getItemTexture(itemName: string): Promise<THREE.Texture | null> {
+    const path = await this.itemIcons.resolve(itemName);
+    if (!path) return null;
+    const bitmap = await this.client.fetchImage(path);
+    if (!bitmap) return null;
+    return bitmapToTexture(bitmap);
+  }
+
+  /**
    * Apply yaw (and head pitch when a head bone exists) to a built model.
    *
    * @param model - Built model.
@@ -263,6 +329,10 @@ export class EntityModelRegistry {
         materials: [{ "*": "Material.default" }],
         partVisibility: [],
         arrays: { materials: {}, geometries: {}, textures: {} },
+        color: undefined,
+        overlayColor: undefined,
+        onFireColor: undefined,
+        isHurtColor: undefined,
       });
     }
 

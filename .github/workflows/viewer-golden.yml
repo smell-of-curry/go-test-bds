@@ -1,35 +1,101 @@
 # Viewer Stage 12 visual regression. Goldens are SwiftShader-stable — if the
 # first CI run fails against Windows-authored PNGs, re-run with GOLDEN_UPDATE in
 # a one-off job (or accept the artefact PNGs) and commit the CI-rendered set.
+#
+# Vanilla baseline bump loop (Stage 5 + 12):
+#   baseline-bump.yml opens a PR that only touches viewer/baseline.tag.
+#   Path filter `viewer/**` includes that file, so this job runs on the PR.
+#   The "Fetch vanilla baseline" step populates .cache and sets
+#   GOLDEN_BASELINE_DIR so golden shots sample real Mojang textures — a pin
+#   bump shows up as a reviewable image diff, not a surprise on main.
+#
+# Accept intentional visual changes:
+#   workflow_dispatch with golden_update=true, or env GOLDEN_UPDATE=1.
+#   Then commit viewer/testdata/goldens/*.png from the job artefact / tree.
+#   Prefer CI SwiftShader renders over local GPU stills (or use GOLDEN_SOFT=1
+#   locally to inspect without failing).
 name: Viewer golden
 
 on:
   push:
     branches: [main, master]
-    paths: [viewer/**, .github/workflows/viewer-golden.yml]
+    paths:
+      - "viewer/**"
+      - ".github/workflows/viewer-golden.yml"
+      - "cmd/fetch-baseline/**"
+      - "gotestbds/assets/**"
   pull_request:
-    paths: [viewer/**, .github/workflows/viewer-golden.yml]
+    paths:
+      - "viewer/**"
+      - ".github/workflows/viewer-golden.yml"
+      - "cmd/fetch-baseline/**"
+      - "gotestbds/assets/**"
+  workflow_dispatch:
+    inputs:
+      golden_update:
+        description: "Rewrite viewer/testdata/goldens (GOLDEN_UPDATE=1) and upload PNGs"
+        type: boolean
+        default: false
 
 jobs:
   golden:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: viewer
     steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Cache vanilla baseline
+        uses: actions/cache@v4
+        with:
+          path: .cache/baseline
+          key: bedrock-samples-${{ hashFiles('viewer/baseline.tag') }}
+
+      - name: Fetch vanilla baseline
+        id: baseline
+        working-directory: .
+        run: |
+          set -euo pipefail
+          DIR=$(go run ./cmd/fetch-baseline .cache)
+          echo "dir=${DIR}" >> "$GITHUB_OUTPUT"
+          test -f "${DIR}/resource_pack/blocks.json"
+          test -f "${DIR}/metadata/vanilladata_modules/mojang-blocks.json"
+          echo "Baseline ready at ${DIR}"
+
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
           cache: npm
           cache-dependency-path: viewer/package-lock.json
+
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       - run: npm run generate:fixture
       - run: npx vite build
+
       - name: Golden + smoke + terrain
+        env:
+          # Real bedrock-samples textures under the fixture pack (see goldenApp.ts).
+          GOLDEN_BASELINE_DIR: ${{ steps.baseline.outputs.dir }}
+          GOLDEN_USE_BASELINE: "1"
+          GOLDEN_UPDATE: ${{ inputs.golden_update == true && '1' || '' }}
         run: npx playwright test --project=golden --project=smoke --project=terrain
+
+      - name: Upload updated goldens
+        if: ${{ inputs.golden_update == true }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: viewer-goldens-updated
+          path: viewer/testdata/goldens
+          retention-days: 14
+
       - name: Upload test-results
         if: failure()
         uses: actions/upload-artifact@v4

@@ -6,10 +6,18 @@ import {
   parseGeometryDocument,
   type ParsedGeometry,
 } from "../geometry";
+import {
+  createEntityMaterial,
+  DEFAULT_ENTITY_MATERIAL,
+  materialStateFromName,
+  type MaterialRenderState,
+  type Rgba,
+  WHITE,
+} from "./material";
 import type { ResolvedControllerPass } from "./types";
 
 /** Alpha cutout threshold for entity skins (transparent texels discarded). */
-export const ENTITY_ALPHA_TEST = 0.5;
+export const ENTITY_ALPHA_TEST = DEFAULT_ENTITY_MATERIAL.alphaTest;
 
 /** Disposable handle for a built entity model root. */
 export interface BuiltEntityModel {
@@ -34,6 +42,12 @@ export interface BuildEntityModelOptions {
   partVisibility?: Map<string, boolean>;
   /** Model scale multiplier. */
   scale?: number;
+  /** Material name → render state (defaults to alphatest cutout). */
+  materialName?: string;
+  /** Optional pre-mapped state (wins over materialName). */
+  materialState?: MaterialRenderState;
+  /** Composed RC tint. */
+  tint?: Rgba;
 }
 
 /**
@@ -47,7 +61,13 @@ export interface BuildEntityModelOptions {
 export function buildEntityModel(
   opts: BuildEntityModelOptions,
 ): BuiltEntityModel {
-  const { geometry, texture, partVisibility = new Map(), scale = 1 } = opts;
+  const {
+    geometry,
+    texture,
+    partVisibility = new Map(),
+    scale = 1,
+    tint = WHITE,
+  } = opts;
 
   texture.magFilter = THREE.NearestFilter;
   texture.minFilter = THREE.NearestFilter;
@@ -55,13 +75,12 @@ export function buildEntityModel(
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.needsUpdate = true;
 
-  const material = new THREE.MeshBasicMaterial({
-    map: texture,
-    alphaTest: ENTITY_ALPHA_TEST,
-    transparent: false,
-    side: THREE.FrontSide,
-    depthWrite: true,
-  });
+  const state =
+    opts.materialState ??
+    (opts.materialName
+      ? materialStateFromName(opts.materialName)
+      : DEFAULT_ENTITY_MATERIAL);
+  const material = createEntityMaterial(texture, state, tint);
 
   const { roots, byName } = buildBoneHierarchy(geometry);
   const worldMats = computeBoneWorldMatrices(geometry);
@@ -277,5 +296,7 @@ export function buildFromPass(
     texture,
     partVisibility: pass.partVisibility,
     scale,
+    materialName: pass.materialName,
+    tint: pass.tint,
   });
 }

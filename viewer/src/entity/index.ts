@@ -45,8 +45,11 @@ export {
 } from "./controllerRuntime";
 export { createEntityMolangHost } from "./queries";
 export {
+  expandMaterialRef,
   expandShortRef,
+  evaluatePassTint,
   modelCacheKey,
+  resolveMaterialName,
   resolveOnePass,
   resolveRenderPasses,
   resolveResourceExpr,
@@ -63,6 +66,37 @@ export {
   type BuildEntityModelOptions,
 } from "./buildModel";
 export {
+  applyTintToRoot,
+  composeControllerTint,
+  createEntityMaterial,
+  DEFAULT_ENTITY_MATERIAL,
+  evalColor,
+  lerpRgba,
+  materialStateFromName,
+  type MaterialRenderState,
+  type Rgba,
+  type TransparencyMode,
+  WHITE,
+} from "./material";
+export {
+  armourTextureStem,
+  looksLikeArmour,
+  pickBone,
+  selectArmourLayers,
+  selectHeldItem,
+  type ArmourLayerSpec,
+  type ArmourSlot,
+  type HeldItemSpec,
+} from "./equipment";
+export {
+  buildItemSprite,
+  poseHeldItem,
+  tickDroppedItem,
+  type ItemSprite,
+} from "./itemSprite";
+export { ItemIconResolver } from "./itemIcons";
+export { createNameTag, nameTagAnchor, type NameTagSprite } from "./nameTag";
+export {
   EntityModelRegistry,
   geometryPathCandidates,
   isAnimControllerPath,
@@ -77,6 +111,7 @@ export type {
   ClientEntityScripts,
   EntityRenderInputs,
   RenderControllerArrays,
+  RenderControllerColor,
   RenderControllerDef,
   ResolvedControllerPass,
 } from "./types";

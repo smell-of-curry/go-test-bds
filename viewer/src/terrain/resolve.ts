@@ -1,4 +1,6 @@
 import { FALLBACK_TEXTURE, NEUTRAL_TEXTURE } from "./atlas";
+import type { BlockGeometryCache } from "./customGeometry";
+import { renderClassFromComponents } from "./customGeometry";
 import {
   canonicalizeBlockId,
   expandTexturesField,
@@ -10,6 +12,7 @@ import {
   indexRegistryBlocks,
   textureNamesFromRegistries,
 } from "./palette";
+import { effectiveComponents, materialFlags } from "./permutations";
 import type {
   BlockDef,
   CubeModel,
@@ -18,6 +21,7 @@ import type {
   RenderClass,
 } from "./types";
 import type { Block, Registries, RegistryBlock } from "../protocol";
+import { blockEntityKind } from "./blockEntities";
 
 type Cardinal = "up" | "down" | "north" | "south" | "east" | "west";
 
@@ -72,6 +76,7 @@ const FOLIAGE_NAMES = new Set([
 export class BlockModelResolver {
   private readonly blocks: BlocksJson;
   private registryByName = new Map<string, RegistryBlock>();
+  private geoCache: BlockGeometryCache | null = null;
 
   /**
    * @param blocks - Parsed blocks.json.
@@ -80,6 +85,15 @@ export class BlockModelResolver {
   constructor(blocks: BlocksJson, registries?: Registries | null) {
     this.blocks = blocks;
     if (registries) this.setRegistries(registries);
+  }
+
+  /**
+   * Bind the geometry cache so resolve/occludes know which cells use custom meshes.
+   *
+   * @param cache - Preloaded block geometry cache, or null.
+   */
+  setGeometryCache(cache: BlockGeometryCache | null): void {
+    this.geoCache = cache;
   }
 
   /**
@@ -169,14 +183,17 @@ export class BlockModelResolver {
     if (TRANSLUCENT_NAMES.has(n) || n.includes("stained_glass"))
       return "translucent";
     if (CUTOUT_NAMES.has(n) || n.endsWith("_leaves")) return "cutout";
+    // Dedicated block-entity geometry is never a full occluding cube.
+    if (blockEntityKind(n)) return "cutout";
 
     // Palette render_method (alpha_test → cutout) when pack has no textures.
     if (!this.hasPackTextures(block.name)) {
       const reg = this.registryByName.get(n);
-      const mats = reg?.components?.materialInstances;
-      if (mats) {
-        const cube = facesFromMaterialInstances(mats);
-        if (cube) return cube.renderClass;
+      if (reg) {
+        const comps = effectiveComponents(reg, block.states);
+        if (comps.materialInstances) {
+          return renderClassFromComponents(comps);
+        }
       }
     }
 
@@ -193,8 +210,24 @@ export class BlockModelResolver {
    */
   occludes(block: Block | undefined): boolean {
     if (!block) return false;
+    // Custom geometry / block entities are not full cubes — never occlude.
+    if (this.usesCustomGeometry(block)) return false;
+    if (blockEntityKind(block.name)) return false;
     const rc = this.renderClassOf(block);
     return rc === "opaque";
+  }
+
+  /**
+   * @param block - Block.
+   * @returns true when mesher should emit cached custom geometry.
+   */
+  usesCustomGeometry(block: Block): boolean {
+    const reg = this.registryByName.get(block.name);
+    if (!reg || !this.geoCache) return false;
+    if (this.hasPackTextures(block.name)) return false;
+    const comps = effectiveComponents(reg, block.states);
+    if (!comps.geometry || comps.unitCube) return false;
+    return this.geoCache.has(comps.geometry);
   }
 
   /**
@@ -232,18 +265,24 @@ export class BlockModelResolver {
 
     const reg = this.registryByName.get(block.name);
     if (reg) {
-      const fromMats = facesFromMaterialInstances(
-        reg.components?.materialInstances,
-      );
+      const comps = effectiveComponents(reg, block.states);
+      const fromMats = facesFromMaterialInstances(comps.materialInstances);
       if (fromMats) {
-        // ponytail: full custom geometry is stage 7's parser wired to terrain;
-        // ceiling = unit cube with material_instances textures. Upgrade: feed
-        // minecraft:geometry through the existing .geo.json parser.
-        void reg.components?.geometry;
+        const star = comps.materialInstances?.["*"];
+        const flags = materialFlags(star);
+        const geoId = comps.geometry;
+        const useGeo =
+          !!geoId && !comps.unitCube && !!this.geoCache?.has(geoId);
         return {
           faces: fromMats.faces,
           renderClass: fromMats.renderClass,
-          customGeometryKey: undefined,
+          customGeometryKey: useGeo ? geoId : undefined,
+          transformation: comps.transformation,
+          lightEmission: comps.lightEmission,
+          faceDimming: flags.faceDimming,
+          ambientOcclusion: flags.ambientOcclusion,
+          boneVisibility: comps.boneVisibility,
+          materialInstances: comps.materialInstances,
         };
       }
       // Palette entry without material_instances → neutral grey, not magenta.

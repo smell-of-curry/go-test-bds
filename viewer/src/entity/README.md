@@ -43,16 +43,56 @@ Wire `rot` is **`[yaw, pitch]`** degrees (optional third = head yaw) — see
 Body yaw uses the same mapping as the camera (`π − yawRad` about Y). Pitch is
 applied to a `head` / `Head` bone when present (after animation sample).
 
+## Material layer
+
+Vanilla `materials/` definitions are **not** in `bedrock-samples`. Mapping from
+material name → render state lives in `material.ts` (`materialStateFromName`).
+
+| Name pattern | Transparency | Cull | Emissive |
+| --- | --- | --- | --- |
+| `entity`, `entity_static` | opaque | yes | no |
+| `entity_alphatest` (+ most short names: `sheep`, `zombie`, …) | alpha_test@0.5 | yes | no |
+| `entity_alphablend` | blend | yes | no |
+| `entity_emissive` | opaque | yes | yes |
+| `entity_emissive_alpha` | alpha_test@0.5 | no | yes |
+| `entity_emissive_alpha_one_sided` | alpha_test@0.5 | yes | yes |
+| `entity_nocull` | opaque | no | no |
+| `charged_creeper` | blend | no | yes |
+| `slime_outer` | blend | no | no |
+| `spider`, `enderman` | alpha_test@0.5 | yes | yes |
+| `*alphablend*` / `*blend*` | blend | (see nocull) | — |
+| `*emissive*` / `*glow*` | (keep mode) | — | yes |
+| `*nocull*` / `*invisible*` / `*_outer` | — | no | — |
+| **default** (unknown) | alpha_test@0.5 | yes | no |
+
+RC tint: evaluate `color` / `overlay_color` / `on_fire_color` / `is_hurt_color`
+(Molang RGBA); `overlay_color` (and hurt/fire) lerps RGB toward the overlay by
+its alpha. Hurt flash needs `query.hurt_time` on the wire — not exported yet.
+
+`emissive` is documented intent only: `MeshBasicMaterial` is already unlit.
+
+## Equipment / items / name tags
+
+- **Armour + held:** snapshot already carries `armour[4]` + `held`; layers use
+  `geometry.humanoid.armor.*` + `textures/models/armor/<stem>_{1,2}`; held item
+  is a flat alpha-tested icon quad on the right-hand bone.
+- **Dropped items:** `minecraft:item` stack rides `held.main` (Go `Item()` →
+  encode); rendered as spinning/bobbing sprite.
+- **Item frames:** blocks with block-entity NBT — rides Stage 6 block-entity
+  pipeline (not built here).
+- **Name tags:** in-scene canvas billboards (`nameTag.ts`); hidden when
+  sneaking; depth-tested (no through-wall dimming).
+
 ## Known gaps
 
 - **Player skins:** the stream does not carry skin PNG / persona data. Players
   always use the vanilla Steve texture (`textures/entity/steve`).
-- Armour, held items, attachables, item frames, dropped items — not drawn yet.
+- Attachables (full item geometry / animations) — flat held quad only.
 - Particle / sound effect keyframes from animations — not played.
-- Material layer (blend vs alphatest, emissive, hurt tint) — alphatest cutout only.
 - Multi-pass / overlay render controllers — first matching pass only.
+- Hurt-time / on-fire flags not on the entity snapshot yet (tint math is ready).
 
 ## Fallback
 
-Any load / parse / resolve failure leaves the existing wireframe box + label.
-Missing animation bindings leave the textured model in rest pose.
+Any load / parse / resolve failure leaves the existing wireframe box (no DOM
+label). Missing animation bindings leave the textured model in rest pose.

@@ -9,11 +9,16 @@
  * Gate: schemaOk && assetsSettled → flush() → settled (same as capture harness).
  *
  * Env:
- *   GOLDEN_UPDATE=1  rewrite viewer/testdata/goldens/*.png
- *   GOLDEN_SOFT=1    report diffs, do not fail (local GPU ≠ CI SwiftShader)
+ *   GOLDEN_UPDATE=1         rewrite viewer/testdata/goldens/*.png
+ *   GOLDEN_SOFT=1           report diffs, do not fail (local GPU ≠ CI SwiftShader)
+ *   GOLDEN_BASELINE_DIR=…   extracted bedrock-samples root (has resource_pack/)
+ *   GOLDEN_USE_BASELINE=0   force solid fixture textures (skip real baseline)
  *
- * Goldens must be regenerated on CI's SwiftShader stack to be stable; Windows
- * GPU stills will differ slightly — use GOLDEN_SOFT locally or update from CI.
+ * When a baseline cache is present (CI always fetches; local auto-detects
+ * `.cache/baseline/<baseline.tag>`), golden shots overlay real Mojang PNGs so
+ * a pin bump shows up as an image diff. Goldens must be regenerated on CI's
+ * SwiftShader stack to be stable; Windows GPU stills will differ slightly —
+ * use GOLDEN_SOFT locally or accept via workflow_dispatch `golden_update`.
  */
 import { expect, test, type Page } from "@playwright/test";
 import { dirname, join } from "node:path";

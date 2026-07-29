@@ -9,10 +9,12 @@ import (
 
 	"github.com/df-mc/dragonfly/server/block"
 	"github.com/df-mc/dragonfly/server/block/cube"
+	"github.com/df-mc/dragonfly/server/item"
 	dfworld "github.com/df-mc/dragonfly/server/world"
 	"github.com/df-mc/dragonfly/server/world/chunk"
 	"github.com/go-gl/mathgl/mgl64"
 	"github.com/sandertv/gophertunnel/minecraft"
+	"github.com/sandertv/gophertunnel/minecraft/protocol"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/login"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/actor"
@@ -438,3 +440,31 @@ func TestColumnSectionsNeverNull(t *testing.T) {
 		}
 	}
 }
+
+// TestEncodeDroppedItemUsesHeldMain ensures dropped stacks ride held.main via Item().
+func TestEncodeDroppedItemUsesHeldMain(t *testing.T) {
+	dfworld.DefaultBlockRegistry.Finalize()
+	w := &itemCarrier{
+		Ent:   entity.NewEnt(mgl64.Vec3{1, 64, 2}, protocol.EntityMetadata{}, 99, -99, "minecraft:item"),
+		stack: item.NewStack(item.Diamond{}, 3),
+	}
+	enc := newEncoder("TestBot", 8, 0)
+	out := enc.encodeEntity(w)
+	if out.Type != "minecraft:item" {
+		t.Fatalf("type=%s", out.Type)
+	}
+	if out.Held.Main == nil || out.Held.Main.Count != 3 {
+		t.Fatalf("held.main=%v want diamond x3", out.Held.Main)
+	}
+	if out.Held.Main.Name == "" {
+		t.Fatal("held.main.name empty")
+	}
+}
+
+// itemCarrier is a test double for dropped items (Item() + Entity).
+type itemCarrier struct {
+	*entity.Ent
+	stack item.Stack
+}
+
+func (i *itemCarrier) Item() item.Stack { return i.stack }

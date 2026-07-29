@@ -381,6 +381,10 @@ components carry geometry / material_instances (network palette wins over any
   incomplete columns. On block edits, the stream re-queues the column through
   budgeted `columnsAdded` so light/biomes stay in sync (per-block deltas do
   not carry those fields).
+- `blockEntities` (optional) lists NBT-backed tile entities in the column for
+  dedicated geometry: `{ pos:[x,y,z], id, textFront?, textBack? }`. Sign text
+  comes from `FrontText`/`BackText` NBT. Absent or empty when the column has
+  none. Additive — not a schema `v` bump; older clients ignore it.
 
 ### Entity
 
@@ -412,6 +416,10 @@ components carry geometry / material_instances (network palette wins over any
 - `props` carries the numeric and string metadata properties that decode
   cleanly. Same rule: drop nothing.
 - `armour` is always four entries, helmet to boots, `null` for empty.
+- `held.main` / `held.off` are the mob's equipment. For `minecraft:item`
+  (dropped stacks) the stack rides `held.main` — the Go world stores it on
+  `Item.Item()`, and the encoder copies that into `held.main` so the viewer
+  needs no extra field.
 
 ### Item
 

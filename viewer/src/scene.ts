@@ -2,9 +2,19 @@ import * as THREE from "three";
 import type { CameraController } from "./camera";
 import {
   applyEntityYaw,
+  buildItemSprite,
+  createNameTag,
   EntityAnimator,
+  nameTagAnchor,
+  pickBone,
+  poseHeldItem,
+  selectArmourLayers,
+  selectHeldItem,
+  tickDroppedItem,
   type BuiltEntityModel,
   type EntityModelRegistry,
+  type ItemSprite,
+  type NameTagSprite,
 } from "./entity";
 import type { Block, Entity } from "./protocol";
 import { columnKey, sectionIndex } from "./protocol";
@@ -347,7 +357,16 @@ interface EntityNode {
   /** In-flight model load token — bumped to ignore stale async results. */
   loadToken: number;
   type: string;
-  label: HTMLDivElement;
+  /** In-scene billboard name tag (replaces DOM labels). */
+  nameTag: NameTagSprite;
+  /** Armour meshes reparented onto body bones (for disposal). */
+  armourMeshes: THREE.Object3D[];
+  /** Held / dropped item sprite. */
+  itemSprite: ItemSprite | null;
+  /** Cumulative seconds for dropped-item spin/bob. */
+  lifeSec: number;
+  /** Last equipment signature (skip redundant reloads). */
+  gearKey: string;
 }
 
 interface HighlightNode {
@@ -362,7 +381,6 @@ export class ViewerScene {
   readonly scene = new THREE.Scene();
   readonly renderer: THREE.WebGLRenderer;
   private mesher: Mesher;
-  private readonly labelsRoot: HTMLElement;
   private readonly sections = new Map<string, SectionNode>();
   private readonly entities = new Map<number, EntityNode>();
   private readonly columnBounds = new Map<string, THREE.LineSegments>();
@@ -380,6 +398,7 @@ export class ViewerScene {
   private actorWantedVisible = false;
   private skyMesh: THREE.Mesh | null = null;
   private envRadiusBlocks = 128;
+  private readonly nameTagScratch = new THREE.Vector3();
   private static readonly highlightGeo = new THREE.EdgesGeometry(
     new THREE.BoxGeometry(1.02, 1.02, 1.02),
   );
@@ -389,11 +408,11 @@ export class ViewerScene {
 
   constructor(
     canvas: HTMLCanvasElement,
-    labelsRoot: HTMLElement,
+    /** @deprecated DOM labels retired — accepted for call-site compat. */
+    _labelsRoot?: HTMLElement,
     mesher: Mesher = new PlaceholderMesher(),
   ) {
     this.mesher = mesher;
-    this.labelsRoot = labelsRoot;
     this.renderer = new THREE.WebGLRenderer({
       canvas,
       // MSAA is ruinously expensive on SwiftShader; capture runs headless w/o GPU.
@@ -614,7 +633,7 @@ export class ViewerScene {
     for (const h of this.highlights) h.lines.visible = visible;
     this.actorGroup.visible = visible && this.actorWantedVisible;
     for (const node of this.entities.values()) {
-      node.label.style.visibility = visible ? "visible" : "hidden";
+      if (!visible) node.nameTag.setVisible(false);
     }
   }
 
@@ -656,14 +675,18 @@ export class ViewerScene {
     for (const [rid, ent] of entities) {
       const node = this.entities.get(rid);
       if (!node) continue;
+      node.lifeSec += dtSec;
       node.group.position.set(ent.pos[0], ent.pos[1], ent.pos[2]);
-      if (node.animator && node.model) {
+      if (ent.type === "minecraft:item" && node.itemSprite) {
+        tickDroppedItem(node.itemSprite.root, node.lifeSec, 0);
+      } else if (node.animator && node.model) {
         // Animator owns bone + head pitch; only yaw the model root here.
         node.animator.tick(dtSec, ent, node.model);
         applyEntityYaw(node.model.root, ent.rot[0]);
       } else {
         this.setEntityPos(rid, ent.pos, ent.rot);
       }
+      this.syncEntityGear(node, ent);
     }
   }
 
@@ -696,7 +719,7 @@ export class ViewerScene {
 
   render(camera: CameraController): void {
     this.renderer.render(this.scene, camera.perspective);
-    this.updateLabels(camera);
+    this.updateNameTags(camera);
   }
 
   /**
@@ -855,10 +878,8 @@ export class ViewerScene {
       group.visible = this.worldVisible;
       this.scene.add(group);
 
-      const label = document.createElement("div");
-      label.className = "entity-label";
-      label.style.visibility = this.worldVisible ? "visible" : "hidden";
-      this.labelsRoot.appendChild(label);
+      const nameTag = createNameTag();
+      this.scene.add(nameTag.root);
 
       node = {
         rid,
@@ -868,7 +889,11 @@ export class ViewerScene {
         animator: null,
         loadToken: 0,
         type: ent.type,
-        label,
+        nameTag,
+        armourMeshes: [],
+        itemSprite: null,
+        lifeSec: 0,
+        gearKey: "",
       };
       this.entities.set(rid, node);
       // Initial pose only — subsequent poses come from motion-lerped tickEntities.
@@ -878,12 +903,12 @@ export class ViewerScene {
       node.type = ent.type;
       this.clearEntityModel(node);
       this.requestEntityModel(node, ent);
-    } else if (!node.model && this.entityRegistry) {
+    } else if (!node.model && !node.itemSprite && this.entityRegistry) {
       this.requestEntityModel(node, ent);
     }
 
     const [w, h] = ent.bbox;
-    if (!node.model) {
+    if (!node.model && !node.itemSprite) {
       node.group.rotation.order = "YXZ";
       node.group.rotation.y = Math.PI - THREE.MathUtils.degToRad(ent.rot[0]);
       // Resize wireframe if bbox changed.
@@ -893,7 +918,8 @@ export class ViewerScene {
       );
       node.wire.position.y = h / 2;
     }
-    node.label.textContent = ent.name || ent.type;
+    node.nameTag.setText(ent.name || "");
+    this.syncEntityGear(node, ent);
   }
 
   private removeEntity(rid: number): void {
@@ -904,7 +930,8 @@ export class ViewerScene {
     this.scene.remove(node.group);
     node.wire.geometry.dispose();
     (node.wire.material as THREE.Material).dispose();
-    node.label.remove();
+    this.scene.remove(node.nameTag.root);
+    node.nameTag.dispose();
     this.entities.delete(rid);
   }
 
@@ -918,6 +945,26 @@ export class ViewerScene {
     const registry = this.entityRegistry;
     if (!registry) return;
     const token = ++node.loadToken;
+
+    if (ent.type === "minecraft:item") {
+      const name = ent.held?.main?.name;
+      if (!name) return;
+      void registry.getItemTexture(name).then((tex) => {
+        if (token !== node.loadToken) {
+          tex?.dispose();
+          return;
+        }
+        if (!tex) return;
+        this.clearEntityModel(node);
+        const sprite = buildItemSprite(tex);
+        node.itemSprite = sprite;
+        node.wire.visible = false;
+        node.group.add(sprite.root);
+        node.group.rotation.set(0, 0, 0);
+      });
+      return;
+    }
+
     void registry.getModel(ent).then((model) => {
       if (token !== node.loadToken) {
         model?.dispose();
@@ -932,6 +979,8 @@ export class ViewerScene {
       node.group.rotation.set(0, 0, 0);
       registry.applyPose(model, ent.rot);
       node.animator = this.createAnimator(ent);
+      node.gearKey = "";
+      this.syncEntityGear(node, ent);
     });
   }
 
@@ -962,12 +1011,95 @@ export class ViewerScene {
    * @param node - Entity node.
    */
   private clearEntityModel(node: EntityNode): void {
-    if (!node.model) return;
-    node.group.remove(node.model.root);
-    node.model.dispose();
-    node.model = null;
+    this.clearEntityGear(node);
+    if (node.model) {
+      node.group.remove(node.model.root);
+      node.model.dispose();
+      node.model = null;
+    }
+    if (node.itemSprite) {
+      node.group.remove(node.itemSprite.root);
+      node.itemSprite.dispose();
+      node.itemSprite = null;
+    }
     node.animator = null;
     node.wire.visible = true;
+    node.gearKey = "";
+  }
+
+  /**
+   * Attach / refresh armour layers + held-item sprite from snapshot equipment.
+   *
+   * @param node - Entity node.
+   * @param ent - Latest entity.
+   */
+  private syncEntityGear(node: EntityNode, ent: Entity): void {
+    if (ent.type === "minecraft:item") return;
+    const registry = this.entityRegistry;
+    if (!registry || !node.model) return;
+
+    const armourKey = (ent.armour ?? []).map((s) => s?.name ?? "").join(",");
+    const heldKey = ent.held?.main?.name ?? "";
+    const key = `${armourKey}|${heldKey}`;
+    if (key === node.gearKey) return;
+    node.gearKey = key;
+    const token = node.loadToken;
+
+    void (async () => {
+      this.clearEntityGear(node);
+      if (token !== node.loadToken || !node.model) return;
+
+      for (const layer of selectArmourLayers(ent.armour)) {
+        const built = await registry.getLayerModel(
+          layer.geometryId,
+          layer.texturePath,
+        );
+        if (token !== node.loadToken || !node.model || !built) {
+          built?.dispose();
+          continue;
+        }
+        // Reparent armour meshes onto matching body bones (follow Stage 9 pose).
+        for (const [boneName, armourBone] of built.bones) {
+          const bodyBone = node.model.bones.get(boneName);
+          if (!bodyBone) continue;
+          for (const child of [...armourBone.children]) {
+            bodyBone.add(child);
+            node.armourMeshes.push(child);
+          }
+        }
+        built.dispose();
+      }
+
+      const held = selectHeldItem(ent.held);
+      if (!held || !node.model) return;
+      const boneName = pickBone(node.model.bones, held.boneCandidates);
+      const tex = await registry.getItemTexture(held.item.name);
+      if (token !== node.loadToken || !tex || !node.model) {
+        tex?.dispose();
+        return;
+      }
+      const sprite = buildItemSprite(tex, 0.4);
+      poseHeldItem(sprite.root);
+      const parent = boneName
+        ? (node.model.bones.get(boneName) ?? node.model.root)
+        : node.model.root;
+      parent.add(sprite.root);
+      node.itemSprite = sprite;
+    })();
+  }
+
+  /**
+   * @param node - Entity node.
+   */
+  private clearEntityGear(node: EntityNode): void {
+    // Cloned layer meshes share GPU resources with the cache — detach only.
+    for (const mesh of node.armourMeshes) mesh.removeFromParent();
+    node.armourMeshes = [];
+    if (node.itemSprite && node.model) {
+      node.itemSprite.root.removeFromParent();
+      node.itemSprite.dispose();
+      node.itemSprite = null;
+    }
   }
 
   /** Load Steve player model onto the observed bot body when available. */
@@ -1023,21 +1155,27 @@ export class ViewerScene {
     this.sectionMeshCount = this.sections.size;
   }
 
-  private updateLabels(camera: CameraController): void {
-    const width = this.renderer.domElement.clientWidth;
-    const height = this.renderer.domElement.clientHeight;
+  /**
+   * Position in-scene name-tag billboards. Hidden when empty, sneaking, or
+   * world not visible.
+   *
+   * @param camera - Active camera controller.
+   */
+  private updateNameTags(camera: CameraController): void {
     const cam = camera.perspective;
     for (const node of this.entities.values()) {
-      const pos = node.group.position.clone();
-      pos.y += 1.2;
-      pos.project(cam);
-      if (pos.z < -1 || pos.z > 1) {
-        node.label.style.display = "none";
+      const ent = this.storeRef?.entities.get(node.rid);
+      const text = ent?.name ?? "";
+      const sneaking = !!ent?.flags?.sneaking;
+      if (!this.worldVisible || !text || sneaking) {
+        node.nameTag.setVisible(false);
         continue;
       }
-      node.label.style.display = "block";
-      node.label.style.left = `${(pos.x * 0.5 + 0.5) * width}px`;
-      node.label.style.top = `${(-pos.y * 0.5 + 0.5) * height}px`;
+      node.nameTag.setText(text);
+      node.nameTag.setVisible(true);
+      const h = ent?.bbox[1] ?? 1.8;
+      nameTagAnchor(node.model?.bones, node.group, h, this.nameTagScratch);
+      node.nameTag.update(cam, this.nameTagScratch);
     }
   }
 

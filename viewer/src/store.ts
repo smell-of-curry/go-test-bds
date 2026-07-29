@@ -3,6 +3,7 @@ import {
   type Block,
   type CaptureFrame,
   type ChatFrame,
+  type BlockEntityWire,
   type Column,
   type DeltaFrame,
   type Entity,
@@ -44,6 +45,8 @@ export interface StoredColumn {
   biomePalette: Array<string | number>;
   /** length 256 surface biome indices, or null when omitted. */
   biomeIndices: Uint8Array | null;
+  /** Dedicated-geometry block entities in this column. */
+  blockEntities: BlockEntityWire[];
 }
 
 export interface WorldState {
@@ -138,6 +141,7 @@ function decodeColumn(col: Column): StoredColumn {
     sections,
     biomePalette: col.biomePalette ? [...col.biomePalette] : [],
     biomeIndices: decodeColumnBiomes(col.biomes),
+    blockEntities: col.blockEntities ? [...col.blockEntities] : [],
   };
 }
 

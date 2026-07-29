@@ -6,6 +6,7 @@ import {
   FALLBACK_TEXTURE,
   type TerrainAtlas,
 } from "./atlas";
+import { BlockGeometryCache } from "./customGeometry";
 import type { BiomeAt, CustomGeometryHook } from "./types";
 import {
   mergeBlocksLayers,
@@ -92,6 +93,27 @@ export type {
   PaletteEntryCoverage,
   PaletteMissReason,
 } from "./palette";
+export {
+  effectiveComponents,
+  evalPermutationCondition,
+  mergeComponents,
+  transformAboutBlockCenter,
+  clearPermutationCache,
+  materialForKey,
+  materialFlags,
+} from "./permutations";
+export {
+  BlockGeometryCache,
+  emitCustomBlockTris,
+  blockGeometryPathCandidates,
+  renderClassFromComponents,
+} from "./customGeometry";
+export {
+  blockEntityKind,
+  meshBlockEntity,
+  stripFormatCodes,
+  indexBlockEntities,
+} from "./blockEntities";
 export type {
   BiomeAt,
   CubeModel,
@@ -131,6 +153,7 @@ export interface TexturedMesherBundle {
   atlas: TerrainAtlas;
   resolver: BlockModelResolver;
   client: AssetClient;
+  geometryCache: BlockGeometryCache;
   /**
    * Bind/replace network palette and rebuild the atlas so new short-names pack.
    * Existing call sites that never pass registries stay valid (no-op-capable).
@@ -202,9 +225,13 @@ export async function createTexturedMesher(
     terrain: terrainMerged,
     flipbooks: flipbooksMerged,
   });
+  const geometryCache = new BlockGeometryCache(client);
+  await geometryCache.preloadFromRegistries(opts.registries ?? null);
+  resolver.setGeometryCache(geometryCache);
   const mesher = new TexturedMesher(atlas, resolver, {
     biomeAt: opts.biomeAt ?? null,
     customGeometry: opts.customGeometry ?? null,
+    geometryCache,
     smoothLighting: opts.smoothLighting,
   });
 
@@ -214,8 +241,12 @@ export async function createTexturedMesher(
     atlas,
     resolver,
     client,
+    geometryCache,
     async applyRegistries(registries: Registries | null): Promise<void> {
       resolver.setRegistries(registries);
+      await geometryCache.preloadFromRegistries(registries);
+      resolver.setGeometryCache(geometryCache);
+      mesher.setGeometryCache(geometryCache);
       const nextNames = resolver.allTextureNames();
       if (opts.extraTextures) {
         for (const n of opts.extraTextures) nextNames.add(n);

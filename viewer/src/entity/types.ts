@@ -50,6 +50,14 @@ export interface RenderControllerArrays {
   textures: Record<string, string[]>;
 }
 
+/** Molang-valued RGBA channel block on a render controller. */
+export interface RenderControllerColor {
+  r?: string | number;
+  g?: string | number;
+  b?: string | number;
+  a?: string | number;
+}
+
 /** Parsed `controller.render.*` entry (common subset). */
 export interface RenderControllerDef {
   name: string;
@@ -58,6 +66,10 @@ export interface RenderControllerDef {
   materials: Array<Record<string, string>>;
   partVisibility: Array<Record<string, string | boolean | number>>;
   arrays: RenderControllerArrays;
+  color?: RenderControllerColor;
+  overlayColor?: RenderControllerColor;
+  onFireColor?: RenderControllerColor;
+  isHurtColor?: RenderControllerColor;
 }
 
 /** Inputs that affect geometry / texture selection (cache key). */
@@ -78,4 +90,15 @@ export interface ResolvedControllerPass {
   texturePaths: string[];
   /** Bone name → visible. Missing → default visible. */
   partVisibility: Map<string, boolean>;
+  /** Resolved material name for `*` (or first entry); used by the material layer. */
+  materialName: string;
+  /** Evaluated / composed RC tint (color + overlays). */
+  tint: { r: number; g: number; b: number; a: number };
+  /** Raw colour slots (for per-frame re-eval when hurt/fire queries change). */
+  colorExprs: {
+    color?: RenderControllerColor;
+    overlayColor?: RenderControllerColor;
+    onFireColor?: RenderControllerColor;
+    isHurtColor?: RenderControllerColor;
+  };
 }
