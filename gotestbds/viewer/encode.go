@@ -916,8 +916,8 @@ func (e *encoder) encodeUI(a *actor.Actor) UI {
 	if f, ok := a.LastForm(); ok {
 		ui.Form = &UIForm{
 			Type:    formTypeName(f.Type()),
-			Title:   f.Title(),
-			Content: f.ContentText(),
+			Title:   resolveLangLines(flattenRawtext(f.Title())),
+			Content: resolveLangLines(flattenRawtext(f.ContentText())),
 			Buttons: formButtons(f),
 		}
 	}
@@ -934,11 +934,11 @@ func (e *encoder) encodeUI(a *actor.Actor) UI {
 	if d, ok := a.LastDialogue(); ok {
 		buttons := make([]string, 0, len(d.Buttons()))
 		for _, b := range d.Buttons() {
-			buttons = append(buttons, b.Text())
+			buttons = append(buttons, resolveLangLines(flattenRawtext(b.Text())))
 		}
 		ui.Dialogue = &UIDialogue{
-			NPCName: d.Title(),
-			Text:    d.Text(),
+			NPCName: resolveLangLines(flattenRawtext(d.Title())),
+			Text:    resolveLangLines(flattenRawtext(d.Text())),
 			Buttons: buttons,
 		}
 	}
@@ -946,12 +946,12 @@ func (e *encoder) encodeUI(a *actor.Actor) UI {
 		if isProtocolChatNoise(m.Text) {
 			continue
 		}
-		ui.Messages = append(ui.Messages, flattenRawtext(m.Text))
+		ui.Messages = append(ui.Messages, resolveLangLines(flattenRawtext(m.Text)))
 	}
 	st := a.ScreenTitle()
-	ui.Title = filterHudControlText(flattenRawtext(st.Title))
-	ui.Subtitle = filterHudControlText(flattenRawtext(st.Subtitle))
-	ui.ActionBar = filterHudControlText(flattenRawtext(st.ActionBar))
+	ui.Title = resolveLangLines(filterHudControlText(flattenRawtext(st.Title)))
+	ui.Subtitle = resolveLangLines(filterHudControlText(flattenRawtext(st.Subtitle)))
+	ui.ActionBar = resolveLangLines(filterHudControlText(flattenRawtext(st.ActionBar)))
 	// Omit default fade timings when nothing is on screen — keeps empty UI `{}`
 	// on the wire instead of always shipping 10/70/20.
 	if st.Title != "" || st.Subtitle != "" || st.ActionBar != "" {
@@ -979,12 +979,15 @@ func formButtons(f *actor.Form) []string {
 	if buttons, ok := f.MenuFormButtons(); ok {
 		out := make([]string, len(buttons))
 		for i, b := range buttons {
-			out[i] = b.Text()
+			out[i] = resolveLangLines(flattenRawtext(b.Text()))
 		}
 		return out
 	}
 	if yes, no, ok := f.ModalFormButtons(); ok {
-		return []string{yes.Text(), no.Text()}
+		return []string{
+			resolveLangLines(flattenRawtext(yes.Text())),
+			resolveLangLines(flattenRawtext(no.Text())),
+		}
 	}
 	return nil
 }

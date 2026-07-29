@@ -56,6 +56,9 @@ type Hub struct {
 
 	arts   *artifactStore
 	assets *assets.Manager
+
+	langMu    sync.Mutex
+	langStack *assets.Stack // stack the lang table was last built from
 }
 
 type botMeta struct {
@@ -239,6 +242,22 @@ func (h *Hub) stream(name string) *Stream {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return h.streams[name]
+}
+
+// refreshLang (re)builds the translate table when the pack stack changed.
+// Cheap when it has not: one pointer compare under its own lock.
+func (h *Hub) refreshLang() {
+	st := h.assetsStack()
+	if st == nil {
+		return
+	}
+	h.langMu.Lock()
+	defer h.langMu.Unlock()
+	if st == h.langStack {
+		return
+	}
+	h.langStack = st
+	installLangTable(st)
 }
 
 func (h *Hub) streamNames() []string {

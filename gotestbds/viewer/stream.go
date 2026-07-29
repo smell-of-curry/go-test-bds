@@ -779,7 +779,7 @@ func (s *Stream) emitHudEvents(a *actor.Actor) {
 			Type: "chat",
 			Bot:  s.name,
 			Tick: tick,
-			Text: flattenRawtext(m.Text),
+			Text: resolveLangLines(flattenRawtext(m.Text)),
 		}
 		data, _ := json.Marshal(cf)
 		s.emitRaw("chat", data)
@@ -791,9 +791,9 @@ func (s *Stream) emitHudEvents(a *actor.Actor) {
 		st := a.ScreenTitle()
 		// The event lane must sanitize like encodeUI: run 15 shipped raw
 		// "&_phone:" tokens and rawtext JSON here, and the HUD drew them.
-		title := filterHudControlText(flattenRawtext(st.Title))
-		subtitle := filterHudControlText(flattenRawtext(st.Subtitle))
-		actionBar := filterHudControlText(flattenRawtext(st.ActionBar))
+		title := resolveLangLines(filterHudControlText(flattenRawtext(st.Title)))
+		subtitle := resolveLangLines(filterHudControlText(flattenRawtext(st.Subtitle)))
+		actionBar := resolveLangLines(filterHudControlText(flattenRawtext(st.ActionBar)))
 		rawEmpty := st.Title == "" && st.Subtitle == "" && st.ActionBar == ""
 		if !rawEmpty && title == "" && subtitle == "" && actionBar == "" {
 			// Pure control-token traffic: a real client's HUD would not change,

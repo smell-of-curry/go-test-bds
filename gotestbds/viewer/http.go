@@ -44,6 +44,9 @@ func (h *Hub) handleStream(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unknown bot", http.StatusNotFound)
 		return
 	}
+	// By the time a viewer attaches, the bot's packs are ingested — the lang
+	// table can resolve translate keys the way a real client would.
+	h.refreshLang()
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {

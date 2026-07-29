@@ -46,9 +46,10 @@ type rawtextMessage struct {
 }
 
 // flattenRawtext renders Bedrock rawtext JSON as readable text: "text" parts
-// verbatim, "translate" parts as their key (the bot has no .lang table to
-// resolve them), and "with" substitution args appended space-separated after
-// their key. Anything that is not a rawtext envelope passes through untouched.
+// verbatim, "translate" parts through the pack-stack lang table when one is
+// installed (falling back to the key with "with" substitution args appended
+// space-separated). Anything that is not a rawtext envelope passes through
+// untouched.
 // Without this, a title like the battle sidebar renders as a wall of JSON in
 // the recording.
 //
@@ -76,8 +77,15 @@ func flattenRawtext(text string) string {
 		if part.Translate == "" {
 			continue
 		}
+		args := rawtextWithArgs(part.With)
+		// A pack-stack lang table renders the key the way a client would;
+		// without one the key itself plus space-joined args stays readable.
+		if resolved, ok := translateKey(part.Translate, args); ok {
+			b.WriteString(resolved)
+			continue
+		}
 		b.WriteString(part.Translate)
-		for _, arg := range rawtextWithArgs(part.With) {
+		for _, arg := range args {
 			if arg == "" {
 				continue
 			}
