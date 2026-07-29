@@ -74,6 +74,8 @@ export class SnapshotStream {
       "chat",
       "title",
       "particle",
+      "phud",
+      "formHover",
     ] as const) {
       es.addEventListener(type, (ev: MessageEvent<string>) => {
         try {

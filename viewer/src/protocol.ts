@@ -2,12 +2,26 @@
 export const SCHEMA_VERSION = 1;
 
 export type FrameType =
-  "hello" | "keyframe" | "delta" | "mark" | "capture" | "chat" | "title";
+  | "hello"
+  | "keyframe"
+  | "delta"
+  | "mark"
+  | "capture"
+  | "chat"
+  | "title"
+  | "phud"
+  | "formHover";
 
 export type ColumnReceiptState = "requested" | "partial" | "complete";
 
 export type MarkPhase =
-  "runStart" | "suiteStart" | "testStart" | "testEnd" | "suiteEnd" | "runEnd";
+  | "runStart"
+  | "suiteStart"
+  | "testStart"
+  | "testEnd"
+  | "suiteEnd"
+  | "runEnd"
+  | "waypoint";
 
 export interface Block {
   name: string;
@@ -158,6 +172,11 @@ export interface UI {
     title: string;
     content: string;
     buttons: string[];
+    /**
+     * Per-button icon (pack texture path or URL), parallel to `buttons`;
+     * `""` for buttons without one. Absent when no button has an image.
+     */
+    buttonImages?: string[];
   } | null;
   container?: {
     type: string;
@@ -406,6 +425,28 @@ export interface ParticleFrame {
   entityId?: number;
 }
 
+/**
+ * Event-lane raw PHUD write: one `&_<token>:<value>` SetTitle, token split
+ * off and the value lang-resolved. `value === ""` clears/hides the element.
+ */
+export interface PhudFrame {
+  v: number;
+  type: "phud";
+  bot: string;
+  tick: number;
+  token: string;
+  value: string;
+}
+
+/** Event-lane form-button hover affordance (presentation only). */
+export interface FormHoverFrame {
+  v: number;
+  type: "formHover";
+  bot: string;
+  tick: number;
+  index: number;
+}
+
 export type Frame =
   | HelloFrame
   | KeyframeFrame
@@ -414,7 +455,9 @@ export type Frame =
   | CaptureFrame
   | ChatFrame
   | TitleFrame
-  | ParticleFrame;
+  | ParticleFrame
+  | PhudFrame
+  | FormHoverFrame;
 
 export function columnKey(x: number, z: number): string {
   return `${x},${z}`;

@@ -1,0 +1,528 @@
+/*
+ * JSON-UI-faithful HUD overlay. Layout mirrors the pack's ui/*.json
+ * (phud/sidebar.json, phud/playerPing.json, phud/currency.json,
+ * phud/battle_wait.json, pokemon/attack.json, server_form.json) with pack
+ * textures fetched over /asset; every image has a flat-colour fallback so a
+ * fixture run with no pack still renders a deterministic layout.
+ *
+ * 1 JSON-UI px ≈ 2 CSS px at the 1280×720 capture size (--jh-px).
+ */
+
+#json-hud {
+  --jh-px: 2px;
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 4;
+  font-family: "Minecraft", ui-sans-serif, system-ui, "Segoe UI", sans-serif;
+  color: #fff;
+}
+
+#json-hud [hidden] {
+  display: none !important;
+}
+
+.jh-glyph {
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  vertical-align: -0.12em;
+  background-repeat: no-repeat;
+  image-rendering: pixelated;
+}
+
+/* ---- top-left ping pill (ui/phud/playerPing.json) ---- */
+.jh-ping {
+  position: absolute;
+  top: 0;
+  left: 0;
+  padding: calc(var(--jh-px) * 1) calc(var(--jh-px) * 3);
+  background: rgba(0, 0, 0, 0.7);
+  font-size: calc(var(--jh-px) * 8);
+  text-shadow: calc(var(--jh-px) * 0.5) calc(var(--jh-px) * 0.5) 0 #383838;
+  white-space: nowrap;
+}
+
+/* ---- top-center banner + currency (ui/phud/currency.json) ---- */
+.jh-topbar {
+  position: absolute;
+  top: calc(var(--jh-px) * 2);
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: calc(var(--jh-px) * 3);
+  align-items: flex-start;
+}
+
+.jh-banner,
+.jh-currency {
+  padding: calc(var(--jh-px) * 2) calc(var(--jh-px) * 6);
+  background: rgba(0, 0, 0, 0.6);
+  border-radius: calc(var(--jh-px) * 1);
+  font-size: calc(var(--jh-px) * 8);
+  text-shadow: calc(var(--jh-px) * 0.5) calc(var(--jh-px) * 0.5) 0 #383838;
+  white-space: nowrap;
+}
+
+/* ---- waypoint locator strip ---- */
+.jh-waypoint {
+  position: absolute;
+  top: calc(var(--jh-px) * 16);
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: calc(var(--jh-px) * 1);
+}
+
+.jh-waypoint-track {
+  width: calc(var(--jh-px) * 120);
+  height: calc(var(--jh-px) * 5);
+  background: rgba(0, 0, 0, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: calc(var(--jh-px) * 2.5);
+  position: relative;
+}
+
+.jh-waypoint-dot {
+  position: absolute;
+  top: 50%;
+  width: calc(var(--jh-px) * 4);
+  height: calc(var(--jh-px) * 4);
+  transform: translate(-50%, -50%);
+  background: #4fc3f7;
+  border-radius: 50%;
+  box-shadow: 0 0 calc(var(--jh-px) * 2) #4fc3f7;
+}
+
+.jh-waypoint-arrow {
+  width: 0;
+  height: 0;
+  border-left: calc(var(--jh-px) * 4) solid transparent;
+  border-right: calc(var(--jh-px) * 4) solid transparent;
+  border-bottom: calc(var(--jh-px) * 6) solid #fff;
+}
+
+.jh-waypoint-text {
+  font-size: calc(var(--jh-px) * 7);
+  text-shadow: 1px 1px 0 #000;
+  white-space: nowrap;
+}
+
+/* ---- right-edge Pokémon sidebar (ui/phud/sidebar.json) ---- */
+.jh-sidebar {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: calc(var(--jh-px) * 110);
+  display: flex;
+  flex-direction: column;
+}
+
+.jh-slot {
+  position: relative;
+  height: calc(var(--jh-px) * 32);
+}
+
+/* data plate: name + stats + xp bar, right-aligned toward the ball */
+.jh-plate {
+  position: absolute;
+  right: calc(var(--jh-px) * 26);
+  top: calc(var(--jh-px) * 2.5);
+  left: 0;
+  height: calc(var(--jh-px) * 27);
+  background-color: rgba(20, 26, 38, 0.72);
+  background-size: 100% 100%;
+  border-radius: calc(var(--jh-px) * 2);
+  padding: calc(var(--jh-px) * 3) calc(var(--jh-px) * 4) 0;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.jh-slot-name {
+  font-size: calc(var(--jh-px) * 7);
+  line-height: 1.1;
+  text-shadow: 1px 1px 0 #222;
+  white-space: nowrap;
+}
+
+.jh-slot-stats {
+  font-size: calc(var(--jh-px) * 5);
+  line-height: 1.2;
+  text-shadow: 1px 1px 0 #222;
+  white-space: nowrap;
+}
+
+.jh-slot-xp {
+  margin-top: calc(var(--jh-px) * 1);
+  width: calc(var(--jh-px) * 62);
+  height: calc(var(--jh-px) * 2);
+  background: rgba(0, 0, 0, 0.8);
+  overflow: hidden;
+}
+
+.jh-slot-xp-fill {
+  height: 100%;
+  background: rgb(64, 153, 255);
+}
+
+/* ball + sprite at the right edge */
+.jh-ball {
+  position: absolute;
+  right: calc(var(--jh-px) * 0);
+  top: calc(var(--jh-px) * 2);
+  width: calc(var(--jh-px) * 26);
+  height: calc(var(--jh-px) * 26);
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+  image-rendering: pixelated;
+}
+
+.jh-ball.jh-ball-fallback {
+  border-radius: 50%;
+  background: linear-gradient(#e33 48%, #1c1c1c 48%, #1c1c1c 56%, #f4f4f4 56%);
+  border: calc(var(--jh-px) * 0.5) solid #1c1c1c;
+  box-sizing: border-box;
+}
+
+.jh-ball-sprite {
+  position: absolute;
+  inset: 0;
+  transform: translateY(-15%);
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+  image-rendering: pixelated;
+}
+
+.jh-slot.selected .jh-ball {
+  outline: calc(var(--jh-px) * 1) solid #fff;
+  outline-offset: calc(var(--jh-px) * 0.5);
+  border-radius: 50%;
+}
+
+/* ---- bottom battle log (ui/phud/battle_wait.json) ---- */
+.jh-battlelog {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 30%;
+  background: rgb(191, 43, 54);
+}
+
+.jh-battlelog-inner {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 85%;
+  height: 95%;
+  background: rgb(35, 32, 32);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding-top: calc(var(--jh-px) * 4);
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.jh-battlelog-line {
+  font-size: calc(var(--jh-px) * 8);
+  line-height: 1.35;
+  text-align: center;
+  text-shadow: 1px 1px 0 #000;
+}
+
+/* ---- bottom battle action bar (ui/pokemon/attack.json) ---- */
+.jh-battlebar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 30%;
+  background: rgb(191, 43, 54);
+  display: flex;
+}
+
+.jh-battle-tabs {
+  width: calc(var(--jh-px) * 42);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: calc(var(--jh-px) * 2) 0;
+  box-sizing: border-box;
+  background: rgb(35, 32, 32);
+}
+
+.jh-battle-tab {
+  flex: 1;
+  margin: calc(var(--jh-px) * 1);
+  background-color: #565a5f;
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+  border-radius: 0 calc(var(--jh-px) * 6) calc(var(--jh-px) * 6) 0;
+  position: relative;
+}
+
+.jh-battle-tab.disabled {
+  filter: grayscale(1) brightness(0.55);
+}
+
+.jh-battle-tab.hovered {
+  outline: calc(var(--jh-px) * 1) solid #fff;
+  filter: brightness(1.25);
+}
+
+.jh-battle-tab .jh-tab-glyph {
+  position: absolute;
+  inset: 15%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: calc(var(--jh-px) * 10);
+}
+
+.jh-battle-center {
+  flex: 1;
+  position: relative;
+  background: rgb(35, 32, 32);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.jh-battle-moves {
+  display: grid;
+  grid-template-columns: repeat(2, calc(var(--jh-px) * 132));
+  grid-auto-rows: calc(var(--jh-px) * 30);
+  gap: calc(var(--jh-px) * 6) calc(var(--jh-px) * 26);
+}
+
+.jh-move {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+.jh-move-plate {
+  flex: 1;
+  background-color: #e7e3df;
+  background-size: 100% 100%;
+  border: calc(var(--jh-px) * 1) solid #6f6a66;
+  border-radius: calc(var(--jh-px) * 1);
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  color: #2b2b2b;
+  font-size: calc(var(--jh-px) * 7);
+  text-align: center;
+}
+
+.jh-move.disabled .jh-move-plate {
+  filter: grayscale(0.6) brightness(0.75);
+}
+
+.jh-move.hovered .jh-move-plate {
+  outline: calc(var(--jh-px) * 1.5) solid #fff;
+  background-color: #f7f5f2;
+}
+
+.jh-move-type {
+  position: absolute;
+  width: calc(var(--jh-px) * 10);
+  height: calc(var(--jh-px) * 10);
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+  image-rendering: pixelated;
+}
+
+.jh-move-type.left {
+  left: calc(var(--jh-px) * 4);
+}
+
+.jh-move-type.right {
+  right: calc(var(--jh-px) * 4);
+}
+
+.jh-move-type-fallback {
+  border-radius: 50%;
+  background-color: #9aa0a6;
+}
+
+.jh-move-pp {
+  height: calc(var(--jh-px) * 6);
+  margin-top: calc(var(--jh-px) * 1);
+  background: #17181c;
+  position: relative;
+  overflow: hidden;
+}
+
+.jh-move-pp-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: rgb(43, 121, 255);
+}
+
+.jh-move-pp-text {
+  position: relative;
+  z-index: 1;
+  text-align: center;
+  font-size: calc(var(--jh-px) * 5);
+  line-height: calc(var(--jh-px) * 6);
+  color: #fff;
+  text-shadow: 1px 1px 0 #000;
+}
+
+.jh-battle-ball {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: calc(var(--jh-px) * 34);
+  height: calc(var(--jh-px) * 34);
+  border-radius: 50%;
+  background-color: #3b3b3b;
+  background-size: cover;
+  background-position: center;
+  border: calc(var(--jh-px) * 2) solid rgb(191, 43, 54);
+  box-shadow: 0 0 0 calc(var(--jh-px) * 1) #1c1c1c;
+}
+
+.jh-battle-ball.hovered {
+  outline: calc(var(--jh-px) * 1.5) solid #fff;
+}
+
+.jh-battle-info {
+  width: calc(var(--jh-px) * 72);
+  background: rgb(191, 43, 54);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: calc(var(--jh-px) * 5);
+  padding: 0 calc(var(--jh-px) * 4);
+  box-sizing: border-box;
+}
+
+.jh-battle-info-line {
+  font-size: calc(var(--jh-px) * 6.5);
+  color: #ffecec;
+  text-align: center;
+  text-shadow: 1px 1px 0 rgba(0, 0, 0, 0.5);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---- centered vanilla-style server form (ui/server_form.json) ---- */
+.jh-form {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: calc(var(--jh-px) * 240);
+  max-height: 84%;
+  background: #c6c6c6;
+  border: calc(var(--jh-px) * 1.5) solid #1a1a1a;
+  box-shadow:
+    inset calc(var(--jh-px) * 1) calc(var(--jh-px) * 1) 0 #ffffff,
+    inset calc(var(--jh-px) * -1) calc(var(--jh-px) * -1) 0 #555555;
+  display: flex;
+  flex-direction: column;
+  font-size: calc(var(--jh-px) * 7);
+}
+
+.jh-form-title {
+  position: relative;
+  padding: calc(var(--jh-px) * 3) calc(var(--jh-px) * 10);
+  color: #313233;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.jh-form-close {
+  position: absolute;
+  right: calc(var(--jh-px) * 3);
+  top: 50%;
+  transform: translateY(-50%);
+  color: #313233;
+  font-size: calc(var(--jh-px) * 7);
+}
+
+.jh-form-body {
+  margin: 0 calc(var(--jh-px) * 3) calc(var(--jh-px) * 3);
+  background: #141414;
+  border: calc(var(--jh-px) * 1) solid #373737;
+  padding: calc(var(--jh-px) * 4);
+  overflow-y: auto;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--jh-px) * 3);
+}
+
+.jh-form-content {
+  color: #e8e8e8;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.jh-form-row {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--jh-px) * 3);
+}
+
+.jh-form-row-icon {
+  width: calc(var(--jh-px) * 14);
+  height: calc(var(--jh-px) * 14);
+  flex: none;
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+  image-rendering: pixelated;
+}
+
+.jh-form-button {
+  flex: 1;
+  min-height: calc(var(--jh-px) * 14);
+  background: #d0d0d0;
+  border: calc(var(--jh-px) * 1) solid #1a1a1a;
+  box-shadow:
+    inset calc(var(--jh-px) * 0.5) calc(var(--jh-px) * 0.5) 0 #ffffff,
+    inset calc(var(--jh-px) * -0.5) calc(var(--jh-px) * -0.5) 0 #58585a;
+  color: #1e1e1f;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: calc(var(--jh-px) * 1) calc(var(--jh-px) * 3);
+  box-sizing: border-box;
+}
+
+.jh-form-button.hovered {
+  background: #ececec;
+  outline: calc(var(--jh-px) * 1) solid #fff;
+  outline-offset: calc(var(--jh-px) * -0.5);
+}
+
+.jh-form-buttons-row {
+  display: flex;
+  gap: calc(var(--jh-px) * 4);
+}
+
+/* the default view owns forms — the top-right debug panel hides unless
+   ?debugForms=1 (main.ts toggles this class) */
+body.jh-owns-forms #ui-panel {
+  display: none !important;
+}
