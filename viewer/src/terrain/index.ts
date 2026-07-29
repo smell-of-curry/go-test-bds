@@ -52,6 +52,7 @@ export {
 export {
   BlockModelResolver,
   isAir,
+  isInvisible,
   isWaterlogFluid,
   facingToFrontFace,
   liquidFlowYaw,

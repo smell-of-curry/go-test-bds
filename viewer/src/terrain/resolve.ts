@@ -177,7 +177,7 @@ export class BlockModelResolver {
    * @returns render class.
    */
   renderClassOf(block: Block): RenderClass {
-    if (isAir(block)) return "air";
+    if (isInvisible(block)) return "air";
     const n = block.name;
     if (LIQUID_NAMES.has(n)) return "liquid";
     if (TRANSLUCENT_NAMES.has(n) || n.includes("stained_glass"))
@@ -243,7 +243,7 @@ export class BlockModelResolver {
     void x;
     void y;
     void z;
-    if (isAir(block)) return null;
+    if (isInvisible(block)) return null;
     if (this.renderClassOf(block) === "liquid") return null;
 
     // Unnamed rid → magenta (bug marker).
@@ -449,6 +449,35 @@ export class BlockModelResolver {
 export function isAir(block: Block | undefined): boolean {
   if (!block) return true;
   return block.name === "minecraft:air" || block.name === "air";
+}
+
+/**
+ * Blocks a real client draws nothing for (outside creative/held-item overlays):
+ * light blocks, barriers, structure void, invisible bedrock.
+ */
+const INVISIBLE_NAMES = new Set([
+  "light_block",
+  "barrier",
+  "structure_void",
+  "invisible_bedrock",
+]);
+
+/**
+ * Whether the mesher should emit nothing for this block (treated like air for
+ * face emission and occlusion). Light levels are unaffected — light rides the
+ * wire from the Go bot, which propagates emission itself.
+ *
+ * @param block - Block.
+ * @returns true for air and invisible-in-client blocks.
+ */
+export function isInvisible(block: Block | undefined): boolean {
+  if (isAir(block)) return true;
+  const name = block!.name.startsWith("minecraft:")
+    ? block!.name.slice("minecraft:".length)
+    : block!.name;
+  // 1.21+ flattens light levels into ids: light_block_0 … light_block_15.
+  if (name.startsWith("light_block")) return true;
+  return INVISIBLE_NAMES.has(name);
 }
 
 /**

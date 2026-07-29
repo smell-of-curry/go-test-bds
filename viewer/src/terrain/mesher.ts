@@ -17,7 +17,12 @@ import {
 } from "./customGeometry";
 import { aoFactor, combinedLight, FACE_SHADE, lightBrightness } from "./light";
 import { createTerrainMaterial } from "./material";
-import { isAir, isWaterlogFluid, type BlockModelResolver } from "./resolve";
+import {
+  isAir,
+  isInvisible,
+  isWaterlogFluid,
+  type BlockModelResolver,
+} from "./resolve";
 import type {
   AtlasUv,
   BiomeAt,
@@ -223,7 +228,7 @@ export class TexturedMesher implements Mesher {
         for (let y = 0; y < 16; y++) {
           const pi = section.indices[sectionIndex(x, y, z)]!;
           const block = section.palette[pi];
-          if (!block || isAir(block)) {
+          if (!block || isInvisible(block)) {
             this.emitLayer1(
               terrainSec,
               x,
