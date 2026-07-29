@@ -210,11 +210,16 @@ all-air sub-chunk case.
 - [x] Resolve translate keys the way a client would. The pack stack ships
       `texts/en_US.lang`; `lang.go` merges it per key in stack order (later
       packs win) and `flattenRawtext` substitutes `%1`–`%9`/`%s` from the
-      rawtext `with` args. Whole-key lines in form buttons, dialogue, titles
-      and chat resolve too (`resolveLangLines`) — substring translation is
-      deliberately avoided so ordinary text mentioning a key-shaped word is
-      never corrupted. No table or unknown key keeps the readable
-      key-plus-args fallback.
+      rawtext `with` args (`%%` collapses to a literal percent; array args may
+      be numeric; nested-rawtext args resolve recursively). Whole-key lines in
+      form buttons, dialogue, titles and chat resolve too (`resolveLangLines`)
+      — substring translation is deliberately avoided so ordinary text
+      mentioning a key-shaped word is never corrupted. No table or unknown key
+      keeps the readable key-plus-args fallback. One trap already hit:
+      `actor.Text` used to flatten rawtext at packet-decode time, discarding
+      `with` args before this table ever saw them — envelopes whose translate
+      parts carry args now pass through as raw JSON for the viewer to resolve
+      ("Accuracy: %s%" stayed unfilled on every battle form until then).
 
 **Check:** `gotestbds/viewer/encode_test.go` drives a synthetic `World` through
 add/modify/remove and asserts the delta sequence reconstructs the same state;
@@ -304,7 +309,10 @@ suites are waiting on.
       indefinitely — runs 13–15 lost their opening shot to it), Chromium runs
       with backgrounding/timer-throttling disabled, and `waitForFunction`
       polls on a timer rather than rAF. The capture error message carries the
-      underlying Playwright error, not a summary that hides it.
+      underlying Playwright error, not a summary that hides it. Short-lived
+      UI beats the grace with the `noSettle` screenshot option (SDK →
+      capture frame → harness): a ~4s title card loses the race against a
+      10s settle wait, so the card shot fires the moment its tick renders.
 
 **Check:** `viewer/tests/capture.spec.ts` runs the harness against a fake bot
 server and asserts a PNG (magic bytes and all) of the requested size at a tick at
