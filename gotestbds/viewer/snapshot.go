@@ -428,6 +428,30 @@ type TitleFrame struct {
 	Clear bool `json:"clear,omitempty"`
 }
 
+// PhudFrame is one raw PokeBedrock HUD token write ("&_<token>:<value>"
+// smuggled through SetTitle) on the event lane. The value is lang-resolved
+// like every other lane; packed payloads (sidebar) arrive verbatim for the
+// client to parse. The filtered title lane is unaffected.
+type PhudFrame struct {
+	V     int    `json:"v"`
+	Type  string `json:"type"`
+	Bot   string `json:"bot"`
+	Tick  uint64 `json:"tick"`
+	Token string `json:"token"`
+	Value string `json:"value"`
+}
+
+// FormHoverFrame highlights one open-form button in the viewer — the hover
+// affordance a real client shows while the cursor rests on a button. Cleared
+// client-side when the form responds or closes.
+type FormHoverFrame struct {
+	V     int    `json:"v"`
+	Type  string `json:"type"`
+	Bot   string `json:"bot"`
+	Tick  uint64 `json:"tick"`
+	Index int    `json:"index"`
+}
+
 // ParticleFrame is one SpawnParticleEffect on the event lane.
 type ParticleFrame struct {
 	V         int        `json:"v"`
@@ -447,6 +471,10 @@ type UIForm struct {
 	Title   string   `json:"title"`
 	Content string   `json:"content"`
 	Buttons []string `json:"buttons,omitempty"`
+	// ButtonImages carries each menu button's icon (pack texture path or URL),
+	// parallel to Buttons; "" for buttons without one. Omitted when no button
+	// has an image. Additive field — not a schema bump.
+	ButtonImages []string `json:"buttonImages,omitempty"`
 }
 
 // UIContainer is an open block/entity inventory.
