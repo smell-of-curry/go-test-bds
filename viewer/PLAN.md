@@ -420,13 +420,13 @@ path-traversal coverage. Endpoints documented in [`PROTOCOL.md`](PROTOCOL.md).
 - [x] Implement liquids: surface geometry, flow direction from state, animated
       texture, and the layer-1 waterlogging the world already tracks through
       `World.Liquid`.
-- [ ] Implement biome tinting for grass, foliage and water. **Go half landed
+- [x] Implement biome tinting for grass, foliage and water. **Go half landed
       (Stage 10a):** request-mode `LevelChunk` biomes decode via dragonfly
       `NetworkDecodeBuffer(..., 0, ...)`, and complete columns export a 16×16
       surface `biomePalette` + `biomes` on the snapshot (see `PROTOCOL.md`).
-      **The renderer's half is done** — tinting runs through a `biomeAt`
-      lookup and degrades to untinted — wire the new column fields into that
-      lookup to finish.
+      **Renderer half landed (Stage 10b):** the column fields feed the
+      `biomeAt` lookup (`terrain/biome.ts`, store decode) and tinting degrades
+      to untinted when biomes are absent.
 - [x] Render block entities that the client draws with dedicated geometry rather
       than from the atlas: chests, signs, banners, beds, skulls. Column
       `blockEntities` on the wire (sign text); chest/sign shaped boxes + sign
