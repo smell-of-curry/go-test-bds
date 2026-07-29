@@ -27,11 +27,14 @@ export interface ClickThroughOptions {
    */
   until: () => boolean | Promise<boolean>;
   /**
-   * Which button to press on each form: a zero-based index, or a label matched
-   * as in {@link Bot.clickButton}. Defaults to the first button, which is the
-   * "continue" button in most dialogue chains.
+   * Which button to press on each form: a zero-based index, a label matched
+   * as in {@link Bot.clickButton}, or a function choosing either per form —
+   * for chains where the right answer depends on the form shown (a battle
+   * loop picking a damaging move, but a plain "continue" on info screens).
+   * Defaults to the first button, which is the "continue" button in most
+   * dialogue chains.
    */
-  button?: number | string;
+  button?: number | string | ((form: OpenForm) => number | string);
   /**
    * Safety valve for a chain that loops forever, e.g. a form that re-shows
    * itself because the addon rejected the answer. Defaults to 20.
@@ -600,8 +603,9 @@ export class Bot {
 
       onForm?.(form);
       answered.push(form);
-      if (typeof button === "number") await this.clickButtonAt(button);
-      else await this.clickButton(button);
+      const choice = typeof button === "function" ? button(form) : button;
+      if (typeof choice === "number") await this.clickButtonAt(choice);
+      else await this.clickButton(choice);
     }
 
     return answered;

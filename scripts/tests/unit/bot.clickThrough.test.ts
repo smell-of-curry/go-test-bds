@@ -86,6 +86,35 @@ describe("Bot.clickThrough", () => {
     );
   });
 
+  it("lets a button function choose per form", async () => {
+    const bot = new Bot(createFakePlayer("FormBot") as unknown as Player);
+    const battle: OpenForm = {
+      type: "menu",
+      title: "battle",
+      buttons: [{ text: "growl" }, { text: "tackle" }],
+    };
+    const info: OpenForm = {
+      type: "menu",
+      title: "info",
+      buttons: [{ text: "Continue" }],
+    };
+    const queue = [battle, info];
+    const clicked: number[] = [];
+
+    bot.waitForForm = async () => queue.shift()!;
+    bot.clickButtonAt = async (index: number) => {
+      clicked.push(index);
+      return { index, text: "x" };
+    };
+
+    await bot.clickThrough({
+      until: () => clicked.length >= 2,
+      button: (form) => Math.min(1, (form.buttons?.length ?? 1) - 1),
+    });
+
+    assert.deepEqual(clicked, [1, 0]);
+  });
+
   it("calls onForm for each answered form", async () => {
     const bot = new Bot(createFakePlayer("FormBot") as unknown as Player);
     const queue = [menu("A"), menu("B")];
