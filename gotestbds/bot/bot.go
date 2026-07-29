@@ -201,6 +201,7 @@ func (b *Bot) registerHandlers() {
 		packet.IDCorrectPlayerMovePrediction: &CorrectPlayerMovePredictionHandler{},
 		packet.IDRemoveActor:                 &RemoveActorHandler{},
 		packet.IDActorEvent:                  &ActorEventHandler{},
+		packet.IDAnimate:                     &AnimateHandler{},
 		packet.IDChangeDimension:             &ChangeDimensionHandler{},
 		packet.IDChunkRadiusUpdated:          &ChunkRadiusUpdatedHandler{},
 		packet.IDNetworkChunkPublisherUpdate: &NetworkChunkPublisherUpdateHandler{},

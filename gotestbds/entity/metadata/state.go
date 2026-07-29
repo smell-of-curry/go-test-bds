@@ -19,6 +19,20 @@ type State struct {
 	hasVariant           bool
 	hasMarkVariant       bool
 	hasScale             bool
+
+	// swingSeq counts arm swings observed via packet.Animate. The viewer
+	// diffs the counter to trigger a one-shot swing animation.
+	swingSeq uint32
+}
+
+// Swing returns the arm-swing counter (increments once per observed swing).
+func (s *State) Swing() uint32 {
+	return s.swingSeq
+}
+
+// NoteSwing records one arm swing (packet.Animate ActionSwingArm).
+func (s *State) NoteSwing() {
+	s.swingSeq++
 }
 
 // Sneaking ...

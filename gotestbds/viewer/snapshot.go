@@ -327,6 +327,9 @@ type Entity struct {
 	Attributes map[string]float64 `json:"attributes"`
 	Held       HeldItems          `json:"held"`
 	Armour     []*Item            `json:"armour"`
+	// Swing counts arm swings (packet.Animate). The client diffs it to play a
+	// one-shot swing animation. Omitted until the first swing.
+	Swing uint32 `json:"swing,omitempty"`
 }
 
 // HeldItems is main- and off-hand.

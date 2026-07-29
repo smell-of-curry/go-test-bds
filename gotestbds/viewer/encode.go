@@ -838,6 +838,7 @@ func (e *encoder) encodeEntity(ent gw.Entity) Entity {
 			Off:  itemPtr(off),
 		},
 		Armour: armourSlots(ent.Armour()),
+		Swing:  st.Swing(),
 	}
 	if out.Props == nil {
 		out.Props = map[string]any{}
