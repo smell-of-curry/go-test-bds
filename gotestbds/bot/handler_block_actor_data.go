@@ -19,7 +19,12 @@ func (*BlockActorDataHandler) Handle(p packet.Packet, b *Bot, a *actor.Actor) er
 	bl := a.World().Block(pos)
 	encodable, ok := bl.(w.NBTer)
 	if !ok {
-		return fmt.Errorf("block at position %v does not implements world.NBTer interface", pos)
+		// Routine on servers with custom blocks: the block decoded as
+		// UnknownBlock (or a vanilla block without NBT), so its block-entity
+		// data has nowhere to go. Run 35 logged thousands of these per
+		// second as ERROR while a structure streamed in; keep it at debug.
+		b.logger.Debug("dropping block actor data for non-NBT block", "pos", fmt.Sprint(pos), "block", fmt.Sprintf("%T", bl))
+		return nil
 	}
 	newBlock := encodable.DecodeNBT(blockActorData.NBTData).(w.Block)
 	a.World().SetBlock(pos, newBlock)

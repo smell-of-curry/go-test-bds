@@ -357,11 +357,16 @@ export function applyTimelapse(opts: {
     return { applied: false, reason: "no intervals" };
   }
 
+  // Encode into a sibling temp file and swap only on success: the raw video
+  // never leaves videoPath mid-encode, so a crash or SIGKILL during ffmpeg
+  // (run 35: the manager's kill escalation cut the pass) still leaves a
+  // playable run video rather than a zero-byte one.
   const rawPath = rawSiblingPath(videoPath);
-  renameSync(videoPath, rawPath);
+  const tmpPath = `${videoPath}.tmp.webm`;
   try {
     // Mirrors Playwright's own vp8 recording settings so quality/size match
-    // the untouched parts of the run video. No audio track exists (-an).
+    // the untouched parts of the run video; realtime deadline keeps the pass
+    // to a fraction of the recording's length. No audio track exists (-an).
     execFileSync(
       ff,
       [
@@ -369,7 +374,7 @@ export function applyTimelapse(opts: {
         "-loglevel",
         "error",
         "-i",
-        rawPath,
+        videoPath,
         "-filter_complex",
         filter,
         "-map",
@@ -385,31 +390,29 @@ export function applyTimelapse(opts: {
         "8",
         "-b:v",
         "1M",
-        videoPath,
+        "-deadline",
+        "realtime",
+        "-cpu-used",
+        "5",
+        tmpPath,
       ],
       { stdio: ["ignore", "ignore", "pipe"] },
     );
   } catch (err) {
     try {
-      unlinkSync(videoPath); // partial output, if any
+      unlinkSync(tmpPath); // partial output, if any
     } catch {
       /* ignore */
     }
-    renameSync(rawPath, videoPath);
     log.warn(
       `timelapse: ffmpeg failed; keeping the real-time video (${String(err).split("\n")[0]})`,
     );
     return { applied: false, reason: "ffmpeg failed" };
   }
 
+  if (keepRaw) renameSync(videoPath, rawPath);
+  renameSync(tmpPath, videoPath);
   const outputDurationMs = probeDurationMs(ff, videoPath);
-  if (!keepRaw) {
-    try {
-      unlinkSync(rawPath);
-    } catch {
-      /* ignore */
-    }
-  }
   log.info(
     `timelapse: x${factor} over ${intervals.length} walk interval(s); ` +
       `${(durationMs / 1000).toFixed(1)}s -> ` +

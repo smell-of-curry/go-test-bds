@@ -35,8 +35,14 @@ type Computer struct {
 }
 
 func (c *Computer) TickMovement(box cube.BBox, pos, vel mgl64.Vec3, rot cube.Rotation, source world.BlockSource) *Movement {
+	if !finiteVec(pos) {
+		// A poisoned position makes every collision bound garbage; freeze
+		// rather than sweep the world (run 35: a NaN reached the mover and
+		// the tick loop spun in Block() at y=-152M until SIGKILL).
+		return &Movement{pos: pos, onGround: c.onGround}
+	}
 	velBefore := vel
-	vel = c.applyHorizontalForces(source, pos, c.applyVerticalForces(vel))
+	vel = clampVel(c.applyHorizontalForces(source, pos, c.applyVerticalForces(vel)))
 	dPos, vel, onGround := CheckCollision(source, box, pos, vel)
 	c.onGround = onGround
 	return &Movement{
@@ -75,6 +81,7 @@ func (c *Computer) applyVerticalForces(vel mgl64.Vec3) mgl64.Vec3 {
 // CheckCollision limits collision.
 func CheckCollision(source world.BlockSource, box cube.BBox, pos, vel mgl64.Vec3) (mgl64.Vec3, mgl64.Vec3, bool) {
 	// TODO: Implement collision with other entities.
+	vel = clampVel(vel)
 	deltaX, deltaY, deltaZ := vel[0], vel[1], vel[2]
 	var onGround bool
 
@@ -124,12 +131,62 @@ func CheckCollision(source world.BlockSource, box cube.BBox, pos, vel mgl64.Vec3
 	return mgl64.Vec3{deltaX, deltaY, deltaZ}, vel, onGround
 }
 
+// maxVelocity is a hard per-axis cap on the velocity the mover will simulate,
+// in blocks per tick. Vanilla terminal falling speed is ~3.92; anything past
+// this is a poisoned value (NaN arithmetic, a bogus SetActorMotion) whose
+// collision sweep would visit an unbounded block volume.
+const maxVelocity = 10.0
+
+// finiteVec reports whether every component of v is a finite number.
+//
+// @param v The vector to check.
+// @returns false when any component is NaN or infinite.
+func finiteVec(v mgl64.Vec3) bool {
+	for _, c := range v {
+		if math.IsNaN(c) || math.IsInf(c, 0) {
+			return false
+		}
+	}
+	return true
+}
+
+// clampVel sanitises a velocity: non-finite components collapse to zero and
+// finite ones are clamped to ±maxVelocity, so the collision sweep in
+// blockBBoxsAround always covers a bounded volume.
+//
+// @param vel The velocity to sanitise.
+// @returns the sanitised velocity.
+func clampVel(vel mgl64.Vec3) mgl64.Vec3 {
+	for i, c := range vel {
+		switch {
+		case math.IsNaN(c) || math.IsInf(c, 0):
+			vel[i] = 0
+		case c > maxVelocity:
+			vel[i] = maxVelocity
+		case c < -maxVelocity:
+			vel[i] = -maxVelocity
+		}
+	}
+	return vel
+}
+
+// maxSweepVolume bounds the block volume one collision sweep may visit.
+// A legitimate sweep (player box grown 0.25, extended by a clamped velocity)
+// stays under ~200 blocks; anything bigger is poisoned input.
+const maxSweepVolume = 4096
+
 // blockBBoxsAround ...
 func blockBBoxsAround(source world.BlockSource, box cube.BBox) []cube.BBox {
 	grown := box.Grow(0.25)
 	min, max := grown.Min(), grown.Max()
+	if !finiteVec(min) || !finiteVec(max) {
+		return nil
+	}
 	minX, minY, minZ := int(math.Floor(min[0])), int(math.Floor(min[1])), int(math.Floor(min[2]))
 	maxX, maxY, maxZ := int(math.Ceil(max[0])), int(math.Ceil(max[1])), int(math.Ceil(max[2]))
+	if vol := (maxX - minX + 1) * (maxY - minY + 1) * (maxZ - minZ + 1); vol < 0 || vol > maxSweepVolume {
+		return nil
+	}
 
 	// A prediction of one BBox per block, plus an additional 2, in case
 	blockBBoxs := make([]cube.BBox, 0, (maxX-minX)*(maxY-minY)*(maxZ-minZ)+2)
