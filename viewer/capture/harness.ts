@@ -12,6 +12,8 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import type { BrowserContext, Page } from "playwright";
 
+import { applyTimelapse, type WalkMark } from "./timelapse";
+
 export type LogLevel = "debug" | "info" | "warn" | "error";
 
 export interface HarnessOptions {
@@ -22,6 +24,14 @@ export interface HarnessOptions {
   maxSegmentSeconds: number;
   browserPath: string;
   logLevel: LogLevel;
+  /**
+   * Speed-up factor for walking segments (mark phase `segment`,
+   * `walk:start`/`walk:end`) applied to the run video after it is written.
+   * 1 disables the pass. Only applies with {@link videoOut}.
+   */
+  timelapse: number;
+  /** Keep the untouched real-time recording as `run-full.webm`. */
+  keepRaw: boolean;
   /**
    * File to write the run video to. When unset the video is POSTed to the bot
    * instead, which only works while the bot is still running.
@@ -170,6 +180,17 @@ export async function runHarness(opts: HarnessOptions): Promise<void> {
   });
   let stillsPage: Page = await stillsCtx.newPage();
 
+  // Video t=0 anchor for walk marks. Playwright starts the screencast when the
+  // context's first page opens (about:blank paints immediately) and paces the
+  // saved webm by wall clock from its first frame, so Date.now() at newPage
+  // resolution tracks the video timeline. Measured by flipping the page colour
+  // at known wall-clock offsets and locating the flips in the saved video:
+  // events sit ~110ms earlier in the video than on this anchor's clock
+  // (stable at 103-114ms over 8s, two runs, no drift), so walk intervals land
+  // ~0.1s late — well inside the ±1s an 8x walking segment tolerates.
+  const videoAnchorMs = Date.now();
+  const walkMarks: WalkMark[] = [];
+
   // A browser that dies mid-run explains every later failure at once — captures
   // that time out, a video that cannot be saved — and says nothing by itself.
   let browserDown = "";
@@ -186,9 +207,11 @@ export async function runHarness(opts: HarnessOptions): Promise<void> {
   });
 
   // Subscribe before the page so marks/captures cannot race past us while the
-  // stills page is still loading. Queue until stillsReady.
+  // stills page is still loading. Queue until stillsReady. Each item carries
+  // its arrival time: walk marks are timed against the video, and processing
+  // (or replaying the pre-ready queue) can lag arrival by seconds.
   let stillsReady = false;
-  const pending: Array<{ type: string; data: string }> = [];
+  const pending: Array<{ type: string; data: string; at: number }> = [];
   let chain: Promise<void> = Promise.resolve();
   let videoUploaded = false;
 
@@ -228,8 +251,20 @@ export async function runHarness(opts: HarnessOptions): Promise<void> {
         );
         await video.delete().catch(() => undefined);
         await ctx.close().catch(() => undefined);
+        // Speed up the marked walking legs now that the file is final. Sync
+        // ffmpeg is fine here: the run is over and nothing else is waiting.
+        applyTimelapse({
+          videoPath: opts.videoOut,
+          marks: walkMarks,
+          factor: opts.timelapse,
+          keepRaw: opts.keepRaw,
+          log,
+        });
         return;
       }
+      // ponytail: the POST path (no --video-out) skips the timelapse pass —
+      // the runner always passes --video-out, and the POST target (the bot's
+      // own HTTP server) is already racing its exit at this point.
       await ctx.close().catch(() => undefined);
 
       const path = await video.path();
@@ -270,7 +305,11 @@ export async function runHarness(opts: HarnessOptions): Promise<void> {
     }
   };
 
-  const onFrame = async (type: string, data: string): Promise<void> => {
+  const onFrame = async (
+    type: string,
+    data: string,
+    atMs: number,
+  ): Promise<void> => {
     let frame: { type: string };
     try {
       frame = JSON.parse(data) as { type: string };
@@ -281,11 +320,13 @@ export async function runHarness(opts: HarnessOptions): Promise<void> {
 
     if (type === "mark" || frame.type === "mark") {
       await safe(log, () =>
-        handleMark(frame as MarkFrame, {
+        handleMark(frame as MarkFrame, atMs, {
           opts,
           log,
           stillsPage,
           mark,
+          videoAnchorMs,
+          walkMarks,
           // `sse` is declared below but only ever called once frames arrive.
           endRun: () => sse.close(),
         }),
@@ -305,12 +346,13 @@ export async function runHarness(opts: HarnessOptions): Promise<void> {
     }
   };
 
-  const enqueue = (type: string, data: string): void => {
+  const enqueue = (type: string, data: string, at = Date.now()): void => {
     if (!stillsReady) {
-      if (type === "mark" || type === "capture") pending.push({ type, data });
+      if (type === "mark" || type === "capture")
+        pending.push({ type, data, at });
       return;
     }
-    chain = chain.then(() => onFrame(type, data));
+    chain = chain.then(() => onFrame(type, data, at));
   };
 
   const sse = subscribeSse(
@@ -380,7 +422,7 @@ export async function runHarness(opts: HarnessOptions): Promise<void> {
     }
     log.info(`capture: stills attached at ${appUrl}`);
     stillsReady = true;
-    for (const p of pending) enqueue(p.type, p.data);
+    for (const p of pending) enqueue(p.type, p.data, p.at);
     pending.length = 0;
 
     await sse.done.catch(() => undefined);
@@ -398,17 +440,33 @@ export async function runHarness(opts: HarnessOptions): Promise<void> {
 
 async function handleMark(
   frame: MarkFrame,
+  atMs: number,
   ctx: {
     opts: HarnessOptions;
     log: Logger;
     stillsPage: Page;
     mark: MarkState;
+    videoAnchorMs: number;
+    walkMarks: WalkMark[];
     endRun: () => void;
   },
 ): Promise<void> {
   if (frame.runId !== undefined) ctx.mark.runId = frame.runId;
   if (frame.suite !== undefined) ctx.mark.suite = frame.suite;
   if (frame.test !== undefined) ctx.mark.test = frame.test;
+
+  // Walking legs, timed against the video for the timelapse pass after the
+  // recording is written. `segment` marks are timeline metadata only.
+  if (
+    frame.phase === "segment" &&
+    (frame.message === "walk:start" || frame.message === "walk:end")
+  ) {
+    ctx.walkMarks.push({
+      message: frame.message,
+      tMs: atMs - ctx.videoAnchorMs,
+    });
+    return;
+  }
 
   // Video is one continuous recording for the run; marks only update the
   // burnt-in overlay (via the app's SSE) and failure stills.
