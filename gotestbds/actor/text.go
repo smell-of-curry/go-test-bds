@@ -42,12 +42,21 @@ type rawText struct {
 	// Translate is a `.lang` key. Bots have no language files, so the key
 	// itself is the most useful thing we can report.
 	Translate *string `json:"translate"`
+	// With carries a translate part's substitution arguments.
+	With json.RawMessage `json:"with"`
 }
 
 // flattenText renders a JSON UI text value as a readable string.
 //
+// A translate part that carries `with` args is NOT flattened: rendering it
+// would drop the args, and the viewer's lang table can only substitute them
+// from the original envelope ("Accuracy: %s%" stayed unfilled on every battle
+// form because this flatten ran at packet-decode time). Argless shapes still
+// flatten to readable text.
+//
 // @param data The raw JSON value.
-// @returns the flattened text, or the raw JSON when the shape is unrecognised.
+// @returns the flattened text, or the raw JSON when the shape is unrecognised
+// or must keep its substitution args.
 func flattenText(data []byte) string {
 	var literal string
 	if json.Unmarshal(data, &literal) == nil {
@@ -58,12 +67,50 @@ func flattenText(data []byte) string {
 	if json.Unmarshal(data, &parsed) != nil {
 		return string(data)
 	}
+	if parsed.hasArgs() {
+		return string(data)
+	}
 
 	rendered := parsed.render()
 	if rendered == "" {
 		return string(data)
 	}
 	return rendered
+}
+
+// hasArgs reports whether any translate part in the tree carries "with" args.
+//
+// @returns true when flattening would lose substitution arguments.
+func (r rawText) hasArgs() bool {
+	if r.Translate != nil && withHasValues(r.With) {
+		return true
+	}
+	for _, part := range r.RawText {
+		if part.hasArgs() {
+			return true
+		}
+	}
+	return false
+}
+
+// withHasValues reports whether a "with" field carries at least one argument
+// (an empty array or envelope loses nothing when flattened).
+//
+// @param raw The raw JSON of the "with" field.
+// @returns true when substitution arguments are present.
+func withHasValues(raw json.RawMessage) bool {
+	if len(raw) == 0 {
+		return false
+	}
+	var plain []json.RawMessage
+	if json.Unmarshal(raw, &plain) == nil {
+		return len(plain) > 0
+	}
+	var nested rawText
+	if json.Unmarshal(raw, &nested) == nil {
+		return len(nested.RawText) > 0
+	}
+	return false
 }
 
 // render walks a rawtext tree, concatenating its parts in order.

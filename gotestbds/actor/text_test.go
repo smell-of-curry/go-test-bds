@@ -32,8 +32,21 @@ func TestTextAcceptsEveryShapeAServerSends(t *testing.T) {
 			want: "§l" + "forms.starter.title" + " (1/3)",
 		},
 		{
-			name: "bare translate object",
+			// Flattening a translate part with args would lose the args, and
+			// only the original envelope lets the viewer's lang table fill
+			// "%s" ("Accuracy: %s%" stayed unfilled on every battle form).
+			name: "bare translate object with args keeps its JSON",
 			json: `{"translate":"forms.starter.title","with":["Bulbasaur"]}`,
+			want: `{"translate":"forms.starter.title","with":["Bulbasaur"]}`,
+		},
+		{
+			name: "translate part with nested rawtext args keeps its JSON",
+			json: `{"rawtext":[{"translate":"a.key","with":{"rawtext":[{"text":"100"}]}}]}`,
+			want: `{"rawtext":[{"translate":"a.key","with":{"rawtext":[{"text":"100"}]}}]}`,
+		},
+		{
+			name: "argless translate still flattens to its key",
+			json: `{"rawtext":[{"translate":"forms.starter.title","with":[]}]}`,
 			want: "forms.starter.title",
 		},
 		{

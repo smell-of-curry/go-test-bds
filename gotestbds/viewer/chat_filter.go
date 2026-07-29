@@ -2,6 +2,7 @@ package viewer
 
 import (
 	"encoding/json"
+	"strconv"
 	"strings"
 )
 
@@ -98,8 +99,9 @@ func flattenRawtext(text string) string {
 }
 
 // rawtextWithArgs extracts substitution arguments from a rawtext "with"
-// field, which the protocol allows as either a plain string array or a nested
-// rawtext object.
+// field, which the protocol allows as either a plain array (strings, but
+// numbers happen in the wild) or a nested rawtext object whose parts may
+// themselves be translate keys — those resolve through the lang table.
 //
 // @param raw The raw JSON of the "with" field, possibly empty.
 // @returns The argument strings, or nil when there are none.
@@ -107,9 +109,22 @@ func rawtextWithArgs(raw json.RawMessage) []string {
 	if len(raw) == 0 {
 		return nil
 	}
-	var plain []string
+	var plain []any
 	if json.Unmarshal(raw, &plain) == nil {
-		return plain
+		args := make([]string, 0, len(plain))
+		for _, v := range plain {
+			switch t := v.(type) {
+			case string:
+				args = append(args, t)
+			case float64:
+				args = append(args, strconv.FormatFloat(t, 'f', -1, 64))
+			case bool:
+				args = append(args, strconv.FormatBool(t))
+			default:
+				args = append(args, "")
+			}
+		}
+		return args
 	}
 	var nested rawtextMessage
 	if json.Unmarshal(raw, &nested) != nil {
@@ -117,6 +132,12 @@ func rawtextWithArgs(raw json.RawMessage) []string {
 	}
 	args := make([]string, 0, len(nested.RawText))
 	for _, p := range nested.RawText {
+		if p.Translate != "" {
+			if resolved, ok := translateKey(p.Translate, rawtextWithArgs(p.With)); ok {
+				args = append(args, p.Text+resolved)
+				continue
+			}
+		}
 		args = append(args, p.Text+p.Translate)
 	}
 	return args

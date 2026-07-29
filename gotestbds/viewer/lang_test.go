@@ -116,6 +116,54 @@ func writeLangPack(t *testing.T, dir string) {
 	}
 }
 
+// TestFlattenRawtextSubstitutesEveryWithShape covers the arg shapes the wire
+// actually carries: the t() helper's nested rawtext envelope, plain string
+// arrays, numeric arrays, and translate-typed args that themselves resolve.
+// Run 29's battle forms showed "Accuracy: %s%" because the actor flattened
+// these envelopes before the lang table ever saw the args.
+func TestFlattenRawtextSubstitutesEveryWithShape(t *testing.T) {
+	installTestLang(t, map[string]string{
+		"forms.battle.moveButton.label.accuracy": "Accuracy: %s%",
+		"models.battleUtils.move.basePower":      "Base Power: %s",
+		"models.player.battleSide.turn":          "§fTurn %s",
+		"entity.bulbasaur.name":                  "Bulbasaur",
+		"models.showdown.switch.actorSentOut":    "%1 sent out %2!",
+	})
+
+	for _, test := range []struct {
+		name string
+		json string
+		want string
+	}{
+		{
+			name: "nested rawtext args (the t() helper)",
+			json: `{"rawtext":[{"translate":"forms.battle.moveButton.label.accuracy","with":{"rawtext":[{"text":"100"}]}}]}`,
+			want: "Accuracy: 100%",
+		},
+		{
+			name: "plain string array args",
+			json: `{"rawtext":[{"translate":"models.battleUtils.move.basePower","with":["50"]}]}`,
+			want: "Base Power: 50",
+		},
+		{
+			name: "numeric args",
+			json: `{"rawtext":[{"translate":"models.player.battleSide.turn","with":[3]}]}`,
+			want: "§fTurn 3",
+		},
+		{
+			name: "translate-typed arg resolves through the table",
+			json: `{"rawtext":[{"translate":"models.showdown.switch.actorSentOut","with":{"rawtext":[{"text":"TestBot"},{"translate":"entity.bulbasaur.name"}]}}]}`,
+			want: "TestBot sent out Bulbasaur!",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := flattenRawtext(test.json); got != test.want {
+				t.Fatalf("flattenRawtext(%s) = %q, want %q", test.json, got, test.want)
+			}
+		})
+	}
+}
+
 func TestResolveLangLines(t *testing.T) {
 	installTestLang(t, map[string]string{
 		"showdown.moves.growl.shortDesc": "Lowers the foe's Attack.",

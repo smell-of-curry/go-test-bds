@@ -21,7 +21,7 @@ func TestCaptureNoSubscriberFailsFast(t *testing.T) {
 	defer cancel()
 
 	start := time.Now()
-	_, err = hub.Capture(ctx, "TestBot", "label", 0)
+	_, err = hub.Capture(ctx, "TestBot", "label", 0, false)
 	elapsed := time.Since(start)
 	if err == nil {
 		t.Fatal("expected error")
