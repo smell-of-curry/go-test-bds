@@ -86,6 +86,12 @@ export interface GetNearbyEntities {
 /** GetState returns the bot's current actor state. */
 export interface GetState {}
 
+/** HoverFormButton visually hovers one open-form button in the attached viewer, then waits Ms milliseconds so a recording shows the choice settling before it is clicked. Hovering is presentation only: with no viewer attached the instruction validates the form and returns immediately (no wait, no error), so suites that run headless pay nothing for it. */
+export interface HoverFormButton {
+  index: number;
+  ms: number;
+}
+
 /** Interact uses the item currently held by the Actor. */
 export interface Interact {}
 
@@ -246,6 +252,7 @@ export type InstructionAction =
   | "getMessages"
   | "getNearbyEntities"
   | "getState"
+  | "hoverFormButton"
   | "interact"
   | "interactWithBlock"
   | "inventoryAction"
@@ -290,6 +297,7 @@ export interface InstructionParametersByAction {
   getMessages: GetMessages;
   getNearbyEntities: GetNearbyEntities;
   getState: GetState;
+  hoverFormButton: HoverFormButton;
   interact: Interact;
   interactWithBlock: InteractWithBlock;
   inventoryAction: InventoryAction;
@@ -335,6 +343,7 @@ export type InstructionPayload =
   | { action: "getMessages"; parameters: GetMessages }
   | { action: "getNearbyEntities"; parameters: GetNearbyEntities }
   | { action: "getState"; parameters: GetState }
+  | { action: "hoverFormButton"; parameters: HoverFormButton }
   | { action: "interact"; parameters: Interact }
   | { action: "interactWithBlock"; parameters: InteractWithBlock }
   | { action: "inventoryAction"; parameters: InventoryAction }

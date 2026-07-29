@@ -45,6 +45,7 @@ type Stream struct {
 	// event lane so a slow world subscriber cannot lose a line a recording needs.
 	lastMsgSeq      uint64
 	lastTitleSeq    uint64
+	lastTitleWrite  uint64
 	lastParticleSeq uint64
 
 	// lastEncodeAt throttles the world projection — bot goroutine only.
@@ -741,6 +742,21 @@ func (s *Stream) emitCapture(id, label string, minTick uint64, timeoutMs int64, 
 	s.emitRaw("capture", data)
 }
 
+// emitFormHover encodes and fans a form-button hover affordance frame.
+//
+// @param index Zero-based button index on the bot's open form.
+func (s *Stream) emitFormHover(index int) {
+	hf := FormHoverFrame{
+		V:     SchemaVersion,
+		Type:  "formHover",
+		Bot:   s.name,
+		Tick:  s.lastTick.Load(),
+		Index: index,
+	}
+	data, _ := json.Marshal(hf)
+	s.emitRaw("formHover", data)
+}
+
 // emitMark encodes and fans a mark frame for this bot.
 func (s *Stream) emitMark(m Mark) {
 	mf := markFrame{
@@ -784,6 +800,31 @@ func (s *Stream) emitHudEvents(a *actor.Actor) {
 		}
 		data, _ := json.Marshal(cf)
 		s.emitRaw("chat", data)
+	}
+
+	// Raw PHUD lane: every title-channel write that smuggles "&_token:value"
+	// emits one phud frame. The write ring (not the latest-state snapshot)
+	// matters here — PokeBedrock's feeders write several tokens per tick, and
+	// the snapshot keeps only the last one.
+	writes := a.TitleWritesFromSeq(s.lastTitleWrite)
+	if seq := a.TitleWriteSeq(); seq > s.lastTitleWrite {
+		s.lastTitleWrite = seq
+	}
+	for _, w := range writes {
+		token, value, ok := parsePhudToken(flattenRawtext(w))
+		if !ok {
+			continue
+		}
+		pf := PhudFrame{
+			V:     SchemaVersion,
+			Type:  "phud",
+			Bot:   s.name,
+			Tick:  tick,
+			Token: token,
+			Value: resolveLangLines(value),
+		}
+		data, _ := json.Marshal(pf)
+		s.emitRaw("phud", data)
 	}
 
 	titleSeq := a.TitleSeq()

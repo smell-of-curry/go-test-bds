@@ -30,6 +30,19 @@ import type {
 } from "./types";
 import { TimeoutError, waitForValue, type WaitOptions } from "./wait";
 
+/** Options for a single form click ({@link Bot.clickButton} / {@link Bot.clickButtonAt}). */
+export interface FormClickOptions extends RunActionOptions {
+  /**
+   * Visually hover the button in the attached viewer before clicking, so a
+   * recording shows the choice settling before it fires. Presentation only:
+   * with no viewer attached the hover is an instant no-op, and hover failures
+   * never fail the click. Defaults to true.
+   */
+  hover?: boolean;
+  /** How long the hover holds before the click, in milliseconds. Defaults to 800. */
+  hoverMs?: number;
+}
+
 /** Options for {@link Bot.clickThrough}. */
 export interface ClickThroughOptions {
   /**
@@ -57,6 +70,10 @@ export interface ClickThroughOptions {
   onForm?: (form: OpenForm) => void;
   /** What the walk is waiting for, quoted in timeout messages. */
   description?: string;
+  /** Hover each button in the viewer before clicking it. Defaults to true. */
+  hover?: boolean;
+  /** How long each hover holds, in milliseconds. Defaults to 800. */
+  hoverMs?: number;
 }
 
 /**
@@ -519,8 +536,20 @@ export class Bot {
    */
   async clickButton(
     text: string,
-    options?: RunActionOptions,
+    options?: FormClickOptions,
   ): Promise<ClickedFormButton> {
+    if (options?.hover !== false) {
+      // Resolving the label to an index costs a getForm round trip, so it
+      // lives inside the best-effort hover path rather than the click itself.
+      try {
+        const form = await this.getForm(options);
+        const index = form ? resolveFormButtonIndex(form, text) : -1;
+        if (index >= 0)
+          await this.hoverFormButton(index, options?.hoverMs, options);
+      } catch {
+        // Hovering is presentation only; never fail the click on it.
+      }
+    }
     return runActionForData<"clickFormButton", ClickedFormButton>(
       this.player,
       "clickFormButton",
@@ -538,14 +567,45 @@ export class Bot {
    */
   async clickButtonAt(
     index: number,
-    options?: RunActionOptions,
+    options?: FormClickOptions,
   ): Promise<ClickedFormButton> {
+    if (options?.hover !== false)
+      await this.hoverFormButton(index, options?.hoverMs, options);
     return runActionForData<"clickFormButton", ClickedFormButton>(
       this.player,
       "clickFormButton",
       { text: "", index },
       this.opts(options),
     );
+  }
+
+  /**
+   * Visually hovers a button on the open form in the attached viewer, so a
+   * recording shows the choice settling before it is clicked.
+   *
+   * Presentation only: with no viewer attached the bot validates the form and
+   * returns immediately, and every error is swallowed — a missing form or
+   * viewer must never fail the suite.
+   *
+   * @param index Zero-based button index to hover.
+   * @param ms How long the hover holds, in milliseconds. Defaults to 800.
+   * @param options Timeout overrides.
+   */
+  async hoverFormButton(
+    index: number,
+    ms = 800,
+    options?: RunActionOptions,
+  ): Promise<void> {
+    try {
+      await runAction(
+        this.player,
+        "hoverFormButton",
+        { index, ms },
+        this.opts({ timeoutMs: ms + 15_000, ...options }),
+      );
+    } catch {
+      // Best-effort: hovering exists for recordings, not correctness.
+    }
   }
 
   /**
@@ -586,6 +646,8 @@ export class Bot {
       maxForms = 20,
       formTimeoutMs = 15_000,
       onForm,
+      hover = true,
+      hoverMs,
     } = options;
     const goal = options.description ?? "the expected state";
     const answered: OpenForm[] = [];
@@ -615,8 +677,18 @@ export class Bot {
       onForm?.(form);
       answered.push(form);
       const choice = typeof button === "function" ? button(form) : button;
-      if (typeof choice === "number") await this.clickButtonAt(choice);
-      else await this.clickButton(choice);
+      if (hover) {
+        // The form is already in hand, so label choices resolve locally
+        // instead of paying clickButton's getForm round trip.
+        const index =
+          typeof choice === "number"
+            ? choice
+            : resolveFormButtonIndex(form, choice);
+        if (index >= 0) await this.hoverFormButton(index, hoverMs);
+      }
+      if (typeof choice === "number")
+        await this.clickButtonAt(choice, { hover: false });
+      else await this.clickButton(choice, { hover: false });
     }
 
     return answered;
@@ -719,4 +791,25 @@ export class Bot {
  */
 function toPos(value: Vector3): Pos {
   return { x: value.x, y: value.y, z: value.z };
+}
+
+/**
+ * Resolves a button label to its zero-based index on an open form, mirroring
+ * the bot's own matching: `§` colour codes stripped, case-insensitive, exact
+ * match preferred over substring.
+ *
+ * @param form The open form.
+ * @param text The label to look for.
+ * @returns The matching index, or -1 when nothing matches.
+ */
+export function resolveFormButtonIndex(form: OpenForm, text: string): number {
+  const buttons =
+    form.buttons ??
+    (form.button1 && form.button2 ? [form.button1, form.button2] : []);
+  const clean = (s: string) => s.replace(/§./g, "").toLowerCase();
+  const want = clean(text);
+  const labels = buttons.map((b) => clean(b.text));
+  const exact = labels.indexOf(want);
+  if (exact >= 0) return exact;
+  return labels.findIndex((label) => label.includes(want));
 }

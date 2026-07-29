@@ -14,6 +14,7 @@ import { SnapshotStream, streamUrlFromSearch } from "./stream";
 import { Store } from "./store";
 import { createTexturedMesher } from "./terrain";
 import { initHud } from "./ui";
+import { initPhudHud } from "./ui/phud";
 
 const canvas = document.getElementById("c") as HTMLCanvasElement;
 const overlayEl = document.getElementById("overlay") as HTMLElement;
@@ -170,6 +171,21 @@ const hud = initHud({
   particles,
   getParticleRegistry: () => particleRegistry,
 });
+// PokeBedrock JSON-UI overlay (sidebar / ping / currency / battle / forms).
+// Textures come from the hub's /asset route, same origin as the stream.
+let phudAssetBase = "";
+try {
+  phudAssetBase = new URL(streamUrlFromSearch(location.search)).origin;
+} catch {
+  /* fixture streams may be relative; CSS fallbacks still render */
+}
+const phud = initPhudHud({ assetBaseUrl: phudAssetBase });
+// The one-to-one form modal owns forms by default; ?debugForms=1 restores
+// the top-right debug panel instead.
+document.body.classList.toggle(
+  "jh-owns-forms",
+  !new URLSearchParams(location.search).has("debugForms"),
+);
 const motion = new MotionLerp();
 
 installViewerHandle(
@@ -248,6 +264,7 @@ store.subscribe((state) => {
   }
 
   hud.onFrame(state);
+  phud.onFrame(state);
   if (state.pendingParticles.length) {
     for (const pf of state.pendingParticles) {
       void spawnStreamParticle(pf.name, pf.pos);

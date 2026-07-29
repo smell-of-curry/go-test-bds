@@ -138,10 +138,14 @@ func DefaultPull(callbacker Callbacker) *Pull {
 	pull.Register(create[WaitForForm]())
 	pull.Register(create[WaitForMessage]())
 	pull.Register(create[ClickFormButton]())
+	// Registered hubless so a suite that hovers before clicking still works
+	// against a bot with no viewer configured (validate + silent no-op);
+	// RegisterViewer re-registers it with the hub attached.
+	pull.Register(create[HoverFormButton]())
 	return pull
 }
 
-// RegisterViewer registers the three viewer instructions against hub.
+// RegisterViewer registers the viewer instructions against hub.
 //
 // Call from Test.RunCtx when a Hub is configured. DefaultPull's signature stays
 // unchanged for external consumers; these actions are optional extras.
@@ -157,6 +161,9 @@ func RegisterViewer(pull *Pull, hub *viewer.Hub) {
 	})
 	pull.Register(func() Instruction {
 		return &PullArtifacts{hub: hub}
+	})
+	pull.Register(func() Instruction {
+		return &HoverFormButton{hub: hub}
 	})
 }
 

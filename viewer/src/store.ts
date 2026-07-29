@@ -8,11 +8,13 @@ import {
   type Column,
   type DeltaFrame,
   type Entity,
+  type FormHoverFrame,
   type Frame,
   type HelloFrame,
   type KeyframeFrame,
   type MarkFrame,
   type ParticleFrame,
+  type PhudFrame,
   type Registries,
   type TitleFrame,
   type UI,
@@ -97,6 +99,22 @@ export interface WorldState {
   time: number | null;
   /** Server camera override; null = default follow / first-person. */
   camera: CameraWire | null;
+  /**
+   * Latest raw PHUD token values from the `phud` event lane
+   * (`&_<token>:<value>` SetTitle writes). `""` = element cleared/hidden.
+   */
+  phud: Map<string, string>;
+  /**
+   * Button index being visually hovered on the open form, or null. Cleared
+   * whenever the form changes or closes.
+   */
+  formHover: number | null;
+  /**
+   * Active waypoint mark (`phase: "waypoint"`, message `x,y,z|label`), or
+   * null after a `clear` message. Kept off `mark` so the caption band ignores
+   * it.
+   */
+  waypoint: MarkFrame | null;
 }
 
 export type StoreListener = (state: WorldState) => void;
@@ -129,6 +147,9 @@ function emptyState(): WorldState {
     fullReset: false,
     time: null,
     camera: null,
+    phud: new Map(),
+    formHover: null,
+    waypoint: null,
   };
 }
 
@@ -245,6 +266,13 @@ export class Store {
         this.applyDelta(frame);
         break;
       case "mark":
+        // Waypoint marks are a HUD channel (locator-bar strip), not run
+        // lifecycle — routing them into `mark` would hijack the caption band.
+        if (frame.phase === "waypoint") {
+          this.state.waypoint = frame.message === "clear" ? null : frame;
+          this.state.tick = frame.tick;
+          break;
+        }
         this.state.mark = frame;
         this.state.tick = frame.tick;
         break;
@@ -259,6 +287,12 @@ export class Store {
         break;
       case "particle":
         this.applyParticle(frame);
+        break;
+      case "phud":
+        this.applyPhud(frame);
+        break;
+      case "formHover":
+        this.applyFormHover(frame);
         break;
       default:
         return;
@@ -304,6 +338,26 @@ export class Store {
   private applyParticle(frame: ParticleFrame): void {
     this.state.tick = frame.tick;
     this.state.pendingParticles.push(frame);
+  }
+
+  /**
+   * Record the latest value for a raw PHUD token.
+   *
+   * @param frame - Event-lane phud frame.
+   */
+  private applyPhud(frame: PhudFrame): void {
+    this.state.tick = frame.tick;
+    this.state.phud.set(frame.token, frame.value);
+  }
+
+  /**
+   * Record the hovered form-button index.
+   *
+   * @param frame - Event-lane formHover frame.
+   */
+  private applyFormHover(frame: FormHoverFrame): void {
+    this.state.tick = frame.tick;
+    this.state.formHover = frame.index;
   }
 
   /**
@@ -369,6 +423,7 @@ export class Store {
     this.state.world = frame.world;
     this.state.actor = frame.actor;
     this.state.ui = frame.ui ?? null;
+    this.state.formHover = null;
     // Registries are join-static; keyframe replaces, deltas never clear.
     this.state.registries = frame.registries ?? null;
     this.state.time = frame.time ?? null;
@@ -411,7 +466,14 @@ export class Store {
     }
 
     if (frame.actor) this.state.actor = frame.actor;
-    if (frame.ui !== undefined) this.state.ui = frame.ui ?? null;
+    if (frame.ui !== undefined) {
+      // Any UI replacement invalidates the hover: the hovered button belongs
+      // to the previous form snapshot.
+      if (formKey(this.state.ui) !== formKey(frame.ui ?? null)) {
+        this.state.formHover = null;
+      }
+      this.state.ui = frame.ui ?? null;
+    }
     if (frame.time !== undefined) this.state.time = frame.time;
     if (frame.cameraCleared) this.state.camera = null;
     else if (frame.camera !== undefined) this.state.camera = frame.camera;
@@ -528,6 +590,18 @@ export class Store {
     if (lz === 0) dirtySectionIfPresent(this.state, cx, cz - 1, sy);
     if (lz === 15) dirtySectionIfPresent(this.state, cx, cz + 1, sy);
   }
+}
+
+/**
+ * Identity key for the open form (title + buttons); "" when none.
+ *
+ * @param ui - UI snapshot or null.
+ * @returns a comparable key for hover invalidation.
+ */
+function formKey(ui: UI | null): string {
+  const f = ui?.form;
+  if (!f) return "";
+  return `${f.title}\0${(f.buttons ?? []).join("\0")}`;
 }
 
 function findPaletteIndex(palette: Block[], block: Block): number {

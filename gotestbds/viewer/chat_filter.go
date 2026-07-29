@@ -155,30 +155,48 @@ var hudTokenValueShown = map[string]bool{
 	"currency":      true,
 }
 
+// parsePhudToken splits a PHUD control token ("&_token:value", PokeBedrock's
+// SetTitle smuggling convention) into its token name and raw value. Flatten
+// rawtext BEFORE calling this — the rawtext form
+// ({"rawtext":[{"text":"&_battleWait:"},…]}) only exposes its token once
+// flattened.
+//
+// @param text Flattened title text from the wire.
+// @returns the token name, its raw value, and whether text was a PHUD write.
+func parsePhudToken(text string) (token, value string, ok bool) {
+	rest, found := strings.CutPrefix(text, "&_")
+	if !found {
+		return "", "", false
+	}
+	token, value, found = strings.Cut(rest, ":")
+	if !found {
+		return "", "", false
+	}
+	return token, value, true
+}
+
 // filterHudControlText resolves title/subtitle/actionbar text that is a PHUD
-// control token ("&_token:value", PokeBedrock's SetTitle smuggling convention)
-// rather than plain visible text: display-worthy token values pass through,
-// control-state tokens become "". Flatten rawtext BEFORE calling this — the
-// rawtext form ({"rawtext":[{"text":"&_battleWait:"},…]}) only exposes its
-// token once flattened.
+// control token rather than plain visible text: display-worthy token values
+// pass through, control-state tokens become "". Flatten rawtext BEFORE calling
+// this (see parsePhudToken).
 //
 // @param text Flattened title text from the wire.
 // @returns The visible text for the HUD, or "" for control state.
 func filterHudControlText(text string) string {
-	if !strings.HasPrefix(text, "&_") {
+	token, value, ok := parsePhudToken(text)
+	if !ok {
+		if strings.HasPrefix(text, "&_") {
+			// Token without a value separator carries nothing to show.
+			return ""
+		}
 		// Unflattened rawtext-form tokens must never reach the screen raw.
 		if strings.Contains(text, `"&_`) {
 			return ""
 		}
 		return text
 	}
-	rest := text[2:]
-	i := strings.Index(rest, ":")
-	if i < 0 {
-		return ""
-	}
-	if hudTokenValueShown[rest[:i]] {
-		return rest[i+1:]
+	if hudTokenValueShown[token] {
+		return value
 	}
 	return ""
 }

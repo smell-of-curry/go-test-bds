@@ -182,6 +182,20 @@ func (h *Hub) Mark(m Mark) {
 	}
 }
 
+// FormHover broadcasts a hover affordance for botName's open form. A no-op
+// when the bot has no stream — hovering is presentation only and must never
+// fail a suite that runs without a viewer.
+//
+// @param botName Bot whose stream should receive the hover frame.
+// @param index Zero-based button index on the open form.
+func (h *Hub) FormHover(botName string, index int) {
+	s := h.stream(botName)
+	if s == nil {
+		return
+	}
+	s.emitFormHover(index)
+}
+
 // Capture requests a still from the harness attached to botName.
 //
 // Returns immediately with an error containing "no subscriber attached" when

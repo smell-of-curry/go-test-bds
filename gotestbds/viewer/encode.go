@@ -916,10 +916,11 @@ func (e *encoder) encodeUI(a *actor.Actor) UI {
 	ui := UI{}
 	if f, ok := a.LastForm(); ok {
 		ui.Form = &UIForm{
-			Type:    formTypeName(f.Type()),
-			Title:   resolveLangLines(flattenRawtext(f.Title())),
-			Content: resolveLangLines(flattenRawtext(f.ContentText())),
-			Buttons: formButtons(f),
+			Type:         formTypeName(f.Type()),
+			Title:        resolveLangLines(flattenRawtext(f.Title())),
+			Content:      resolveLangLines(flattenRawtext(f.ContentText())),
+			Buttons:      formButtons(f),
+			ButtonImages: formButtonImages(f),
 		}
 	}
 	if c, ok := a.CurrentContainer(); ok {
@@ -991,6 +992,30 @@ func formButtons(f *actor.Form) []string {
 		}
 	}
 	return nil
+}
+
+// formButtonImages lists each menu button's image (pack texture path or URL),
+// parallel to formButtons.
+//
+// @param f The open form.
+// @returns per-button image data, or nil when no button carries one.
+func formButtonImages(f *actor.Form) []string {
+	buttons, ok := f.MenuFormButtons()
+	if !ok {
+		return nil
+	}
+	out := make([]string, len(buttons))
+	hasAny := false
+	for i, b := range buttons {
+		out[i] = b.Image().Data
+		if out[i] != "" {
+			hasAny = true
+		}
+	}
+	if !hasAny {
+		return nil
+	}
+	return out
 }
 
 func encodeEffects(a *actor.Actor) []Effect {
