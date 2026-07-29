@@ -127,9 +127,13 @@ type CaptureFrame struct {
 	MinTick uint64 `json:"minTick"`
 	// TimeoutMs is the caller's deadline, carried so the harness gives up at the
 	// same moment this side does instead of capping it with its own constant.
-	TimeoutMs int64  `json:"timeoutMs,omitempty"`
-	Ext       string `json:"ext"`
-	Label     string `json:"label,omitempty"`
+	TimeoutMs int64 `json:"timeoutMs,omitempty"`
+	// NoSettle skips the harness's mesh-settle grace so the still fires the
+	// moment the target tick renders — for short-lived UI (a title card that
+	// holds ~4s loses the race against a 10s settle wait).
+	NoSettle bool   `json:"noSettle,omitempty"`
+	Ext      string `json:"ext"`
+	Label    string `json:"label,omitempty"`
 }
 
 // World is dimension metadata for a snapshot.

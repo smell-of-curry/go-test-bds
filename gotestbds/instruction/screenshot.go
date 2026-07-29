@@ -14,8 +14,11 @@ import (
 type Screenshot struct {
 	Label     string `json:"label"`
 	TimeoutMs int    `json:"timeoutMs"`
-	hub       *viewer.Hub
-	result    any
+	// NoSettle skips the harness's mesh-settle grace so the still fires the
+	// moment the target tick renders — for short-lived UI like title cards.
+	NoSettle bool `json:"noSettle"`
+	hub      *viewer.Hub
+	result   any
 }
 
 // Name returns the instruction name.
@@ -51,7 +54,7 @@ func (s *Screenshot) Run(ctx context.Context, b *bot.Bot) error {
 
 	// Capture blocks until the harness posts a frame at tick >= minTick. It
 	// lives outside Execute so the bot tick loop keeps running.
-	art, err := s.hub.Capture(ctx, botName, s.Label, tick)
+	art, err := s.hub.Capture(ctx, botName, s.Label, tick, s.NoSettle)
 	if err != nil {
 		return err
 	}

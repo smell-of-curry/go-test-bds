@@ -6,7 +6,7 @@
  * Script API directly. See README.md for the wire protocol.
  */
 
-export { Bot } from "./bot";
+export { Bot, type ScreenshotOptions } from "./bot";
 export {
   cancelAllInstructions,
   DEFAULT_ACTION_TIMEOUT_MS,

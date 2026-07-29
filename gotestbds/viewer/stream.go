@@ -725,7 +725,7 @@ func (s *Stream) emitRaw(event string, data []byte) {
 }
 
 // emitCapture encodes and fans a capture request.
-func (s *Stream) emitCapture(id, label string, minTick uint64, timeoutMs int64) {
+func (s *Stream) emitCapture(id, label string, minTick uint64, timeoutMs int64, noSettle bool) {
 	cf := CaptureFrame{
 		V:         SchemaVersion,
 		Type:      "capture",
@@ -733,6 +733,7 @@ func (s *Stream) emitCapture(id, label string, minTick uint64, timeoutMs int64) 
 		ID:        id,
 		MinTick:   minTick,
 		TimeoutMs: timeoutMs,
+		NoSettle:  noSettle,
 		Ext:       "png",
 		Label:     label,
 	}

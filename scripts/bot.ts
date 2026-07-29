@@ -1,5 +1,16 @@
 import { type Player, type Vector3, world } from "@minecraft/server";
 import { runAction, runActionForData, type RunActionOptions } from "./client";
+
+/** Options for {@link Bot.screenshot}. */
+export interface ScreenshotOptions extends RunActionOptions {
+  /**
+   * Skip the capture harness's mesh-settle grace so the still fires the
+   * moment the target tick renders. Use for short-lived UI (a title card
+   * holding ~4s loses the race against a ~10s settle wait); the trade-off is
+   * far columns may still be meshing in the frame.
+   */
+  noSettle?: boolean;
+}
 import type {
   BlockAtPosition,
   BotInventory,
@@ -632,19 +643,25 @@ export class Bot {
    * Asks the attached capture harness for a still of this bot's view.
    *
    * @param label Free-text label slugged into the artefact filename.
-   * @param options Timeout overrides. Defaults to 30 000 ms for the capture.
+   * @param options Timeout overrides (default 30 000 ms for the capture) and
+   * `noSettle` to skip the harness's mesh-settle grace — for short-lived UI
+   * like a title card that expires before a ~10s settle wait finishes.
    * @returns The written screenshot artefact.
    * @throws {InstructionError} if no viewer is attached or the capture fails.
    */
   async screenshot(
     label = "",
-    options?: RunActionOptions,
+    options?: ScreenshotOptions,
   ): Promise<ScreenshotResult> {
     const captureTimeoutMs = options?.timeoutMs ?? 30_000;
     return runActionForData<"screenshot", ScreenshotResult>(
       this.player,
       "screenshot",
-      { label, timeoutMs: captureTimeoutMs },
+      {
+        label,
+        timeoutMs: captureTimeoutMs,
+        noSettle: options?.noSettle ?? false,
+      },
       { ...this.opts(options), timeoutMs: captureTimeoutMs + 5_000 },
     );
   }

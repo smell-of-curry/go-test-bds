@@ -73,6 +73,10 @@ interface CaptureFrame {
   id: string;
   minTick: number;
   timeoutMs?: number;
+  /** Skip the mesh-settle grace: short-lived UI (a ~4s title card) loses the
+   * race against a 10s settle wait, and a card shot needs speed, not mesh
+   * completeness. */
+  noSettle?: boolean;
   ext?: string;
   label?: string;
   bot?: string;
@@ -464,19 +468,22 @@ async function handleCapture(
     // still for its whole budget ("Timeout 30000ms exceeded" — the Playwright
     // default, not ours). The first gate already proved the wanted tick was
     // rendered; a still with a few unmeshed far columns beats no still.
-    await stillsPage
-      .waitForFunction(
-        () =>
-          (window as unknown as { __viewer?: { settled: boolean } }).__viewer
-            ?.settled === true,
-        undefined,
-        { polling: 250, timeout: SETTLE_GRACE_MS },
-      )
-      .catch(() => {
-        log.warn(
-          `capture: scene still meshing after ${SETTLE_GRACE_MS}ms; capturing anyway`,
-        );
-      });
+    // noSettle skips even the grace — a ~4s title card loses that race.
+    if (!frame.noSettle) {
+      await stillsPage
+        .waitForFunction(
+          () =>
+            (window as unknown as { __viewer?: { settled: boolean } }).__viewer
+              ?.settled === true,
+          undefined,
+          { polling: 250, timeout: SETTLE_GRACE_MS },
+        )
+        .catch(() => {
+          log.warn(
+            `capture: scene still meshing after ${SETTLE_GRACE_MS}ms; capturing anyway`,
+          );
+        });
+    }
 
     const tick = await stillsPage.evaluate(
       () => (window as unknown as { __viewer: { tick: number } }).__viewer.tick,

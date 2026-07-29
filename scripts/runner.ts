@@ -1,6 +1,6 @@
 import { system } from "@minecraft/server";
-import type { Bot } from "./bot";
-import { cancelAllInstructions, type RunActionOptions } from "./client";
+import type { Bot, ScreenshotOptions } from "./bot";
+import { cancelAllInstructions } from "./client";
 import {
   ConsoleReporter,
   MultiReporter,
@@ -53,13 +53,14 @@ export interface TestContext {
    * behave identically whether or not anyone is rendering it.
    *
    * @param label Short name for the shot, slugged into the filename.
-   * @param options Timeout overrides, e.g. a longer wait while the viewer is
-   * still downloading and stitching texture packs early in a run.
+   * @param options Timeout overrides (e.g. a longer wait while the viewer is
+   * still downloading and stitching texture packs early in a run) and
+   * `noSettle` for short-lived UI that expires before the settle grace.
    * @returns Where the still landed, or null when nothing is watching.
    */
   screenshot(
     label: string,
-    options?: RunActionOptions,
+    options?: ScreenshotOptions,
   ): Promise<ScreenshotResult | null>;
 }
 
@@ -470,7 +471,7 @@ function createContext(
     },
     async screenshot(
       label: string,
-      options?: RunActionOptions,
+      options?: ScreenshotOptions,
     ): Promise<ScreenshotResult | null> {
       try {
         return await bots[0].screenshot(label, options);

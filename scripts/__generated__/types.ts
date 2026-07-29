@@ -181,6 +181,8 @@ export interface RunCommand {
 export interface Screenshot {
   label: string;
   timeoutMs: number;
+  /** NoSettle skips the harness's mesh-settle grace so the still fires the moment the target tick renders — for short-lived UI like title cards. */
+  noSettle: boolean;
 }
 
 /** SetHeldSlot sets the currently held hotbar slot. */

@@ -192,9 +192,11 @@ func (h *Hub) Mark(m Mark) {
 // @param botName Bot whose stream should receive the capture frame.
 // @param label Free-text label slugged into the artefact filename.
 // @param minTick Harness must render a frame at or after this tick.
+// @param noSettle Skip the harness's mesh-settle grace so short-lived UI
+// (title cards) is photographed before it expires.
 // @returns the written Artifact.
 // @throws when no subscriber is attached, the harness reports an error, or ctx expires.
-func (h *Hub) Capture(ctx context.Context, botName, label string, minTick uint64) (Artifact, error) {
+func (h *Hub) Capture(ctx context.Context, botName, label string, minTick uint64, noSettle bool) (Artifact, error) {
 	h.mu.Lock()
 	s := h.streams[botName]
 	h.mu.Unlock()
@@ -214,7 +216,7 @@ func (h *Hub) Capture(ctx context.Context, botName, label string, minTick uint64
 
 	id := h.arts.nextCaptureID()
 	ch := h.arts.beginCapture(id)
-	s.emitCapture(id, label, minTick, timeoutMs)
+	s.emitCapture(id, label, minTick, timeoutMs, noSettle)
 
 	select {
 	case <-ctx.Done():
