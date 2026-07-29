@@ -28,6 +28,19 @@ export interface CachedBlockGeometry {
 const loggedMiss = new Set<string>();
 
 /**
+ * Engine-built-in block geometry that never ships as a pack `.geo.json`.
+ * `full_block` is the plain cube; `cross` is the flower X (drawn as a cube
+ * here — ponytail: proper cross shape rides the custom-geometry path later).
+ *
+ * @param id - `geometry.*` identifier, optionally namespaced.
+ * @returns true when the id names an engine built-in.
+ */
+export function isBuiltinBlockGeometry(id: string): boolean {
+  const bare = id.replace(/^[^:]+:/, "").toLowerCase();
+  return bare === "geometry.full_block" || bare === "geometry.cross";
+}
+
+/**
  * Loads and caches `.geo.json` for custom block geometry identifiers.
  * Sync lookup at mesh time; preload via {@link preloadFromRegistries}.
  */
@@ -92,7 +105,22 @@ export class BlockGeometryCache {
    */
   async ensure(id: string): Promise<CachedBlockGeometry | null> {
     if (this.byId.has(id)) return this.byId.get(id) ?? null;
-    const json = await this.loadGeometryJson(id);
+    // Built-ins (full_block, cross) are not pack files — cube path draws them.
+    if (isBuiltinBlockGeometry(id)) {
+      this.byId.set(id, null);
+      return null;
+    }
+    let json: unknown | null = null;
+    try {
+      json = await this.loadGeometryJson(id);
+    } catch (err) {
+      // A failed fetch (400 on an odd id, network) must degrade this block to
+      // the cube path, never reject the caller — run 24 lost the whole world
+      // to one rejecting preload Promise.all.
+      this.byId.set(id, null);
+      logMissOnce(id, err instanceof Error ? err.message : "fetch");
+      return null;
+    }
     if (!json) {
       this.byId.set(id, null);
       logMissOnce(id, "missing");
@@ -167,7 +195,9 @@ export class BlockGeometryCache {
  * @returns candidate paths.
  */
 export function blockGeometryPathCandidates(geometryId: string): string[] {
-  const bare = geometryId.replace(/^geometry\./i, "");
+  // "minecraft:geometry.full_block" / "pokeb:geometry.foo" → namespace off
+  // first (a colon in the asset path is a 400), then the geometry. prefix.
+  const bare = geometryId.replace(/^[^:]+:/, "").replace(/^geometry\./i, "");
   return [
     `models/blocks/${bare}.geo.json`,
     `models/block/${bare}.geo.json`,

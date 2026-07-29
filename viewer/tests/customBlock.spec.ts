@@ -13,6 +13,12 @@ import {
 import type { RegistryBlock } from "../src/protocol";
 import { BlockModelResolver } from "../src/terrain/resolve";
 import { stripFormatCodes } from "../src/terrain/blockEntities";
+import {
+  BlockGeometryCache,
+  blockGeometryPathCandidates,
+  isBuiltinBlockGeometry,
+} from "../src/terrain/customGeometry";
+import type { AssetClient } from "../src/terrain/assetClient";
 
 test.describe("custom block permutations", () => {
   test.beforeEach(() => clearPermutationCache());
@@ -183,5 +189,57 @@ test.describe("geometry fallback + transform", () => {
 
   test("stripFormatCodes removes section signs", () => {
     expect(stripFormatCodes("§aHello§r")).toBe("Hello");
+  });
+});
+
+test.describe("geometry preload survives real palettes (run 24)", () => {
+  test("built-in ids are recognized and never become fetch paths", () => {
+    expect(isBuiltinBlockGeometry("minecraft:geometry.full_block")).toBe(true);
+    expect(isBuiltinBlockGeometry("geometry.full_block")).toBe(true);
+    expect(isBuiltinBlockGeometry("minecraft:geometry.cross")).toBe(true);
+    expect(isBuiltinBlockGeometry("geometry.fixture.custom_crate")).toBe(false);
+
+    // A namespaced id must lose its colon before it becomes a URL path.
+    for (const p of blockGeometryPathCandidates("pokeb:geometry.machine")) {
+      expect(p).not.toContain(":");
+      expect(p).toContain("machine");
+    }
+  });
+
+  test("preload resolves even when every fetch throws or 400s", async () => {
+    let fetches = 0;
+    const client = {
+      fetchJson: async () => {
+        fetches++;
+        throw new Error("GET /asset/... → 400");
+      },
+      getIndex: async () => {
+        throw new Error("GET /packs/index → 500");
+      },
+    } as unknown as AssetClient;
+
+    const cache = new BlockGeometryCache(client);
+    const blocks: RegistryBlock[] = [
+      {
+        name: "pokeb:plain",
+        components: { geometry: "minecraft:geometry.full_block" },
+      },
+      {
+        name: "pokeb:broken",
+        components: { geometry: "geometry.pokeb.machine" },
+      },
+    ];
+
+    // The run-24 regression: this Promise.all rejected and took boot with it.
+    await expect(
+      cache.preloadFromRegistries({ blocks } as never),
+    ).resolves.toBeUndefined();
+
+    // Built-in short-circuits without a network trip; the broken id degraded
+    // to the cube path (null) instead of poisoning the cache.
+    expect(cache.has("minecraft:geometry.full_block")).toBe(false);
+    expect(cache.get("minecraft:geometry.full_block")).toBeNull();
+    expect(cache.get("geometry.pokeb.machine")).toBeNull();
+    expect(fetches).toBeGreaterThan(0);
   });
 });
