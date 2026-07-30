@@ -83,12 +83,11 @@ func translateKey(key string, args []string) (string, bool) {
 	return substituteLang(tmpl, args), true
 }
 
-// substituteLang fills Bedrock lang placeholders: %1–%9 positional, %s
-// sequential over the remaining unused args, %% a literal percent ("lost
-// %s%% of its health!" rendered "20%%" until the escape was handled).
-// Unmatched placeholders stay verbatim so a short "with" is visible rather
-// than silently eaten. ponytail: %1$s forms are rare in these packs and
-// skipped.
+// substituteLang fills Bedrock lang placeholders: %1–%9 positional, Java-style
+// %1$s / %2$d (digit + `$` + conversion letter), %s sequential over the
+// remaining unused args, %% a literal percent ("lost %s%% of its health!"
+// rendered "20%%" until the escape was handled). Unmatched placeholders stay
+// verbatim so a short "with" is visible rather than silently eaten.
 //
 // @param tmpl The lang template.
 // @param args Substitution arguments, possibly short or empty.
@@ -120,12 +119,20 @@ func substituteLang(tmpl string, args []string) string {
 			}
 		case n >= '1' && n <= '9':
 			idx, _ := strconv.Atoi(string(n))
+			// %1$s / %1$d — consume `$` + one conversion letter when present.
+			advance := 1
+			if i+3 < len(tmpl) && tmpl[i+2] == '$' {
+				conv := tmpl[i+3]
+				if (conv >= 'a' && conv <= 'z') || (conv >= 'A' && conv <= 'Z') {
+					advance = 3
+				}
+			}
 			if idx <= len(args) {
 				b.WriteString(args[idx-1])
 				if idx > next {
 					next = idx
 				}
-				i++
+				i += advance
 				continue
 			}
 		}

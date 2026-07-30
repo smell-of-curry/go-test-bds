@@ -42,11 +42,30 @@ func TestSubstituteLang(t *testing.T) {
 		// %% is the lang escape for a literal percent, args or not.
 		{"lost %s%% of its health!", []string{"20"}, "lost 20% of its health!"},
 		{"100%% plain", nil, "100% plain"},
+		// Java-style positional %N$s / %N$d (vanilla death messages).
+		{"%1$s suffocated in a wall", []string{"TestBot"}, "TestBot suffocated in a wall"},
+		{"%1$s was slain by %2$s", []string{"A", "B"}, "A was slain by B"},
+		{"score %1$d", []string{"42"}, "score 42"},
+		{"%1$s", nil, "%1$s"},
+		{"%2$s alone", []string{"only"}, "%2$s alone"},
 	}
 	for _, c := range cases {
 		if got := substituteLang(c.tmpl, c.args); got != c.want {
 			t.Fatalf("substituteLang(%q,%v)=%q want %q", c.tmpl, c.args, got, c.want)
 		}
+	}
+}
+
+// TestFlattenRawtextJavaStylePositional covers vanilla death-message templates
+// that use %1$s — key resolves, but substituteLang used to leave the
+// placeholder literally ("%1$s suffocated…") in live captures.
+func TestFlattenRawtextJavaStylePositional(t *testing.T) {
+	installTestLang(t, map[string]string{
+		"death.attack.inWall": "%1$s suffocated in a wall",
+	})
+	in := `{"rawtext":[{"translate":"death.attack.inWall","with":["TestBot"]}]}`
+	if got := flattenRawtext(in); got != "TestBot suffocated in a wall" {
+		t.Fatalf("flattenRawtext=%q", got)
 	}
 }
 
