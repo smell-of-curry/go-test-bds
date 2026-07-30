@@ -9,9 +9,12 @@ import (
 const messageRingCap = 200
 
 // ReceivedMessage is a chat/system message retained for observation instructions.
+// Parameters carries packet.Text substitution args for TextTypeTranslation
+// (and tip/popup); empty for ordinary chat.
 type ReceivedMessage struct {
-	Text         string `json:"text"`
-	ReceivedAtMs int64  `json:"receivedAtMs"`
+	Text         string   `json:"text"`
+	Parameters   []string `json:"parameters,omitempty"`
+	ReceivedAtMs int64    `json:"receivedAtMs"`
 }
 
 // messageRing is a bounded, mutex-protected ring buffer of received messages.
@@ -25,11 +28,14 @@ type messageRing struct {
 }
 
 // RecordMessage appends a received message to the ring buffer.
-func (a *Actor) RecordMessage(text string) {
+//
+// @param text The message body (plain chat, or a translate key).
+// @param parameters Optional Text-packet substitution arguments.
+func (a *Actor) RecordMessage(text string, parameters ...string) {
 	if a.messages == nil {
 		a.messages = &messageRing{}
 	}
-	a.messages.append(text, time.Now().UnixMilli())
+	a.messages.append(text, parameters, time.Now().UnixMilli())
 }
 
 // RecentMessages returns up to limit of the most recent messages, oldest first.
@@ -58,11 +64,15 @@ func (a *Actor) MessagesFromSeq(afterSeq uint64) []ReceivedMessage {
 	return a.messages.fromSeq(afterSeq)
 }
 
-func (r *messageRing) append(text string, receivedAtMs int64) {
+func (r *messageRing) append(text string, parameters []string, receivedAtMs int64) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.nextSeq++
-	msg := ReceivedMessage{Text: text, ReceivedAtMs: receivedAtMs}
+	var params []string
+	if len(parameters) > 0 {
+		params = append([]string(nil), parameters...)
+	}
+	msg := ReceivedMessage{Text: text, Parameters: params, ReceivedAtMs: receivedAtMs}
 	r.items = append(r.items, msg)
 	r.seqs = append(r.seqs, r.nextSeq)
 	if len(r.items) > messageRingCap {

@@ -5,6 +5,7 @@ import (
 	"strings"
 	"sync/atomic"
 
+	"github.com/smell-of-curry/go-test-bds/gotestbds/actor"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/assets"
 )
 
@@ -93,6 +94,18 @@ func translateKey(key string, args []string) (string, bool) {
 // @param args Substitution arguments, possibly short or empty.
 // @returns the template with placeholders replaced.
 func substituteLang(tmpl string, args []string) string {
+	return applyLangPlaceholders(tmpl, args, false)
+}
+
+// applyLangPlaceholders fills lang placeholders. When stripUnfilled is true,
+// unmatched %s / %N / %N$x tokens are dropped instead of left literal — used
+// for bare-key resolveLangLines so recordings never show "%1$s suffocated…".
+//
+// @param tmpl The lang template.
+// @param args Substitution arguments, possibly short or empty.
+// @param stripUnfilled When true, omit placeholders that have no matching arg.
+// @returns the template with placeholders replaced (or stripped).
+func applyLangPlaceholders(tmpl string, args []string, stripUnfilled bool) string {
 	if !strings.Contains(tmpl, "%") {
 		return tmpl
 	}
@@ -117,6 +130,10 @@ func substituteLang(tmpl string, args []string) string {
 				i++
 				continue
 			}
+			if stripUnfilled {
+				i++
+				continue
+			}
 		case n >= '1' && n <= '9':
 			idx, _ := strconv.Atoi(string(n))
 			// %1$s / %1$d — consume `$` + one conversion letter when present.
@@ -135,6 +152,10 @@ func substituteLang(tmpl string, args []string) string {
 				i += advance
 				continue
 			}
+			if stripUnfilled {
+				i += advance
+				continue
+			}
 		}
 		b.WriteByte(c)
 	}
@@ -145,6 +166,7 @@ func substituteLang(tmpl string, args []string) string {
 // the addon's battle buttons take ("showdown.moves.growl.shortDesc" alone on
 // a line). Mixed-content lines pass through: substring translation would
 // corrupt ordinary text that merely mentions a key-shaped word.
+// Bare-key lookup has no args, so unfilled %N / %N$s tokens are stripped.
 //
 // @param text Flattened multi-line text.
 // @returns text with whole-key lines resolved.
@@ -157,7 +179,7 @@ func resolveLangLines(text string) string {
 	changed := false
 	for i, line := range lines {
 		if v, ok := (*t)[strings.TrimSpace(line)]; ok {
-			lines[i] = v
+			lines[i] = strings.Join(strings.Fields(applyLangPlaceholders(v, nil, true)), " ")
 			changed = true
 		}
 	}
@@ -165,4 +187,51 @@ func resolveLangLines(text string) string {
 		return text
 	}
 	return strings.Join(lines, "\n")
+}
+
+// resolveTranslationParameters resolves one level of nested translate keys in
+// Text-packet Parameters (same depth flattenRawtext uses for "with" args).
+//
+// @param params Raw Parameters from packet.Text.
+// @returns args ready for substituteLang.
+func resolveTranslationParameters(params []string) []string {
+	if len(params) == 0 {
+		return nil
+	}
+	out := make([]string, len(params))
+	for i, p := range params {
+		if resolved, ok := translateKey(p, nil); ok {
+			out[i] = strings.Join(strings.Fields(applyLangPlaceholders(resolved, nil, true)), " ")
+			continue
+		}
+		out[i] = p
+	}
+	return out
+}
+
+// renderChatMessage turns a buffered chat/system/translation message into
+// player-facing text for the viewer HUD.
+//
+// @param m A message from the actor ring (text ± Text-packet Parameters).
+// @returns the resolved display string.
+func renderChatMessage(m actor.ReceivedMessage) string {
+	text := flattenRawtext(m.Text)
+	if len(m.Parameters) == 0 {
+		return resolveLangLines(text)
+	}
+	args := resolveTranslationParameters(m.Parameters)
+	key := strings.TrimSpace(text)
+	if resolved, ok := translateKey(key, args); ok {
+		return resolved
+	}
+	var b strings.Builder
+	b.WriteString(key)
+	for _, arg := range args {
+		if arg == "" {
+			continue
+		}
+		b.WriteByte(' ')
+		b.WriteString(arg)
+	}
+	return b.String()
 }

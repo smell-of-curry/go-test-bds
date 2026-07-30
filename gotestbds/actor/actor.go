@@ -466,8 +466,11 @@ func (a *Actor) Chat(message string) {
 }
 
 // ReceiveMessage makes Actor receive message.
-func (a *Actor) ReceiveMessage(message string) {
-	a.Handler().HandleReceiveMessage(a, message)
+//
+// @param message The packet.Text Message field (plain text or translate key).
+// @param parameters Optional TextTypeTranslation/Tip/Popup Parameters.
+func (a *Actor) ReceiveMessage(message string, parameters ...string) {
+	a.Handler().HandleReceiveMessage(a, message, parameters)
 }
 
 // ReceiveForm makes Actor receive Form.

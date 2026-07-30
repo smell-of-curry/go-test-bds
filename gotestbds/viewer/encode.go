@@ -948,7 +948,7 @@ func (e *encoder) encodeUI(a *actor.Actor) UI {
 		if isProtocolChatNoise(m.Text) {
 			continue
 		}
-		ui.Messages = append(ui.Messages, resolveLangLines(flattenRawtext(m.Text)))
+		ui.Messages = append(ui.Messages, renderChatMessage(m))
 	}
 	st := a.ScreenTitle()
 	ui.Title = resolveLangLines(filterHudControlText(flattenRawtext(st.Title)))

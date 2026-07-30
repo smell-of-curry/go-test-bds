@@ -188,11 +188,16 @@ func TestFlattenRawtextSubstitutesEveryWithShape(t *testing.T) {
 func TestResolveLangLines(t *testing.T) {
 	installTestLang(t, map[string]string{
 		"showdown.moves.growl.shortDesc": "Lowers the foe's Attack.",
+		"death.attack.inWall":            "%1$s suffocated in a wall",
 	})
 	in := "b:1_normal .growl\nshowdown.moves.growl.shortDesc"
 	want := "b:1_normal .growl\nLowers the foe's Attack."
 	if got := resolveLangLines(in); got != want {
 		t.Fatalf("resolveLangLines=%q want %q", got, want)
+	}
+	// Bare key with no Parameters: strip unfilled %1$s rather than show it.
+	if got := resolveLangLines("death.attack.inWall"); got != "suffocated in a wall" {
+		t.Fatalf("unfilled strip=%q", got)
 	}
 	// No table → untouched.
 	activeLang.Store(nil)

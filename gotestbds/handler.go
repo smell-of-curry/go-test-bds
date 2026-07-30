@@ -61,7 +61,11 @@ type actionEnvelope struct {
 }
 
 // HandleReceiveMessage stores ordinary chat and dispatches [RUN_ACTION] instructions.
-func (h *TestingHandler) HandleReceiveMessage(a *actor.Actor, msg string) {
+//
+// @param a The actor that received the message.
+// @param msg The packet.Text Message field.
+// @param parameters Optional translation Parameters from the Text packet.
+func (h *TestingHandler) HandleReceiveMessage(a *actor.Actor, msg string, parameters []string) {
 	h.logger.Debug("received message", "message", msg)
 
 	actualMessage := h.extractMessageContent(msg)
@@ -77,7 +81,7 @@ func (h *TestingHandler) HandleReceiveMessage(a *actor.Actor, msg string) {
 		return
 	}
 
-	a.RecordMessage(actualMessage)
+	a.RecordMessage(actualMessage, parameters...)
 }
 
 // extractMessageContent extracts the actual message from either plain string or raw text format

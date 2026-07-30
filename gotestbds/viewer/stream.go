@@ -836,7 +836,7 @@ func (s *Stream) emitHudEvents(a *actor.Actor) {
 			Type: "chat",
 			Bot:  s.name,
 			Tick: tick,
-			Text: resolveLangLines(flattenRawtext(m.Text)),
+			Text: renderChatMessage(m),
 		}
 		data, _ := json.Marshal(cf)
 		s.emitRaw("chat", data)
