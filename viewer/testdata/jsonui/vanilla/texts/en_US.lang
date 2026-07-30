@@ -1,0 +1,4 @@
+## Vanilla fixture lang (override target)
+phud.playerPing.label=VANILLA Ping: 
+fixture.shared=vanilla
+fixture.only_vanilla=only vanilla

@@ -136,7 +136,9 @@ export function buildResolver(
       shallowAssign(merged, d.props);
     }
 
-    const vars = collectVariables(chain, varOverrides, globalVars);
+    const vars = resolveVarAliases(
+      collectVariables(chain, varOverrides, globalVars),
+    );
     const substituted = substituteVars(merged, vars) as PropertyBag;
 
     const type =
@@ -157,6 +159,8 @@ export function buildResolver(
     const controls: ResolvedChild[] = [];
     if (Array.isArray(controlsRaw)) {
       for (const entry of controlsRaw) {
+        // Pass alias-resolved vars so children see `$var_index: 2`, not
+        // `$var_index: "$pokemon_id_index"` (sidebar empty-plate leak).
         const child = resolveControlEntry(entry, namespace, vars, resolving);
         if (child) controls.push(child);
       }
@@ -256,7 +260,9 @@ export function buildResolver(
       overrideVars[`$${varName}`] = substituteVars(v, parentVars);
     }
     // Parent scope $vars must flow into the child (sidebar `$var_size`, etc.).
-    const childVars = { ...parentVars, ...overrideVars };
+    // Re-resolve aliases so `$var_index: "$pokemon_id_index"` becomes a number
+    // once the instance supplies `$pokemon_id_index`.
+    const childVars = resolveVarAliases({ ...parentVars, ...overrideVars });
     // Non-$ instance props also override after child resolve — pass as var-less
     // property overrides by re-merging onto the resolved child.
     const child = resolve(refNs, refName, childVars, stack);
@@ -625,7 +631,35 @@ function collectVariablesFromProps(
 ): PropertyBag {
   const vars = { ...base };
   applyVarDeclarations(vars, props, true);
-  return vars;
+  return resolveVarAliases(vars);
+}
+
+/**
+ * Chase `$alias` values in a var map (`$var_index` → `$pokemon_id_index` → 2).
+ *
+ * Template props often set `$var_index: "$pokemon_id_index"` while the instance
+ * supplies the numeric `$pokemon_id_index`. Without this, children inherit the
+ * literal alias string and every slot parses field 0.
+ *
+ * @param vars - Raw variable map.
+ * @returns map with aliases resolved (multi-pass, cycle-safe).
+ */
+function resolveVarAliases(vars: PropertyBag): PropertyBag {
+  const out: PropertyBag = { ...vars };
+  for (let pass = 0; pass < 8; pass++) {
+    let changed = false;
+    for (const [k, v] of Object.entries(out)) {
+      if (typeof v !== "string" || !/^\$[A-Za-z_][A-Za-z0-9_]*$/.test(v))
+        continue;
+      if (!(v in out)) continue;
+      const next = out[v];
+      if (next === v) continue;
+      out[k] = next as PropertyBag[string];
+      changed = true;
+    }
+    if (!changed) break;
+  }
+  return out;
 }
 
 /**

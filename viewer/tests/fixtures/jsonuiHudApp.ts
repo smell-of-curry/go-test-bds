@@ -99,6 +99,8 @@ void runtime.ready.then(() => {
   runtime.onFrame(makeState());
   document.body.dataset.ready = "1";
   document.body.dataset.frameMs = String(runtime.lastFrameMs);
+  let lastVitals: VitalsFrame | null = null;
+  let lastPhud: Record<string, string> = {};
   const api = {
     runtime,
     /**
@@ -107,16 +109,30 @@ void runtime.ready.then(() => {
      * @param phudExtra - Token → value; use `""` to clear a token.
      */
     setPhud(phudExtra: Record<string, string>): void {
-      runtime.onFrame(makeState(phudExtra));
+      lastPhud = phudExtra;
+      runtime.onFrame(makeState(lastPhud, lastVitals));
       document.body.dataset.frameMs = String(runtime.lastFrameMs);
     },
     /**
-     * Re-render survival HUD from a vitals frame (clears PHUD extras).
+     * Re-render survival HUD from a vitals frame (keeps last PHUD extras).
      *
      * @param vitals - Vitals SSE payload.
      */
     setVitals(vitals: VitalsFrame): void {
-      runtime.onFrame(makeState({}, vitals));
+      lastVitals = vitals;
+      runtime.onFrame(makeState(lastPhud, lastVitals));
+      document.body.dataset.frameMs = String(runtime.lastFrameMs);
+    },
+    /**
+     * Set PHUD tokens and vitals in one frame.
+     *
+     * @param phudExtra - Token map.
+     * @param vitals - Vitals frame.
+     */
+    setHud(phudExtra: Record<string, string>, vitals: VitalsFrame): void {
+      lastPhud = phudExtra;
+      lastVitals = vitals;
+      runtime.onFrame(makeState(lastPhud, lastVitals));
       document.body.dataset.frameMs = String(runtime.lastFrameMs);
     },
   };

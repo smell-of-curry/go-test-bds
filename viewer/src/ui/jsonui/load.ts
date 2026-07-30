@@ -19,6 +19,15 @@ export interface UiPackInfo {
 export interface UiLoadClient {
   getPacks(): Promise<UiPackInfo[]>;
   fetchPackJson<T = unknown>(packId: string, path: string): Promise<T | null>;
+  /**
+   * Fetch a non-JSON pack file as UTF-8 text (e.g. `texts/en_US.lang`).
+   * Missing → null (404).
+   *
+   * @param packId - Pack id from GET /packs.
+   * @param path - Pack-relative path.
+   * @returns file text, or null when absent.
+   */
+  fetchPackText(packId: string, path: string): Promise<string | null>;
 }
 
 interface UiDefsFile {
@@ -34,16 +43,22 @@ export interface UiFileSet {
    * Keys are `$name` strings.
    */
   globals: PropertyBag;
+  /**
+   * Merged `texts/en_US.lang` across packs (later pack wins per key).
+   * Used when a label has `localize: true`.
+   */
+  lang: Record<string, string>;
 }
 
 /**
  * Load every ui file referenced by any pack's `ui/_ui_defs.json`, plus the
- * side-channel `ui/_global_variables.json` from every pack (not listed in defs).
- * Later packs may add ui paths; each path is fetched from every pack that has it.
- * Sources are emitted lowest-priority pack first.
+ * side-channel `ui/_global_variables.json` and `texts/en_US.lang` from every
+ * pack (not listed in defs). Later packs may add ui paths; each path is
+ * fetched from every pack that has it. Sources are emitted lowest-priority
+ * pack first. Lang keys merge the same way (later pack wins).
  *
- * @param client - Pack list + per-pack JSON fetch (injectable for tests).
- * @returns file layers + merged globals map.
+ * @param client - Pack list + per-pack JSON/text fetch (injectable for tests).
+ * @returns file layers + merged globals map + merged lang table.
  */
 export async function loadUiFileSet(client: UiLoadClient): Promise<UiFileSet> {
   const packs = (await client.getPacks()).slice().sort((a, b) => {
@@ -55,6 +70,7 @@ export async function loadUiFileSet(client: UiLoadClient): Promise<UiFileSet> {
   const paths: string[] = [];
   const seen = new Set<string>();
   const globals: PropertyBag = {};
+  const lang: Record<string, string> = {};
 
   for (const pack of packs) {
     const globalDoc = await client.fetchPackJson<unknown>(
@@ -62,6 +78,9 @@ export async function loadUiFileSet(client: UiLoadClient): Promise<UiFileSet> {
       "ui/_global_variables.json",
     );
     mergeGlobalVariables(globals, globalDoc);
+
+    const langText = await client.fetchPackText(pack.id, "texts/en_US.lang");
+    if (langText != null) Object.assign(lang, parseLangFile(langText));
 
     const defs = await client.fetchPackJson<UiDefsFile>(
       pack.id,
@@ -87,7 +106,52 @@ export async function loadUiFileSet(client: UiLoadClient): Promise<UiFileSet> {
       files.push({ packId: pack.id, path, raw });
     }
   }
-  return { files, globals };
+  return { files, globals, lang };
+}
+
+/**
+ * Parse a Bedrock `texts/<locale>.lang` file into a key→value map.
+ *
+ * Format: `key=value` per line; `#` / `##` full-line comments; trailing
+ * comment after a tab is stripped; CRLF tolerated. Values keep interior and
+ * trailing spaces (lang entries like `Current Ping: ` rely on that).
+ *
+ * @param text - Raw `.lang` file contents.
+ * @returns flat translation table.
+ */
+export function parseLangFile(text: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const rawLine of text.split(/\r?\n/)) {
+    if (!rawLine || rawLine.startsWith("#")) continue;
+    const eq = rawLine.indexOf("=");
+    if (eq <= 0) continue;
+    const key = rawLine.slice(0, eq).trim();
+    if (!key) continue;
+    let value = rawLine.slice(eq + 1);
+    const tab = value.indexOf("\t");
+    if (tab >= 0) value = value.slice(0, tab);
+    out[key] = value;
+  }
+  return out;
+}
+
+/**
+ * Look up a label's text in a lang table when `localize` is truthy.
+ * Misses leave the text unchanged (raw key stays visible — useful for
+ * spotting missing translations).
+ *
+ * @param text - Label text (often a lang key).
+ * @param localize - Element `localize` prop.
+ * @param lang - Merged pack lang table.
+ * @returns translated text, or the original when not localizing / miss.
+ */
+export function localizeLabelText(
+  text: string,
+  localize: unknown,
+  lang: Readonly<Record<string, string>> | undefined,
+): string {
+  if (localize !== true || !lang || !text) return text;
+  return lang[text] ?? text;
 }
 
 /**

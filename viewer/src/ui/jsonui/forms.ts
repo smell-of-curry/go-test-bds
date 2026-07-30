@@ -67,6 +67,8 @@ export interface FormRendererDeps {
   guiScale?: number;
   viewport?: Viewport;
   measureText?: MeasureText;
+  /** Merged pack lang table for `localize: true` labels. */
+  lang?: Readonly<Record<string, string>>;
 }
 
 export interface FormRenderer {
@@ -288,6 +290,7 @@ export function createFormRenderer(deps: FormRendererDeps): FormRenderer {
     engineRoot = renderTree(layout, host, {
       guiScale,
       assets: deps.assets,
+      lang: deps.lang,
     });
     tagCollectionIndices(layout, engineRoot);
     applyHover();

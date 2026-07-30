@@ -6,10 +6,13 @@ import { test } from "node:test";
 
 import {
   loadUiFileSet,
+  localizeLabelText,
+  parseLangFile,
   parseLooseJson,
   parseUiRawFile,
   type UiLoadClient,
 } from "./load";
+import { createFixtureUiClient } from "./fixtureClient";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fixtures = join(here, "../../../testdata/jsonui");
@@ -88,9 +91,12 @@ test("loadUiFileSet: unions defs, per-pack fetch, pack order", async () => {
     async fetchPackJson(packId, path) {
       return (store.get(`${packId}:${path}`) as never) ?? null;
     },
+    async fetchPackText() {
+      return null;
+    },
   };
 
-  const { files, globals } = await loadUiFileSet(client);
+  const { files, globals, lang } = await loadUiFileSet(client);
   const paths = files.map((f) => `${f.packId}:${f.path}`);
   assert.deepEqual(paths, [
     "vanilla:ui/hud_screen.json",
@@ -101,6 +107,7 @@ test("loadUiFileSet: unions defs, per-pack fetch, pack order", async () => {
   assert.equal(files[0]!.raw.namespace, "hud");
   assert.equal(files[3]!.raw.namespace, "sidebar");
   assert.deepEqual(globals, {});
+  assert.deepEqual(lang, {});
 });
 
 test("loadUiFileSet: skips missing pack files", async () => {
@@ -118,6 +125,9 @@ test("loadUiFileSet: skips missing pack files", async () => {
       if (path === "ui/ok.json") {
         return { namespace: "ok", e: { type: "label" } } as T;
       }
+      return null;
+    },
+    async fetchPackText() {
       return null;
     },
   };
@@ -154,6 +164,9 @@ test("loadUiFileSet: globals merge, later pack wins", async () => {
       if (path === "ui/_ui_defs.json") return { ui_defs: [] } as T;
       return null;
     },
+    async fetchPackText() {
+      return null;
+    },
   };
   const { files, globals } = await loadUiFileSet(client);
   assert.equal(files.length, 0);
@@ -179,4 +192,71 @@ test("parseLooseJson: real _global_variables fixtures", () => {
   assert.ok(typeof vanilla.$generic_button_text_color !== "undefined");
   assert.equal(typeof poke.$string_parser, "string");
   assert.ok((poke.$string_parser as string).includes("$var_size"));
+});
+
+test("parseLangFile: comments, tab trailers, CRLF", () => {
+  const text =
+    "## section\r\n" +
+    "# line comment\r\n" +
+    "a=one\r\n" +
+    "b=two\t# trail\r\n" +
+    "c=keep space \r\n" +
+    "\r\n" +
+    "d=##not a comment value\r\n";
+  assert.deepEqual(parseLangFile(text), {
+    a: "one",
+    b: "two",
+    c: "keep space ",
+    d: "##not a comment value",
+  });
+});
+
+test("localizeLabelText: localize true hits / miss unchanged", () => {
+  const lang = { "phud.playerPing.label": "Current Ping: " };
+  assert.equal(
+    localizeLabelText("phud.playerPing.label", true, lang),
+    "Current Ping: ",
+  );
+  assert.equal(localizeLabelText("missing.key", true, lang), "missing.key");
+  assert.equal(
+    localizeLabelText("phud.playerPing.label", false, lang),
+    "phud.playerPing.label",
+  );
+});
+
+test("loadUiFileSet: lang merge, later pack wins, 404 ok", async () => {
+  const client: UiLoadClient = {
+    async getPacks() {
+      return [
+        { id: "vanilla", priority: 0 },
+        { id: "server", priority: 1 },
+        { id: "empty", priority: 2 },
+      ];
+    },
+    async fetchPackJson<T = unknown>(
+      _packId: string,
+      path: string,
+    ): Promise<T | null> {
+      if (path === "ui/_ui_defs.json") return { ui_defs: [] } as T;
+      return null;
+    },
+    async fetchPackText(packId: string, path: string): Promise<string | null> {
+      if (path !== "texts/en_US.lang") return null;
+      if (packId === "vanilla") return "shared=vanilla\nonly_v=1\n";
+      if (packId === "server") return "shared=server\nping=Current Ping: \n";
+      return null;
+    },
+  };
+  const { lang } = await loadUiFileSet(client);
+  assert.equal(lang.shared, "server");
+  assert.equal(lang.only_v, "1");
+  assert.equal(lang.ping, "Current Ping: ");
+});
+
+test("loadUiFileSet: real fixture lang override order", async () => {
+  const { lang } = await loadUiFileSet(createFixtureUiClient(fixtures));
+  assert.equal(lang["phud.playerPing.label"], "Current Ping: ");
+  assert.equal(lang["fixture.shared"], "pokebedrock");
+  assert.equal(lang["fixture.only_vanilla"], "only vanilla");
+  assert.equal(lang["fixture.with_tab"], "hello");
 });

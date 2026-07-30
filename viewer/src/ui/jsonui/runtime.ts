@@ -51,11 +51,12 @@ export interface JsonUiRuntime {
  */
 export function createFetchUiClient(assetBaseUrl: string): UiLoadClient {
   const base = assetBaseUrl.replace(/\/$/, "");
-  // AssetClient already implements getPacks + fetchPackJson.
+  // AssetClient already implements getPacks + fetchPackJson + fetchPackText.
   const assets = new AssetClient(base);
   return {
     getPacks: () => assets.getPacks() as Promise<UiPackInfo[]>,
     fetchPackJson: (packId, path) => assets.fetchPackJson(packId, path),
+    fetchPackText: (packId, path) => assets.fetchPackText(packId, path),
   };
 }
 
@@ -106,11 +107,12 @@ export function createJsonUiRuntime(opts: JsonUiRuntimeOptions): JsonUiRuntime {
   host.appendChild(formsHost);
 
   const ready = (async () => {
-    const { files, globals } = await loadUiFileSet(client);
+    const { files, globals, lang } = await loadUiFileSet(client);
     resolver = buildResolver(files, globals);
     hud = createHudRenderer(resolver, hudLayer, {
       guiScale,
       assets,
+      lang,
       viewportCss: {
         width: 1024,
         height: 576,
@@ -120,6 +122,7 @@ export function createJsonUiRuntime(opts: JsonUiRuntimeOptions): JsonUiRuntime {
       resolver,
       globals,
       assets,
+      lang,
       host: formsHost,
       guiScale,
     });

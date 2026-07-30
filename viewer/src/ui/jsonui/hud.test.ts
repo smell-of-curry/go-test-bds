@@ -134,6 +134,28 @@ describe("title quirk", () => {
     applyTitleQuirk(root, "Level Up!");
     assert.equal(root.props.visible, true);
   });
+
+  it("hides title chrome when title string is empty", () => {
+    const bg: ResolvedElement = {
+      type: "image",
+      name: "title_background",
+      namespace: "hud",
+      props: { visible: true },
+      controls: [],
+      bindings: [],
+    };
+    const root: ResolvedElement = {
+      type: "stack_panel",
+      name: "hud_title_text",
+      namespace: "hud",
+      props: { visible: true },
+      controls: [{ id: "title_background", element: bg }],
+      bindings: [],
+    };
+    applyTitleQuirk(root, "");
+    assert.equal(root.props.visible, false);
+    assert.equal(bg.props.visible, false);
+  });
 });
 
 describe("heartIcons", () => {
@@ -177,9 +199,38 @@ describe("vitalsGlobals visibility", () => {
     assert.equal(src.global("#level_number"), "0");
     assert.equal(src.global("#hotbar_elipses_left_visible"), false);
     assert.equal(src.global("#hotbar_elipses_right_visible"), false);
+    // xpProgress > 0 still wants the thin XP strip; level glyph stays hidden.
     assert.equal(src.global("#hotbar_with_xp_bar"), true);
     assert.equal(src.global("#hotbar_no_xp_bar"), false);
     assert.equal(src.global("#hotbar_with_locator_bar"), false);
+  });
+
+  it("hides XP strip when level and progress are both zero", () => {
+    const src = bindingSourceFromState(
+      emptyState({
+        vitals: {
+          v: 1,
+          type: "vitals",
+          bot: "Bot",
+          tick: 1,
+          health: 20,
+          maxHealth: 20,
+          food: 20,
+          air: 300,
+          maxAir: 300,
+          armor: 0,
+          xpLevel: 0,
+          xpProgress: 0,
+          selectedSlot: 0,
+          hotbar: Array(9).fill(null),
+        },
+      }),
+      "",
+    );
+    assert.equal(src.global("#hotbar_with_xp_bar"), false);
+    assert.equal(src.global("#hotbar_no_xp_bar"), true);
+    assert.equal(src.global("#is_not_riding_bubbles"), false);
+    assert.equal(src.global("#is_armor_visible"), false);
   });
 
   it("shows level number when xpLevel > 0", () => {

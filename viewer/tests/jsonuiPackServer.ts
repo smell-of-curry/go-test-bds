@@ -72,7 +72,11 @@ export function handleJsonUiPackRequest(
       res.end("missing");
       return true;
     }
-    res.writeHead(200, { ...CORS, "content-type": "application/json" });
+    const isLang = /\.lang$/i.test(abs);
+    res.writeHead(200, {
+      ...CORS,
+      "content-type": isLang ? "text/plain; charset=utf-8" : "application/json",
+    });
     res.end(readFileSync(abs));
     return true;
   }

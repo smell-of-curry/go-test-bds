@@ -296,3 +296,27 @@ test("pokebedrock sidebar fixture parses", () => {
   assert.ok(raw);
   assert.ok(Object.keys(raw!.elements).length > 0);
 });
+
+test("sidebar $var_index aliases resolve to numeric field indices", () => {
+  const globals = parseLooseJson<Record<string, unknown>>(
+    readFileSync(join(fixtures, "pokebedrock/_global_variables.json"), "utf8"),
+  );
+  const sidebar = parseLooseJson(
+    readFileSync(join(fixtures, "pokebedrock/phud/sidebar.json"), "utf8"),
+  );
+  const r = buildResolver(
+    [src("pokebedrock", "ui/phud/sidebar.json", sidebar)],
+    globals,
+  );
+  const main = r.resolve("phud_sidebar", "main");
+  assert.ok(main);
+  const dock = main!.controls.find((c) => c.id === "dock")!.element;
+  const holder = dock.controls.find((c) => c.id === "pokemon_holder")!.element;
+  const p1 = holder.controls.find((c) => c.id === "pokemon1")!.element;
+  const p3 = holder.controls.find((c) => c.id === "pokemon3")!.element;
+  const data1 = p1.controls.find((c) => c.id === "pokemon_data")!.element;
+  const data3 = p3.controls.find((c) => c.id === "pokemon_data")!.element;
+  assert.equal(data1.props.$var_index, 2);
+  assert.equal(data3.props.$var_index, 16);
+  assert.notEqual(data1.props.$var_index, "$pokemon_id_index");
+});

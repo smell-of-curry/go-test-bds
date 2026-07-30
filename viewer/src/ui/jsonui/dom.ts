@@ -4,6 +4,7 @@
  */
 
 import { formatCodesToFragment } from "../formatCodes";
+import { localizeLabelText } from "./load";
 import type { LayoutNode } from "./layout";
 
 /** Maps a pack-relative texture path to a fetchable URL. */
@@ -25,6 +26,8 @@ export interface RenderOptions {
   assets: JsonUiAssets;
   /** Optional natural sizes for UV background math. */
   textureSizes?: TextureSizeMap;
+  /** Merged pack lang table for `localize: true` labels. */
+  lang?: Readonly<Record<string, string>>;
   /**
    * Called once per unknown control `type`.
    *
@@ -336,7 +339,12 @@ function applyLabel(
   // A leading `#` at paint time is an unresolved binding name (resolved
   // bindings overwrite `text` with the final string). The real client renders
   // an unbound label empty, never the literal binding name.
-  const text = raw.startsWith("#") ? "" : raw;
+  const unbound = raw.startsWith("#") ? "" : raw;
+  const text = localizeLabelText(
+    unbound,
+    node.element.props.localize,
+    opts.lang,
+  );
   const fontScale =
     typeof node.element.props.font_scale_factor === "number"
       ? node.element.props.font_scale_factor

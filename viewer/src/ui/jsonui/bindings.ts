@@ -133,9 +133,23 @@ export function stripDollar(name: string): string {
  * @returns Stored value, or undefined.
  */
 function readVariable(props: PropertyBag, name: string): unknown {
-  if (`$${name}` in props) return props[`$${name}`];
-  if (name in props) return props[name];
-  return undefined;
+  let v: unknown =
+    `$${name}` in props
+      ? props[`$${name}`]
+      : name in props
+        ? props[name]
+        : undefined;
+  // Chase `$alias` (sidebar `$var_index` → `$pokemon_id_index` → number).
+  for (
+    let i = 0;
+    i < 8 && typeof v === "string" && /^\$[A-Za-z_][A-Za-z0-9_]*$/.test(v);
+    i++
+  ) {
+    const next = props[v] ?? props[v.slice(1)];
+    if (next === undefined || next === v) break;
+    v = next;
+  }
+  return v;
 }
 
 /**

@@ -234,6 +234,19 @@ function stripScrollChrome(el: ResolvedElement): ResolvedElement {
  * @returns true when the control must be dropped from layout.
  */
 function isIgnored(props: PropertyBag): boolean {
+  // common_buttons stacks default/hover/pressed/locked panels. Without a real
+  // pointer-state machine, drop only the non-default faces (hover/locked were
+  // painting white focus_border_white / White slabs over the battle grid).
+  // Do NOT key off `$default_state === false` — parents declare
+  // `$default_state|default: false` before the child sets `$default_state: true`.
+  if (
+    props.$hover_state === true ||
+    props.$pressed_state === true ||
+    props.$locked_state === true
+  ) {
+    return true;
+  }
+
   const raw = props.ignored;
   if (raw === true) return true;
   if (raw === false || raw === undefined || raw === null) return false;
@@ -243,7 +256,17 @@ function isIgnored(props: PropertyBag): boolean {
   try {
     const value = evalExpr(parseExpr(src.startsWith("(") ? src : `(${src})`), {
       binding: () => undefined,
-      variable: (name) => props[`$${name}`] ?? props[name],
+      variable: (name) => {
+        const v = props[`$${name}`] ?? props[name];
+        if (v !== undefined) return v;
+        // common_buttons images use `(not $button_image_visible)` / border
+        // with `|default: true` on the parent panel; if the flag never landed
+        // on this child, treat missing as visible (real client default).
+        if (name === "button_image_visible" || name === "border_visible") {
+          return true;
+        }
+        return undefined;
+      },
     });
     if (typeof value === "boolean") return value;
     if (typeof value === "number") return value !== 0;
@@ -806,7 +829,7 @@ function layoutGrid(
     );
   }
 
-  // ponytail: grid_item_template synthesis needs collection data + resolver — cells from controls only.
+  // grid_item_template hosts are expanded in collections.expandCollections.
   return {
     element: el,
     box: selfBox,
@@ -981,10 +1004,14 @@ function positionWithAnchors(
   const parentAy = parent.y + parent.h * from.y;
   const selfAx = size.w * to.x;
   const selfAy = size.h * to.y;
-  return {
-    x: parentAx - selfAx + offset.x,
-    y: parentAy - selfAy + offset.y,
-  };
+  let x = parentAx - selfAx + offset.x;
+  const y = parentAy - selfAy + offset.y;
+  // Right-anchored controls with a +x offset (sidebar dock `47%`) hang past
+  // the parent; the real client clips to the screen edge, so flush right.
+  if (from.x >= 0.999 && x + size.w > parent.x + parent.w) {
+    x = parent.x + parent.w - size.w;
+  }
+  return { x, y };
 }
 
 function resolveOffset(

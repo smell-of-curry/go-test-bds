@@ -136,6 +136,61 @@ export function resolveFactoryTemplate(
 }
 
 /**
+ * Resolve `grid_item_template` for a collection grid host.
+ *
+ * @param host - Grid element with `grid_item_template` + `collection_name`.
+ * @param resolver - UI resolver.
+ * @returns template element, or undefined.
+ */
+export function resolveGridItemTemplate(
+  host: ResolvedElement,
+  resolver: UiResolver,
+): ResolvedElement | undefined {
+  const ref = host.props.grid_item_template;
+  if (typeof ref !== "string" || !ref) return undefined;
+  const parsed = parseControlRef(ref, host.namespace);
+  if (!parsed) return undefined;
+  return resolver.resolve(parsed.namespace, parsed.name);
+}
+
+/**
+ * Infer `[cols, rows]` when a grid omits `grid_dimensions`.
+ *
+ * Horizontal grids (starter picker) size cells from the template width
+ * percent (`15%` → 6 columns). Falls back to 6×N to match PokeBedrock's
+ * `ButtonsPerRow`.
+ *
+ * @param host - Grid host props.
+ * @param template - Resolved item template.
+ * @param itemCount - Collection length.
+ * @returns column and row counts.
+ */
+export function inferGridDimensions(
+  host: ResolvedElement,
+  template: ResolvedElement,
+  itemCount: number,
+): [number, number] {
+  const existing = host.props.grid_dimensions;
+  if (Array.isArray(existing) && existing.length >= 2) {
+    return [
+      Math.max(1, Math.floor(Number(existing[0]) || 1)),
+      Math.max(1, Math.floor(Number(existing[1]) || 1)),
+    ];
+  }
+  let cols = 6;
+  const size = template.props.size;
+  if (Array.isArray(size) && typeof size[0] === "string") {
+    const m = /^(\d+(?:\.\d+)?)%$/.exec(size[0].trim());
+    if (m) {
+      const pct = Number(m[1]);
+      if (pct > 0) cols = Math.max(1, Math.floor(100 / pct));
+    }
+  }
+  const rows = Math.max(1, Math.ceil(Math.max(itemCount, 1) / cols));
+  return [cols, rows];
+}
+
+/**
  * Expand every `collection_name` + `factory` host in `el` into N children.
  * Does not apply bindings — call {@link bindResolvedTree} after.
  *
@@ -292,9 +347,10 @@ export function countCollectionInstances(
   collectionName: string,
 ): number {
   let n = 0;
-  if (el.props.collection_name === collectionName && el.props.factory) {
-    n += el.controls.length;
-  }
+  const isHost =
+    el.props.collection_name === collectionName &&
+    (!!el.props.factory || typeof el.props.grid_item_template === "string");
+  if (isHost) n += el.controls.length;
   for (const c of el.controls) {
     n += countCollectionInstances(c.element, collectionName);
   }
@@ -343,6 +399,23 @@ function expandInPlace(
       }
       el.controls = children;
     }
+  } else if (collName && typeof el.props.grid_item_template === "string") {
+    // PokeBedrock starter picker: `picker_panel_grid` uses grid_item_template
+    // + #maximum_grid_items, not a factory stack.
+    const items = collections[collName] ?? [];
+    const template = resolveGridItemTemplate(el, resolver);
+    if (template) {
+      const children: ResolvedChild[] = [];
+      for (let i = 0; i < items.length; i++) {
+        const inst = cloneResolved(template);
+        inst.props = { ...inst.props, collection_index: i };
+        expandInPlace(inst, resolver, collections);
+        children.push({ id: `${inst.name}_${i}`, element: inst });
+      }
+      el.controls = children;
+      const [cols, rows] = inferGridDimensions(el, template, items.length);
+      el.props.grid_dimensions = [cols, rows];
+    }
   }
 
   for (const child of el.controls) {
@@ -351,8 +424,8 @@ function expandInPlace(
 }
 
 /**
- * When `el` is a collection host that already has factory children, map each
- * child id suffix / order to a collection index.
+ * When `el` is a collection host that already has factory/grid children, map
+ * each child id suffix / order to a collection index.
  */
 function factoryChildScope(
   el: ResolvedElement,
@@ -363,7 +436,10 @@ function factoryChildScope(
     typeof el.props.collection_name === "string"
       ? el.props.collection_name
       : "";
-  if (!collName || !el.props.factory) return undefined;
+  const isHost =
+    !!collName &&
+    (!!el.props.factory || typeof el.props.grid_item_template === "string");
+  if (!isHost) return undefined;
   const items = collections[collName] ?? [];
   return {
     name: collName,

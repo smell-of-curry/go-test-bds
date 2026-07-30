@@ -194,6 +194,29 @@ export class AssetClient {
   }
 
   /**
+   * Fetch raw text from a specific pack (`GET /pack/<id>/...`).
+   * Used for `.lang` files that are not JSON.
+   *
+   * @param packId - Pack id from GET /packs.
+   * @param path - Pack-relative path.
+   * @returns file text or null on 404.
+   */
+  async fetchPackText(packId: string, path: string): Promise<string | null> {
+    const key = normalizePath(path);
+    const res = await fetch(
+      `${this.baseUrl}/pack/${encodeURIComponent(packId)}/${key
+        .split("/")
+        .map(encodeURIComponent)
+        .join("/")}`,
+    );
+    if (res.status === 404) return null;
+    if (!res.ok) {
+      throw new Error(`GET /pack/${packId}/${key} → ${res.status}`);
+    }
+    return res.text();
+  }
+
+  /**
    * Fetch a JSON file from every pack in stack order (lowest priority first).
    * Missing packs are skipped.
    *

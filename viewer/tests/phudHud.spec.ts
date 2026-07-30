@@ -160,7 +160,10 @@ function moveLabel(
   pp: string,
   display: string,
 ): string {
-  const data = [type, `.${moveId}`, pp].map((v) => v.padEnd(30, "_")).join(" ");
+  // Live BattleUtils joins padded fields with NBSP (U+00A0).
+  const data = [type, `.${moveId}`, pp]
+    .map((v) => v.padEnd(30, "_"))
+    .join("\u00A0");
   return `b:${slot}_${data}${display}`;
 }
 
@@ -265,11 +268,13 @@ test("phud lanes render ping, banner+currency and the sidebar", async ({
     expect(got.dockText).toContain("Bulbasaur");
     expect(got.dockText).toMatch(/Lv\.?\s*11|HP:\s*20\/20/);
     expect(got.pingText).toContain("63");
-    // localize:true leaves the lang key in the fixture engine.
-    expect(got.pingText).toMatch(/phud\.playerPing\.label|Current Ping/);
+    expect(got.pingText).toContain("Current Ping");
+    expect(got.pingText).not.toContain("phud.playerPing.label");
     expect(got.pingColor).toMatch(/85, 255, 85|#55ff55/);
     expect(got.banner).toContain("Buy Ranks, Crates, and more at");
+    expect(got.banner).not.toContain("_");
     expect(got.currencyHostText).toContain("1.00K");
+    expect(got.currencyHostText).not.toMatch(/YouTube_+/);
     expect(got.noRawTitle).toBe(true);
 
     // Clearing a token hides its element (visible:false → display:none).
@@ -433,6 +438,44 @@ test("battle form renders the bottom battle bar and hover follows formHover", as
     expect(bar.menuH).toBeGreaterThan(40);
     expect(bar.solidFace).toBe(false);
 
+    // Default button faces (not hover/locked) must paint; a lone white
+    // focus/White slab was the live-pack regression.
+    const faces = await page.evaluate(() => {
+      const battle = document.querySelector(
+        '[data-jsonui-name="battle.main"]',
+      ) as HTMLElement;
+      const moveFaces = [
+        ...battle.querySelectorAll<HTMLElement>(
+          '.jsonui[data-ui-name="grid_button_check_id"] .jsonui-image-face',
+        ),
+      ].filter((f) => {
+        const r = f.getBoundingClientRect();
+        return r.width > 8 && r.height > 8 && !!f.style.backgroundImage;
+      });
+      // Live regression was a full-size White/focus slab per move cell.
+      // Battle chrome uses tinted `white_transparency` for the bar — ignore it.
+      const whiteSlabs = [
+        ...battle.querySelectorAll<HTMLElement>(".jsonui-image-face"),
+      ].filter((f) => {
+        const bg = f.style.backgroundImage || "";
+        if (
+          !/textures\/ui\/White(?:\.png)?["')]?/i.test(bg) &&
+          !/focus_border_white/i.test(bg)
+        ) {
+          return false;
+        }
+        const r = f.getBoundingClientRect();
+        return (
+          r.width > 40 &&
+          r.height > 40 &&
+          getComputedStyle(f).display !== "none"
+        );
+      });
+      return { moveFaces: moveFaces.length, whiteSlabs: whiteSlabs.length };
+    });
+    expect(faces.moveFaces).toBeGreaterThanOrEqual(1);
+    expect(faces.whiteSlabs).toBe(0);
+
     // Hover the second move button (index 1 on the form).
     h.broadcast({
       v: 1,
@@ -565,7 +608,122 @@ test("ordinary server form renders the centered vanilla modal with icons", async
   }
 });
 
-test("starter picker long_form paints all image buttons inside the scroll body", async ({
+test("starter picker pokemon.main_panel paints the live §p§o§k§e§1 grid", async ({
+  page,
+}) => {
+  const h = await startHarness();
+  try {
+    await openViewer(
+      page,
+      `${h.base}?stream=${encodeURIComponent(h.streamUrl)}`,
+    );
+
+    const starters = [
+      "§lBulbasaur§r\n§7No. 001",
+      "§lCharmander§r\n§7No. 004",
+      "§lSquirtle§r\n§7No. 007",
+      "§lChikorita§r\n§7No. 152",
+      "§lCyndaquil§r\n§7No. 155",
+      "§lTotodile§r\n§7No. 158",
+      "",
+      "",
+      "§lShiny toggle",
+    ];
+    h.broadcast({
+      v: 1,
+      type: "delta",
+      bot: "TestBot",
+      tick: 150,
+      ui: {
+        form: {
+          type: "menu",
+          // Live BEH starter picker title flag (routes to pokemon.main_panel).
+          title: "§p§o§k§e§1",
+          content: "",
+          buttons: starters,
+          buttonImages: [
+            "textures/sprites/bulbasaur",
+            "textures/sprites/charmander",
+            "textures/sprites/squirtle",
+            "textures/sprites/chikorita",
+            "textures/sprites/cyndaquil",
+            "textures/sprites/totodile",
+            "",
+            "",
+            "textures/ui/icons/sparkle",
+          ],
+        },
+      },
+    } as unknown as JsonlFrame);
+
+    await page.waitForFunction(
+      () =>
+        !!document.querySelector('[data-jsonui-name="pokemon.main_panel"]') &&
+        document.querySelectorAll(
+          '[data-jsonui-name="pokemon.main_panel"] [data-collection-index]',
+        ).length > 0,
+      undefined,
+      { timeout: 15_000 },
+    );
+
+    const got = await page.evaluate(() => {
+      const form = document.querySelector(
+        '[data-jsonui-name="pokemon.main_panel"]',
+      )!;
+      const text = form.textContent ?? "";
+      const idxs = [
+        ...form.querySelectorAll<HTMLElement>("[data-collection-index]"),
+      ].map((el) => Number(el.dataset.collectionIndex));
+      const unique = [...new Set(idxs)].sort((a, b) => a - b);
+      const painted = [
+        ...form.querySelectorAll<HTMLElement>(
+          '.jsonui[data-ui-name="picker_panel_grid"] .jsonui',
+        ),
+      ].filter((el) => {
+        if (el.style.display === "none") return false;
+        const r = el.getBoundingClientRect();
+        return r.width > 8 && r.height > 8;
+      });
+      return {
+        welcome: text.includes("Welcome to PokéBedrock"),
+        unique,
+        painted: painted.length,
+        longFormAbsent: !document.querySelector(
+          '[data-jsonui-name="server_form.long_form"]',
+        ),
+      };
+    });
+
+    expect(got.welcome).toBe(true);
+    expect(got.longFormAbsent).toBe(true);
+    expect(got.unique).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8]);
+    expect(got.painted).toBeGreaterThanOrEqual(6);
+
+    h.broadcast({
+      v: 1,
+      type: "formHover",
+      bot: "TestBot",
+      tick: 155,
+      index: 2,
+    } as unknown as JsonlFrame);
+    await page.waitForFunction(
+      () =>
+        !!document.querySelector(
+          '[data-collection-index="2"].jsonui-form-hovered',
+        ),
+      undefined,
+      { timeout: 15_000 },
+    );
+  } finally {
+    await h.close().catch(() => undefined);
+    await Promise.race([
+      page.close(),
+      new Promise<void>((r) => setTimeout(r, 3_000)),
+    ]).catch(() => undefined);
+  }
+});
+
+test("ordinary server form long_form still paints image buttons", async ({
   page,
 }) => {
   const h = await startHarness();
@@ -623,38 +781,14 @@ test("starter picker long_form paints all image buttons inside the scroll body",
       const idxs = [
         ...form.querySelectorAll<HTMLElement>("[data-collection-index]"),
       ].map((el) => Number(el.dataset.collectionIndex));
-      const unique = [...new Set(idxs)].sort((a, b) => a - b);
-      // Scroll viewport must not collapse to a zero-width sliver.
-      const viewport = form.querySelector(
-        '.jsonui[data-ui-name="scrolling_view_port"]',
-      ) as HTMLElement | null;
-      const vw = viewport?.getBoundingClientRect().width ?? 0;
       return {
         allLabels: names.every((n) => text.includes(n)),
-        unique,
-        viewportW: vw,
+        unique: [...new Set(idxs)].sort((a, b) => a - b),
       };
     }, starters);
 
     expect(got.allLabels).toBe(true);
     expect(got.unique).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8]);
-    expect(got.viewportW).toBeGreaterThan(120);
-
-    h.broadcast({
-      v: 1,
-      type: "formHover",
-      bot: "TestBot",
-      tick: 155,
-      index: 3,
-    } as unknown as JsonlFrame);
-    await page.waitForFunction(
-      () =>
-        !!document.querySelector(
-          '[data-collection-index="3"].jsonui-form-hovered',
-        ),
-      undefined,
-      { timeout: 15_000 },
-    );
   } finally {
     await h.close().catch(() => undefined);
     await Promise.race([

@@ -42,6 +42,12 @@ export function createFixtureUiClient(fixturesRoot: string): UiLoadClient {
         return null;
       }
     },
+    async fetchPackText(packId: string, path: string): Promise<string | null> {
+      // Lang files live outside `ui/` — resolve relative to the pack root.
+      const abs = join(fixturesRoot, packId, path);
+      if (!existsSync(abs) || !statSync(abs).isFile()) return null;
+      return readFileSync(abs, "utf8");
+    },
   };
 }
 

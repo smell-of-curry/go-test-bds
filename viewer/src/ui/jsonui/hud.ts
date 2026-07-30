@@ -7,6 +7,7 @@ import { applyBindings } from "./bindings";
 import { renderTree, type JsonUiAssets } from "./dom";
 import { evalExpr, parseExpr } from "./expr";
 import { layoutTree, type LayoutNode, type MeasureText } from "./layout";
+import { localizeLabelText } from "./load";
 import type {
   BindingSource,
   BindingValue,
@@ -40,6 +41,8 @@ export interface HudRendererOptions {
   guiScale?: number;
   viewportCss?: { width: number; height: number };
   measureText?: MeasureText;
+  /** Merged pack lang table for `localize: true` labels. */
+  lang?: Readonly<Record<string, string>>;
 }
 
 /** Handle returned by {@link createHudRenderer}. */
@@ -206,9 +209,9 @@ function vitalsGlobals(v: VitalsFrame): Record<string, BindingValue> {
     "#level_number": String(v.xpLevel),
     // Vanilla: level glyph only when xpLevel > 0.
     "#level_number_visible": v.xpLevel > 0,
-    // Survival desktop: XP bar + hotbar (not creative / locator variants).
-    "#hotbar_with_xp_bar": true,
-    "#hotbar_no_xp_bar": false,
+    // Survival desktop: XP strip only when the player has XP to show.
+    "#hotbar_with_xp_bar": v.xpLevel > 0 || v.xpProgress > 0,
+    "#hotbar_no_xp_bar": !(v.xpLevel > 0 || v.xpProgress > 0),
     "#hotbar_with_locator_bar": false,
     "#player_health": v.health,
     "#player_max_health": v.maxHealth,
@@ -217,7 +220,7 @@ function vitalsGlobals(v: VitalsFrame): Record<string, BindingValue> {
     "#player_air": v.air,
     "#player_max_air": airMax,
     // Bubbles only when submerged (air below max).
-    "#is_not_riding_bubbles": v.air < airMax,
+    "#is_not_riding_bubbles": airBubblesVisible(v),
     "#is_riding_bubbles": false,
   };
 }
@@ -254,6 +257,7 @@ export function createHudRenderer(
   opts: HudRendererOptions,
 ): HudRenderer {
   const guiScale = opts.guiScale ?? DEFAULT_GUI_SCALE;
+  const lang = opts.lang;
   const measureText =
     opts.measureText ??
     ((text: string, fontScale: number) => ({
@@ -287,6 +291,7 @@ export function createHudRenderer(
         propStore,
         idIndex,
         state.vitals,
+        lang,
       );
       applyTitleQuirk(bound, title);
 
@@ -310,6 +315,7 @@ export function createHudRenderer(
       const paintRoot = renderTree(layout, host, {
         guiScale,
         assets: opts.assets,
+        lang,
         warn: (type) => {
           if (warnedRenderers.has(`type:${type}`)) return;
           warnedRenderers.add(`type:${type}`);
@@ -516,6 +522,7 @@ function bindTree(
   store: Map<string, PropertyBag>,
   idIndex: Map<string, PropertyBag>,
   vitals: VitalsFrame | null,
+  lang?: Readonly<Record<string, string>>,
 ): ResolvedElement {
   const prev = store.get(path) ?? {};
   const out: PropertyBag = { ...el.props };
@@ -558,30 +565,48 @@ function bindTree(
 
   applyElementBindings(el, source, out, idIndex, parentLookup);
   applyPropertyRefs(out);
+  // Translate before layout so 100%c label hosts size to the localized string.
+  if (typeof out.text === "string" && !out.text.startsWith("#")) {
+    out.text = localizeLabelText(
+      out.text,
+      out.localize ?? el.props.localize,
+      lang,
+    );
+  }
+  // Empty party slots still bind ball texture `…/balls/empty` — hide that icon
+  // so only occupied plates paint (matches real client empty = invisible).
+  if (el.name === "ball_icon") {
+    const ball = out.ball_type;
+    if (ball === "empty" || ball === "null" || ball === "") out.visible = false;
+  }
   applyRendererSizing(el, out, vitals);
   applyVisibilityChangedLatch(el, out, source, prev);
-  // Pack grid uses grid_item_template + collection — we don't expand those.
+  // Hotbar grid uses grid_item_template; HUD seeds dimensions. Form grids
+  // (starter picker) expand via collections.expandCollections.
   // Size the host and inject one full-width hotbar_renderer stub instead.
   if (el.name === "hotbar_grid" && vitals) {
     out.size = [HOTBAR_SLOT_W * HOTBAR_SLOTS + 2, HOTBAR_H];
     out.grid_dimensions = [1, 1];
   }
-  // XP strip panels are height-5 hosts that wrap the hotbar; grow them so the
-  // hanging bar isn't clipped by a short stacking-context box.
+  // XP strip HOSTS wrap the hotbar (offset [4,16]); grow only those so the
+  // hanging bar isn't clipped — never the 5px progress-bar images themselves
+  // (that painted the live-capture "two fat green bars").
   if (
     vitals &&
-    (el.name === "empty_progress_bar" ||
-      el.name === "full_progress_bar" ||
-      el.name === "progress_bar_nub" ||
-      el.name === "resizing_xp_bar_with_hotbar" ||
+    (el.name === "resizing_xp_bar_with_hotbar" ||
       el.name === "exp_progress_bar_and_hotbar")
   ) {
     const h = 5 + 16 + HOTBAR_H;
     out.size = [HOTBAR_SLOT_W * HOTBAR_SLOTS + 10, h];
-    // Pack pins max_size height to 5 on the nub — lift the clamp.
-    if (Array.isArray(out.max_size)) {
-      out.max_size = [out.max_size[0] ?? 400, h];
-    }
+  }
+  // Hide the thin XP textures when there is nothing to show.
+  if (
+    vitals &&
+    (el.name === "empty_progress_bar" ||
+      el.name === "full_progress_bar" ||
+      el.name === "progress_bar_nub")
+  ) {
+    if (!(vitals.xpLevel > 0 || vitals.xpProgress > 0)) out.visible = false;
   }
 
   store.set(path, { ...out });
@@ -601,6 +626,7 @@ function bindTree(
       store,
       idIndex,
       vitals,
+      lang,
     ),
   }));
 
@@ -619,6 +645,7 @@ function bindTree(
         store,
         idIndex,
         vitals,
+        lang,
       ),
     });
   }
@@ -810,8 +837,9 @@ function applyRendererSizing(
       break;
     case "bubbles_renderer": {
       out.size = [ICON * HEART_COUNT, ICON];
-      const maxAir = vitals && vitals.maxAir > 0 ? vitals.maxAir : 300;
-      if (!vitals || vitals.air >= maxAir) out.visible = false;
+      // Pack (pokebedrock hud_screen) binds bubbles to `#is_not_riding`, which
+      // stays true on land — native Bedrock still only paints when air < max.
+      if (!vitals || !airBubblesVisible(vitals)) out.visible = false;
       break;
     }
     case "hotbar_renderer":
@@ -841,8 +869,10 @@ function applyRendererSizing(
  * @param title - Raw title string.
  */
 export function applyTitleQuirk(root: ResolvedElement, title: string): void {
-  if (!PHUD_TITLE_RE.test(title)) return;
-  hideTitleSubtree(root);
+  // PHUD tokens: pack's `%.1s = '&_'` never matches (1 vs 2 chars) → chrome leaks.
+  // Empty title: pb hud_title_text is sized 100%×100% so tip backgrounds become
+  // giant translucent black rectangles mid-screen.
+  if (!title || PHUD_TITLE_RE.test(title)) hideTitleSubtree(root);
 }
 
 /**
@@ -861,6 +891,19 @@ function hideTitleSubtree(el: ResolvedElement): void {
     el.props.visible = false;
   }
   for (const c of el.controls) hideTitleSubtree(c.element);
+}
+
+/**
+ * True when the air-bubble row should paint (submerged / air below max).
+ *
+ * @param v - Vitals frame.
+ * @returns whether bubbles are visible.
+ */
+function airBubblesVisible(v: VitalsFrame): boolean {
+  const maxAir = v.maxAir > 0 ? v.maxAir : 300;
+  const air = Number(v.air);
+  if (!Number.isFinite(air)) return false;
+  return air < maxAir;
 }
 
 /**
@@ -984,16 +1027,13 @@ function paintOneRenderer(
       );
       break;
     case "bubbles_renderer": {
-      if (!vitals) {
+      if (!vitals || !airBubblesVisible(vitals)) {
         el.style.display = "none";
         return;
       }
       const maxAir = vitals.maxAir > 0 ? vitals.maxAir : 300;
-      if (vitals.air >= maxAir) {
-        el.style.display = "none";
-        return;
-      }
-      const pts = Math.round((vitals.air / maxAir) * 20);
+      const air = Number(vitals.air);
+      const pts = Math.round((air / maxAir) * 20);
       paintIconRow(
         el,
         heartIcons(pts),

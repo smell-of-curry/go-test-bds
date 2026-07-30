@@ -1,0 +1,5 @@
+## PokeBedrock fixture lang
+# Full-line hash comment
+phud.playerPing.label=Current Ping: 
+fixture.shared=pokebedrock
+fixture.with_tab=hello	# trailing tab comment

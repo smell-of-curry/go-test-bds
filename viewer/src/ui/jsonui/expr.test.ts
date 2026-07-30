@@ -118,6 +118,27 @@ describe("parseExpr / evalExpr operators", () => {
   });
 });
 
+describe("currency.json pad split (real phud_currency bindings)", () => {
+  // From pokebedrock-res ui/phud/currency.json — banner padded to 80 with `_`,
+  // then coin+amount. Quest takes first 80 and strips EVERY `_`; currency takes
+  // the remainder. (Pre-fix: string `-` only removed the first `_`, leaving
+  // literal pad underscores in the top HUD.)
+  const QUEST = "((%.80s * #level_number) - '_')";
+  const CURRENCY = "((#level_number - (%.80s * #level_number)) - '_')";
+
+  it("strips underscore pad and splits banner from coin value", () => {
+    const banner = "Share your Pokemon Journey on TikTok and YouTube";
+    const payload = banner.padEnd(80, "_") + " \uE10E 1.00K";
+    const s = scope({ bindings: { level_number: payload } });
+    const quest = ev(QUEST, s);
+    const curr = ev(CURRENCY, s);
+    assert.equal(quest, banner);
+    assert.equal(String(quest).includes("_"), false);
+    assert.equal(String(curr).includes("_"), false);
+    assert.match(String(curr), /1\.00K/);
+  });
+});
+
 describe("sidebar field extraction (real $string_parser)", () => {
   // From pokebedrock-res ui/_global_variables.json + sidebar.json $var_size: 121
   const STRING_PARSER =

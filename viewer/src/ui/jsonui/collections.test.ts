@@ -121,6 +121,70 @@ describe("expandCollections", () => {
     });
     assert.equal(expanded.controls.length, 2);
   });
+
+  it("expands grid_item_template hosts (starter picker)", () => {
+    const template: ResolvedElement = {
+      type: "panel",
+      name: "button",
+      namespace: "pokemon",
+      props: { size: ["15%", 30] },
+      controls: [],
+      bindings: [
+        {
+          binding_type: "collection",
+          binding_collection_name: "form_buttons",
+          binding_name: "#form_button_text",
+          binding_name_override: "#form_button_text",
+        },
+      ],
+    };
+    const host: ResolvedElement = {
+      type: "grid",
+      name: "picker_panel_grid",
+      namespace: "pokemon",
+      props: {
+        collection_name: "form_buttons",
+        grid_item_template: "pokemon.button",
+        grid_rescaling_type: "horizontal",
+      },
+      controls: [],
+      bindings: [
+        {
+          binding_name: "#form_button_length",
+          binding_name_override: "#maximum_grid_items",
+        },
+      ],
+    };
+    const resolver: UiResolver = {
+      resolve: (ns, name) =>
+        ns === "pokemon" && name === "button" ? template : undefined,
+      screens: () => [],
+    };
+    const items = formButtonsCollection(
+      ["Bulbasaur", "Charmander", "Squirtle", "", "", "", "", "", ""],
+      [
+        "textures/sprites/bulbasaur",
+        "textures/sprites/charmander",
+        "textures/sprites/squirtle",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+      ],
+    );
+    const tree = prepareCollectionTree(
+      host,
+      resolver,
+      source({ "#form_button_length": 9, "#title_text": "§p§o§k§e§1" }),
+      { form_buttons: items },
+    );
+    assert.equal(countCollectionInstances(tree, "form_buttons"), 9);
+    assert.deepEqual(tree.props.grid_dimensions, [6, 2]);
+    assert.equal(tree.controls[0]!.element.props.form_button_text, "Bulbasaur");
+    assert.equal(tree.controls[2]!.element.props.form_button_text, "Squirtle");
+  });
 });
 
 describe("applyBindings collection", () => {

@@ -94,6 +94,18 @@ describe("routeForm", () => {
     assert.equal(r.kind, "long_form");
   });
 
+  it("maps pokemon flag to pokemon.main_panel (starter picker)", () => {
+    const r = routeForm({
+      type: "menu",
+      title: "§p§o§k§e§1",
+      content: "",
+      buttons: ["Bulbasaur"],
+    });
+    assert.equal(r.screen, "pokemon.main_panel");
+    assert.equal(r.flag, "§p§o§k§e");
+    assert.equal(r.kind, "flag");
+  });
+
   it("modal/custom type → custom_form", () => {
     const r = routeForm({
       type: "modal",
@@ -129,6 +141,73 @@ describe("formBindingState", () => {
     assert.equal(
       collections.form_buttons![0]!["#form_button_text"],
       form.buttons[0],
+    );
+  });
+});
+
+describe("starter picker fixture end-to-end", () => {
+  it("expands picker_panel_grid via grid_item_template", () => {
+    const pokemonDoc = parseLooseJson(
+      readFileSync(join(fixtures, "pokebedrock/pokemon/pokemon.json"), "utf8"),
+      "pokemon.json",
+    );
+    const resolver = buildResolver([
+      src("pokebedrock", "ui/pokemon/pokemon.json", pokemonDoc),
+    ]);
+    const form: FormSnapshot = {
+      type: "menu",
+      title: "§p§o§k§e§1",
+      content: "",
+      buttons: [
+        "§lBulbasaur§r\n§7No. 001",
+        "§lCharmander§r\n§7No. 004",
+        "§lSquirtle§r\n§7No. 007",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+      ],
+      buttonImages: [
+        "textures/sprites/bulbasaur",
+        "textures/sprites/charmander",
+        "textures/sprites/squirtle",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+      ],
+    };
+    const prepared = prepareFormTree(resolver, form);
+    assert.ok(prepared, "pokemon.main_panel should resolve");
+    assert.equal(prepared!.route.screen, "pokemon.main_panel");
+
+    let pickerKids = -1;
+    let pickerVisible = false;
+    let stackVisible: boolean | undefined;
+    walk(prepared!.tree, (el) => {
+      if (el.name === "picker_panel_grid") {
+        pickerKids = el.controls.length;
+        pickerVisible = el.props.visible !== false;
+        assert.deepEqual(el.props.grid_dimensions, [6, 2]);
+      }
+      if (el.name === "pokemon_panel_grid" || el.name === "button_stack") {
+        if (el.props.collection_name === "form_buttons" && el.props.factory) {
+          stackVisible = el.props.visible !== false;
+        }
+      }
+    });
+    assert.equal(pickerKids, form.buttons.length);
+    assert.equal(pickerVisible, true, "§1 title shows picker grid");
+    assert.equal(stackVisible, false, "§s stack stays hidden on picker title");
+
+    const texts = collectFormButtonTexts(prepared!.tree);
+    assert.ok(
+      String(texts.get(0)).includes("Bulbasaur"),
+      `button 0: ${texts.get(0)}`,
     );
   });
 });
