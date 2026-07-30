@@ -322,8 +322,9 @@ func TestSlowSubscriberColumnDeliveryConverges(t *testing.T) {
 			keyframes++
 		}
 		frames = append(frames, fr)
-		if _, ok := sub.next(); ok {
-			t.Fatal("more than one world frame pending")
+		drainEventLane(sub)
+		if fr, ok := sub.next(); ok && isWorldFrame(fr.event) {
+			t.Fatalf("more than one world frame pending: %s", fr.event)
 		}
 	}
 

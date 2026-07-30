@@ -48,12 +48,24 @@ type Stream struct {
 	lastTitleWrite  uint64
 	lastParticleSeq uint64
 
+	// Vitals lane — bot goroutine writes fingerprint/throttle; lastVitalsData
+	// is also read on attach (HTTP goroutine) under mu.
+	lastVitalsKey   string // fingerprint of lastVitalsData
+	lastEmittedKey  string // fingerprint of last fan-out
+	lastVitalsAt    time.Time
+	lastVitalsData  []byte
+
 	// lastEncodeAt throttles the world projection — bot goroutine only.
 	lastEncodeAt time.Time
 	// encodeInterval is worldEncodeInterval in production; tests zero it to
 	// drive Tick faster than wall time.
 	encodeInterval time.Duration
 }
+
+// vitalsEmitInterval is the minimum gap between vitals frames. Survival stats
+// change slowly; 10 Hz matches the world-projection throttle and keeps the
+// event lane quiet while the HUD still feels live.
+const vitalsEmitInterval = 100 * time.Millisecond
 
 // worldEncodeInterval is the minimum gap between world projections. Projecting
 // every loaded column each of the client's 20 ticks starved the bot loop below
@@ -220,12 +232,23 @@ func (sub *subscriber) requeueSupersededColumnsLocked(f encodedFrame) {
 	}
 }
 
-// next takes the frame to send, events first.
+// next takes the frame to send.
+//
+// An unsent keyframe wins over the event lane so a fresh attach stays
+// hello → keyframe → … (PROTOCOL.md). Events still beat catch-up deltas —
+// chat/title/vitals must not wait behind world backpressure.
 //
 // @returns the frame and true, or false when there is nothing to send.
 func (sub *subscriber) next() (encodedFrame, bool) {
 	sub.mu.Lock()
 	defer sub.mu.Unlock()
+	if sub.pending != nil && sub.pending.event == "keyframe" {
+		f := *sub.pending
+		sub.pending = nil
+		sub.applyColumnDelivery(f)
+		sub.sent++
+		return f, true
+	}
 	if len(sub.events) > 0 {
 		f := sub.events[0]
 		sub.events = sub.events[1:]
@@ -354,7 +377,9 @@ func (s *Stream) Tick(a *actor.Actor) {
 	if nsubs == 0 {
 		// Nobody watching: skip encode entirely. A later attach sets resync so
 		// the next Tick emits a fresh keyframe — the run must behave the same
-		// whether or not a viewer is attached.
+		// whether or not a viewer is attached. Still refresh vitals so attach
+		// can replay the latest survival stats without waiting for a change.
+		s.cacheVitals(a)
 		return
 	}
 
@@ -388,6 +413,11 @@ func (s *Stream) Tick(a *actor.Actor) {
 		}
 	}
 
+	// Seed vitals before keyframe fan-out so attach/resync can replay them
+	// immediately after the keyframe (next() still prefers the keyframe).
+	s.cacheVitals(a)
+
+	keyframed := false
 	for _, sub := range subs {
 		frame, keyframe, err := s.frameFor(sub, cur, shared, a)
 		if err != nil {
@@ -397,6 +427,16 @@ func (s *Stream) Tick(a *actor.Actor) {
 			continue
 		}
 		sub.pushWorld(frame, keyframe)
+		if keyframe {
+			keyframed = true
+			s.pushVitalsTo(sub)
+		}
+	}
+	if keyframed {
+		// Keyframe path already replayed vitals; align the emit cursor so the
+		// same snapshot is not immediately re-emitted on the event lane.
+		s.lastEmittedKey = s.lastVitalsKey
+		s.lastVitalsAt = time.Now()
 	}
 
 	s.emitHudEvents(a)
@@ -669,7 +709,7 @@ func (s *Stream) DimensionChanged(from, to int32) {
 }
 
 // attach adds a subscriber. The caller sends hello itself; the next Tick that
-// sees resync delivers a keyframe.
+// sees resync delivers a keyframe (and replays latest vitals after it).
 func (s *Stream) attach() *subscriber {
 	sub := &subscriber{
 		wake:             make(chan struct{}, 1),
@@ -880,4 +920,68 @@ func (s *Stream) emitHudEvents(a *actor.Actor) {
 		data, _ := json.Marshal(pf)
 		s.emitRaw("particle", data)
 	}
+
+	s.emitVitals(a, true)
+}
+
+// cacheVitals stores the latest vitals frame without fanning it out — used
+// when nobody is attached so a later keyframe can replay.
+//
+// @param a Live actor on the bot goroutine.
+func (s *Stream) cacheVitals(a *actor.Actor) {
+	s.emitVitals(a, false)
+}
+
+// pushVitalsTo queues the latest vitals snapshot on one subscriber (keyframe
+// attach replay). No-op when nothing has been cached yet.
+//
+// @param sub Subscriber that just received a keyframe.
+func (s *Stream) pushVitalsTo(sub *subscriber) {
+	s.mu.Lock()
+	data := s.lastVitalsData
+	s.mu.Unlock()
+	if len(data) == 0 {
+		// Build once so a cold stream still seeds the HUD on the opening keyframe.
+		return
+	}
+	sub.pushEvent(encodedFrame{event: "vitals", data: data})
+}
+
+// emitVitals builds the survival-HUD frame, stores it for keyframe replay, and
+// optionally fans it out when the fingerprint changed and the throttle allows.
+//
+// @param a Live actor on the bot goroutine.
+// @param fanout When true, emit to subscribers on change (throttled).
+func (s *Stream) emitVitals(a *actor.Actor, fanout bool) {
+	vf := collectVitals(s.name, a)
+	key := vitalsFingerprint(vf)
+	if key != s.lastVitalsKey {
+		data, err := json.Marshal(vf)
+		if err != nil {
+			return
+		}
+		s.mu.Lock()
+		s.lastVitalsData = data
+		s.mu.Unlock()
+		s.lastVitalsKey = key
+	}
+	if !fanout {
+		return
+	}
+	if key == s.lastEmittedKey {
+		return
+	}
+	now := time.Now()
+	if !s.lastVitalsAt.IsZero() && now.Sub(s.lastVitalsAt) < vitalsEmitInterval {
+		return
+	}
+	s.mu.Lock()
+	data := s.lastVitalsData
+	s.mu.Unlock()
+	if len(data) == 0 {
+		return
+	}
+	s.lastEmittedKey = key
+	s.lastVitalsAt = now
+	s.emitRaw("vitals", data)
 }

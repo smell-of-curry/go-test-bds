@@ -52,6 +52,16 @@ func (t *Test) RunCtx(ctx context.Context) error {
 		t.InstructionPrefix = DefaultInstructionPrefix
 	}
 
+	// Register the stream before dial/spawn. The capture harness starts as soon
+	// as BDS `list` shows the bot, which is before pack ingest finishes —
+	// delaying Register until NewTestingHandler raced the harness into a
+	// /stream 404 (unknown bot) and killed capture for the whole run.
+	botName := t.Dialer.IdentityData.DisplayName
+	if t.Viewer != nil && botName != "" {
+		t.Viewer.Register(botName)
+		defer t.Viewer.Unregister(botName)
+	}
+
 	t.Logger.Debug("dialing", "address", t.RemoteAddress)
 	conn, err := t.Dialer.DialContext(ctx, "raknet", t.RemoteAddress)
 	if err != nil {
@@ -77,10 +87,6 @@ func (t *Test) RunCtx(ctx context.Context) error {
 	}
 
 	b := bot.NewBot(conn, t.Logger.With("src", "bot"))
-	if t.Viewer != nil {
-		name := t.Dialer.IdentityData.DisplayName
-		defer t.Viewer.Unregister(name)
-	}
 	h := NewTestingHandler(b, t)
 	b.Execute(func(a *actor.Actor) {
 		a.Handle(h)

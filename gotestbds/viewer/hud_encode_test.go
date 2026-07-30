@@ -13,6 +13,8 @@ func TestEncodeUIFiltersProtocolChatNoise(t *testing.T) {
 	a.RecordMessage("[RUN_ACTION]{\"action\":\"jump\"}")
 	a.RecordMessage("[STATUS]{\"status\":\"ok\"}")
 	a.RecordMessage("[GOTESTBDS]{\"kind\":\"testEnd\"}")
+	a.RecordMessage("ping-1785367479587")
+	a.RecordMessage("e2e-ping-run-dev-1")
 	a.RecordMessage("real chat")
 
 	ui := newEncoder("HudBot", 4, 4).encodeUI(a)

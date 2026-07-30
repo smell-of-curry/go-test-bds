@@ -455,6 +455,34 @@ type FormHoverFrame struct {
 	Index int    `json:"index"`
 }
 
+// VitalsHotbarSlot is one hotbar entry on the vitals lane (null = empty).
+type VitalsHotbarSlot struct {
+	TypeID string `json:"typeId"`
+	Count  int    `json:"count"`
+}
+
+// VitalsFrame is the bot's own survival HUD stats on the event lane — hearts,
+// hunger, air, XP, selected slot, and the 9 hotbar stacks. Emitted on change
+// (throttled); latest frame is replayed to a newly attached subscriber.
+//
+// Armor points are stubbed at 0 until a cheap armor-value source exists.
+type VitalsFrame struct {
+	V            int                 `json:"v"`
+	Type         string              `json:"type"`
+	Bot          string              `json:"bot"`
+	Tick         uint64              `json:"tick"`
+	Health       float64             `json:"health"`
+	MaxHealth    float64             `json:"maxHealth"`
+	Food         float64             `json:"food"`
+	Air          int                 `json:"air"`
+	MaxAir       int                 `json:"maxAir"`
+	Armor        int                 `json:"armor"`
+	XPLevel      int                 `json:"xpLevel"`
+	XPProgress   float64             `json:"xpProgress"`
+	SelectedSlot int                 `json:"selectedSlot"`
+	Hotbar       []*VitalsHotbarSlot `json:"hotbar"`
+}
+
 // ParticleFrame is one SpawnParticleEffect on the event lane.
 type ParticleFrame struct {
 	V         int        `json:"v"`

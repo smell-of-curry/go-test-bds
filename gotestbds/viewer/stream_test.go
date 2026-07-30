@@ -27,7 +27,7 @@ func TestSlowSubscriberKeepsLatestWorldWithoutKeyframeRestart(t *testing.T) {
 	addColumn(a.World(), dfworld.ChunkPos{0, 0})
 	a.World().SetBlock(cube.Pos{1, 70, 1}, block.Gold{})
 
-	// First tick → keyframe.
+	// First tick → keyframe (vitals may ride the event lane after it).
 	s.Tick(a)
 	fr, ok := sub.next()
 	if !ok {
@@ -36,6 +36,7 @@ func TestSlowSubscriberKeepsLatestWorldWithoutKeyframeRestart(t *testing.T) {
 	if fr.event != "keyframe" {
 		t.Fatalf("first event=%s", fr.event)
 	}
+	drainEventLane(sub)
 
 	// Several ticks without reading: only the newest world frame is kept.
 	for i := 0; i < 5; i++ {
@@ -59,8 +60,8 @@ func TestSlowSubscriberKeepsLatestWorldWithoutKeyframeRestart(t *testing.T) {
 	if fr.event != "delta" {
 		t.Fatalf("pending event=%s want delta after superseded catch-up (not a keyframe restart)", fr.event)
 	}
-	if _, ok := sub.next(); ok {
-		t.Fatal("more than one world frame kept for a subscriber that is behind")
+	if fr, ok := sub.next(); ok && isWorldFrame(fr.event) {
+		t.Fatalf("more than one world frame kept for a subscriber that is behind: %s", fr.event)
 	}
 	if sub.needsResync() {
 		t.Fatal("resync must stay clear when only catch-up deltas were superseded")
@@ -166,9 +167,35 @@ func TestUnsentKeyframeIsRegeneratedWithFreshBlocks(t *testing.T) {
 	if string(fr.data) == string(before) {
 		t.Fatal("keyframe was not regenerated; the block change is lost")
 	}
-	if _, ok := sub.next(); ok {
-		t.Fatal("more than one world frame kept while behind")
+	drainEventLane(sub)
+	if fr, ok := sub.next(); ok && isWorldFrame(fr.event) {
+		t.Fatalf("more than one world frame kept while behind: %s", fr.event)
 	}
+}
+
+// drainEventLane drops queued non-world event-lane frames (vitals/chat/…).
+// Stops before consuming a pending world frame.
+func drainEventLane(sub *subscriber) {
+	for {
+		sub.mu.Lock()
+		if sub.pending != nil && sub.pending.event == "keyframe" {
+			sub.mu.Unlock()
+			return
+		}
+		if len(sub.events) == 0 {
+			sub.mu.Unlock()
+			return
+		}
+		sub.mu.Unlock()
+		fr, ok := sub.next()
+		if !ok || isWorldFrame(fr.event) {
+			return
+		}
+	}
+}
+
+func isWorldFrame(event string) bool {
+	return event == "keyframe" || event == "delta"
 }
 
 // TestDeltaDoesNotReplaceUnsentKeyframe covers the rule that keeps a subscriber

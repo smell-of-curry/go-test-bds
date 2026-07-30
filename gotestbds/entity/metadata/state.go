@@ -20,6 +20,12 @@ type State struct {
 	hasMarkVariant       bool
 	hasScale             bool
 
+	// Air supply from EntityDataKeyAirSupply / AirSupplyMax (ticks). Absent
+	// until the server sends them — reader defaults to the Bedrock full tank.
+	air, airMax int32
+	hasAir      bool
+	hasAirMax   bool
+
 	// swingSeq counts arm swings observed via packet.Animate. The viewer
 	// diffs the counter to trigger a one-shot swing animation.
 	swingSeq uint32
@@ -122,7 +128,37 @@ func (s *State) Props() map[string]any {
 	if s.hasScale {
 		out["scale"] = s.scale
 	}
+	if s.hasAir {
+		out["air"] = s.air
+	}
+	if s.hasAirMax {
+		out["airMax"] = s.airMax
+	}
 	return out
+}
+
+// defaultAirSupply is Bedrock's full player air tank in ticks when the server
+// has not yet sent EntityDataKeyAirSupply.
+const defaultAirSupply int32 = 300
+
+// Air returns the current air supply in ticks.
+//
+// @returns the last EntityDataKeyAirSupply value, or 300 when never received.
+func (s *State) Air() int32 {
+	if !s.hasAir {
+		return defaultAirSupply
+	}
+	return s.air
+}
+
+// MaxAir returns the maximum air supply in ticks.
+//
+// @returns the last EntityDataKeyAirSupplyMax value, or 300 when never received.
+func (s *State) MaxAir() int32 {
+	if !s.hasAirMax {
+		return defaultAirSupply
+	}
+	return s.airMax
 }
 
 // Decode decodes metadata into State.
@@ -160,6 +196,14 @@ func (s *State) Decode(meta protocol.EntityMetadata) {
 	if sc, ok := scale(meta); ok {
 		s.scale = sc
 		s.hasScale = true
+	}
+	if v, ok := meta[protocol.EntityDataKeyAirSupply]; ok {
+		s.air = asInt32(v)
+		s.hasAir = true
+	}
+	if v, ok := meta[protocol.EntityDataKeyAirSupplyMax]; ok {
+		s.airMax = asInt32(v)
+		s.hasAirMax = true
 	}
 }
 

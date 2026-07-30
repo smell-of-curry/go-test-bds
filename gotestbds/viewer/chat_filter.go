@@ -2,6 +2,7 @@ package viewer
 
 import (
 	"encoding/json"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -19,6 +20,13 @@ var protocolChatPrefixes = []string{
 	"[PROXY_",
 }
 
+// protocolChatPatterns catch non-prefixed test/protocol chat that still must
+// stay out of recordings (SDK e2e round-trip pings, bare ping-<epochMs>).
+var protocolChatPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)^e2e-ping-`),
+	regexp.MustCompile(`(?i)^ping-\d+$`),
+}
+
 // isProtocolChatNoise reports whether text is an internal bot protocol line.
 //
 // @param text Raw chat/system message text.
@@ -30,7 +38,37 @@ func isProtocolChatNoise(text string) bool {
 			return true
 		}
 	}
+	plain := stripSectionSigns(trimmed)
+	for _, re := range protocolChatPatterns {
+		if re.MatchString(plain) {
+			return true
+		}
+	}
 	return false
+}
+
+// stripSectionSigns drops Bedrock § formatting codes so pattern matches see
+// the plain payload ("§eping-1" → "ping-1").
+//
+// @param text Possibly formatted chat text.
+// @returns text with §X pairs removed.
+func stripSectionSigns(text string) string {
+	if !strings.ContainsRune(text, '§') {
+		return text
+	}
+	runes := []rune(text)
+	var b strings.Builder
+	b.Grow(len(runes))
+	for i := 0; i < len(runes); i++ {
+		if runes[i] == '§' {
+			if i+1 < len(runes) {
+				i++
+			}
+			continue
+		}
+		b.WriteRune(runes[i])
+	}
+	return b.String()
 }
 
 // rawtextPart is one element of a Bedrock rawtext message.
