@@ -5,7 +5,15 @@
 // stays real-time. Pure interval/filter computation lives in exported
 // functions so it can be unit-tested without ffmpeg.
 import { execFileSync } from "node:child_process";
-import { existsSync, readdirSync, renameSync, unlinkSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  renameSync,
+  rmSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -115,36 +123,43 @@ export function capIntervals(intervals: Interval[], cap: number): Interval[] {
   return out;
 }
 
+/** One contiguous slice of the source video in the segment plan. */
+export interface PlanPiece {
+  /** Slice start on the source timeline. */
+  startMs: number;
+  /** Slice end, or null for "to the end of the file" (the tail piece). */
+  endMs: number | null;
+  /** Whether this slice plays at the speed-up factor. */
+  fast: boolean;
+}
+
 /**
- * Build the ffmpeg `filter_complex` that plays `intervals` at `factor`x and
- * everything else in real time: alternating trim+setpts pieces concatenated,
- * then re-timed to a constant 25 fps (Playwright's recording rate) so the
- * fast pieces do not carry a 200 fps stream into the output.
+ * Turn sped-up intervals into an alternating slice plan covering the whole
+ * video. Each piece is later encoded by its own ffmpeg invocation and the
+ * results are concatenated.
  *
- * The final piece is left open-ended (`trim=start=` with no `end`) so a
- * duration probe that slightly undershoots the real length never clips the
- * tail of the video.
+ * A single filter_complex (split/trim/concat) did this in one pass until run
+ * 37: ffmpeg feeds every split branch as the input decodes, and frames for
+ * concat inputs whose turn has not come yet queue in RAM — for a 24-minute
+ * recording that buffered ~28 GB of decoded frames and the kernel OOM-killed
+ * ffmpeg (taking the whole manager service down with it, since it shares the
+ * cgroup). Per-piece invocations decode only their slice and stream it out,
+ * so memory stays flat no matter how long the run is.
+ *
+ * The final piece is left open-ended so a duration probe that slightly
+ * undershoots the real length never clips the tail of the video.
  *
  * @param intervals Disjoint sped-up intervals sorted by start time.
  * @param durationMs Total video duration used to place the tail piece.
- * @param factor Speed-up factor for walking intervals (> 1).
- * @returns the filter graph string ending in `[out]`, or null when there is
- * nothing to speed up.
+ * @returns alternating pieces covering [0, end-of-file], or null when there
+ * is nothing to speed up.
  */
-export function buildTimelapseFilter(
+export function buildSegmentPlan(
   intervals: Interval[],
   durationMs: number,
-  factor: number,
-): string | null {
-  if (intervals.length === 0 || factor <= 1) return null;
-  const sec = (ms: number) => (ms / 1000).toFixed(3);
-
-  interface Piece {
-    startMs: number;
-    endMs: number | null;
-    fast: boolean;
-  }
-  const pieces: Piece[] = [];
+): PlanPiece[] | null {
+  if (intervals.length === 0) return null;
+  const pieces: PlanPiece[] = [];
   let cursor = 0;
   for (const iv of intervals) {
     if (iv.startMs > cursor)
@@ -155,23 +170,7 @@ export function buildTimelapseFilter(
   if (cursor < durationMs)
     pieces.push({ startMs: cursor, endMs: null, fast: false });
   pieces[pieces.length - 1].endMs = null;
-
-  const parts: string[] = [];
-  const labels: string[] = [];
-  pieces.forEach((p, i) => {
-    const trim =
-      p.endMs === null
-        ? `trim=start=${sec(p.startMs)}`
-        : `trim=start=${sec(p.startMs)}:end=${sec(p.endMs)}`;
-    const pts = p.fast
-      ? `setpts=(PTS-STARTPTS)/${factor}`
-      : `setpts=PTS-STARTPTS`;
-    parts.push(`[0:v]${trim},${pts}[v${i}]`);
-    labels.push(`[v${i}]`);
-  });
-  parts.push(`${labels.join("")}concat=n=${pieces.length}:v=1:a=0[cat]`);
-  parts.push(`[cat]fps=25[out]`);
-  return parts.join(";");
+  return pieces;
 }
 
 /**
@@ -189,11 +188,13 @@ export function parseDurationMs(text: string): number | null {
 }
 
 /**
- * Filters the timelapse graph needs. Playwright's bundled ffmpeg is built
- * with `--disable-everything` and ships only pad/crop/scale (plus core trim)
- * — it cannot re-time video, so every candidate is probed before use.
+ * Filters the segment encodes need. Playwright's bundled ffmpeg is built
+ * with `--disable-everything` and ships only pad/crop/scale — it cannot
+ * re-time video, so every candidate is probed before use. (The concat
+ * demuxer is not a filter and cannot be probed here; if a candidate lacks
+ * it the join step fails and the raw video is kept.)
  */
-export const REQUIRED_FILTERS = ["trim", "setpts", "concat", "fps"] as const;
+export const REQUIRED_FILTERS = ["setpts", "fps"] as const;
 
 /**
  * @param filtersText Output of `ffmpeg -filters`.
@@ -292,7 +293,8 @@ function playwrightFfmpeg(): string | null {
 export interface TimelapseResult {
   applied: boolean;
   reason?: string;
-  filter?: string;
+  /** Number of encoded plan pieces when applied. */
+  pieces?: number;
   inputDurationMs?: number;
   outputDurationMs?: number;
 }
@@ -351,49 +353,70 @@ export function applyTimelapse(opts: {
     computeWalkIntervals(walkMarks, durationMs),
     MAX_FAST_INTERVALS,
   );
-  const filter = buildTimelapseFilter(intervals, durationMs, factor);
-  if (!filter) {
+  const plan = buildSegmentPlan(intervals, durationMs);
+  if (!plan) {
     log.info("timelapse: no usable walk intervals; leaving the video as-is");
     return { applied: false, reason: "no intervals" };
   }
 
-  // Encode into a sibling temp file and swap only on success: the raw video
-  // never leaves videoPath mid-encode, so a crash or SIGKILL during ffmpeg
-  // (run 35: the manager's kill escalation cut the pass) still leaves a
-  // playable run video rather than a zero-byte one.
+  // Each piece is encoded by its own streaming ffmpeg invocation (see
+  // buildSegmentPlan for why one filter_complex pass is banned: it OOM-killed
+  // the box on long runs), then joined losslessly with the concat demuxer.
+  // The final rename swaps in the result only on success, so a crash or
+  // SIGKILL mid-encode (run 35) still leaves a playable run video.
   const rawPath = rawSiblingPath(videoPath);
   const tmpPath = `${videoPath}.tmp.webm`;
+  const segDir = `${videoPath}.tlseg`;
+  const sec = (ms: number) => (ms / 1000).toFixed(3);
   try {
-    // Mirrors Playwright's own vp8 recording settings so quality/size match
-    // the untouched parts of the run video; realtime deadline keeps the pass
-    // to a fraction of the recording's length. No audio track exists (-an).
+    mkdirSync(segDir, { recursive: true });
+    const segPaths: string[] = [];
+    plan.forEach((p, i) => {
+      const segPath = join(segDir, `seg_${String(i).padStart(3, "0")}.webm`);
+      segPaths.push(segPath);
+      // -ss before -i seeks the input; with -t (a duration, unambiguous
+      // regardless of -ss placement) the invocation decodes only its slice.
+      const args = ["-nostdin", "-y", "-loglevel", "error"];
+      args.push("-ss", sec(p.startMs));
+      if (p.endMs !== null) args.push("-t", sec(p.endMs - p.startMs));
+      args.push("-i", videoPath);
+      const pts = p.fast
+        ? `setpts=(PTS-STARTPTS)/${factor}`
+        : "setpts=PTS-STARTPTS";
+      // fps=25 (Playwright's recording rate) drops the surplus frames a fast
+      // piece would otherwise carry into the output.
+      args.push("-filter:v", `${pts},fps=25`, "-an");
+      // Mirrors Playwright's own vp8 recording settings so quality/size match
+      // the recording; realtime deadline keeps the pass well under the
+      // recording's own length.
+      args.push("-c:v", "libvpx", "-qmin", "0", "-qmax", "50");
+      args.push("-crf", "8", "-b:v", "1M");
+      args.push("-deadline", "realtime", "-cpu-used", "8", segPath);
+      execFileSync(ff, args, { stdio: ["ignore", "ignore", "pipe"] });
+    });
+
+    // concat demuxer + stream copy: every segment shares codec/params, so the
+    // join is a cheap remux. Quoted-and-escaped paths per the demuxer's rules.
+    const listPath = join(segDir, "list.txt");
+    writeFileSync(
+      listPath,
+      segPaths.map((p) => `file '${p.replaceAll("'", "'\\''")}'`).join("\n"),
+    );
     execFileSync(
       ff,
       [
+        "-nostdin",
         "-y",
         "-loglevel",
         "error",
-        "-i",
-        videoPath,
-        "-filter_complex",
-        filter,
-        "-map",
-        "[out]",
-        "-an",
-        "-c:v",
-        "libvpx",
-        "-qmin",
+        "-f",
+        "concat",
+        "-safe",
         "0",
-        "-qmax",
-        "50",
-        "-crf",
-        "8",
-        "-b:v",
-        "1M",
-        "-deadline",
-        "realtime",
-        "-cpu-used",
-        "5",
+        "-i",
+        listPath,
+        "-c",
+        "copy",
         tmpPath,
       ],
       { stdio: ["ignore", "ignore", "pipe"] },
@@ -408,20 +431,22 @@ export function applyTimelapse(opts: {
       `timelapse: ffmpeg failed; keeping the real-time video (${String(err).split("\n")[0]})`,
     );
     return { applied: false, reason: "ffmpeg failed" };
+  } finally {
+    rmSync(segDir, { recursive: true, force: true });
   }
 
   if (keepRaw) renameSync(videoPath, rawPath);
   renameSync(tmpPath, videoPath);
   const outputDurationMs = probeDurationMs(ff, videoPath);
   log.info(
-    `timelapse: x${factor} over ${intervals.length} walk interval(s); ` +
-      `${(durationMs / 1000).toFixed(1)}s -> ` +
+    `timelapse: x${factor} over ${intervals.length} walk interval(s), ` +
+      `${plan.length} piece(s); ${(durationMs / 1000).toFixed(1)}s -> ` +
       `${outputDurationMs ? (outputDurationMs / 1000).toFixed(1) : "?"}s` +
       (keepRaw ? `; raw kept at ${rawPath}` : ""),
   );
   return {
     applied: true,
-    filter,
+    pieces: plan.length,
     inputDurationMs: durationMs,
     ...(outputDurationMs ? { outputDurationMs } : {}),
   };

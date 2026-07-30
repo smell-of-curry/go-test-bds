@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
-  buildTimelapseFilter,
+  buildSegmentPlan,
   capIntervals,
   computeWalkIntervals,
   hasAllFilters,
@@ -108,51 +108,49 @@ test("capIntervals: merges the pair with the smallest gap", () => {
   ]);
 });
 
-test("buildTimelapseFilter: mid-video interval yields normal/fast/normal", () => {
-  const filter = buildTimelapseFilter(
-    [{ startMs: 5000, endMs: 20000 }],
-    30000,
-    8,
-  );
-  assert.equal(
-    filter,
-    "[0:v]trim=start=0.000:end=5.000,setpts=PTS-STARTPTS[v0];" +
-      "[0:v]trim=start=5.000:end=20.000,setpts=(PTS-STARTPTS)/8[v1];" +
-      "[0:v]trim=start=20.000,setpts=PTS-STARTPTS[v2];" +
-      "[v0][v1][v2]concat=n=3:v=1:a=0[cat];[cat]fps=25[out]",
+test("buildSegmentPlan: mid-video interval yields normal/fast/normal", () => {
+  assert.deepEqual(buildSegmentPlan([{ startMs: 5000, endMs: 20000 }], 30000), [
+    { startMs: 0, endMs: 5000, fast: false },
+    { startMs: 5000, endMs: 20000, fast: true },
+    { startMs: 20000, endMs: null, fast: false },
+  ]);
+});
+
+test("buildSegmentPlan: interval at t=0 has no leading piece", () => {
+  assert.deepEqual(buildSegmentPlan([{ startMs: 0, endMs: 4000 }], 10000), [
+    { startMs: 0, endMs: 4000, fast: true },
+    { startMs: 4000, endMs: null, fast: false },
+  ]);
+});
+
+test("buildSegmentPlan: interval reaching EOF is fast and open-ended", () => {
+  assert.deepEqual(buildSegmentPlan([{ startMs: 6000, endMs: 10000 }], 10000), [
+    { startMs: 0, endMs: 6000, fast: false },
+    { startMs: 6000, endMs: null, fast: true },
+  ]);
+});
+
+test("buildSegmentPlan: two legs alternate normal and fast", () => {
+  assert.deepEqual(
+    buildSegmentPlan(
+      [
+        { startMs: 1000, endMs: 3000 },
+        { startMs: 7000, endMs: 9000 },
+      ],
+      10000,
+    ),
+    [
+      { startMs: 0, endMs: 1000, fast: false },
+      { startMs: 1000, endMs: 3000, fast: true },
+      { startMs: 3000, endMs: 7000, fast: false },
+      { startMs: 7000, endMs: 9000, fast: true },
+      { startMs: 9000, endMs: null, fast: false },
+    ],
   );
 });
 
-test("buildTimelapseFilter: interval at t=0 has no leading piece", () => {
-  const filter = buildTimelapseFilter([{ startMs: 0, endMs: 4000 }], 10000, 8);
-  assert.equal(
-    filter,
-    "[0:v]trim=start=0.000:end=4.000,setpts=(PTS-STARTPTS)/8[v0];" +
-      "[0:v]trim=start=4.000,setpts=PTS-STARTPTS[v1];" +
-      "[v0][v1]concat=n=2:v=1:a=0[cat];[cat]fps=25[out]",
-  );
-});
-
-test("buildTimelapseFilter: interval reaching EOF is fast and open-ended", () => {
-  const filter = buildTimelapseFilter(
-    [{ startMs: 6000, endMs: 10000 }],
-    10000,
-    4,
-  );
-  assert.equal(
-    filter,
-    "[0:v]trim=start=0.000:end=6.000,setpts=PTS-STARTPTS[v0];" +
-      "[0:v]trim=start=6.000,setpts=(PTS-STARTPTS)/4[v1];" +
-      "[v0][v1]concat=n=2:v=1:a=0[cat];[cat]fps=25[out]",
-  );
-});
-
-test("buildTimelapseFilter: nothing to do returns null", () => {
-  assert.equal(buildTimelapseFilter([], 10000, 8), null);
-  assert.equal(
-    buildTimelapseFilter([{ startMs: 0, endMs: 5000 }], 10000, 1),
-    null,
-  );
+test("buildSegmentPlan: nothing to do returns null", () => {
+  assert.equal(buildSegmentPlan([], 10000), null);
 });
 
 test("parseDurationMs: reads the ffmpeg banner", () => {
