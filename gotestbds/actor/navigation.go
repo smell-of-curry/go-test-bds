@@ -6,6 +6,7 @@ import (
 	"github.com/df-mc/dragonfly/server/block"
 	"github.com/df-mc/dragonfly/server/block/cube"
 	w "github.com/df-mc/dragonfly/server/world"
+	"github.com/go-gl/mathgl/mgl64"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/mcmath/physics/movement"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/world"
 )
@@ -21,6 +22,16 @@ const (
 	pathfindVisitedCap      = 12000
 	repathCooldownTicks     = 10 // re-FindPath at most every 0.5s when stuck
 	fruitlessRepathLimit    = 3  // stop after this many no-progress re-paths
+
+	// maxSafeFallBlocks is the deepest single drop we allow on a path.
+	// Stair/terrain drops of 1–4 blocks stay fine; deeper pits must be walked
+	// around (or fail as unreachable).
+	maxSafeFallBlocks = 4
+
+	// walkMaxFallDistance is WalkNodeEvaluatorConfig.MaxFallDistance. The lib
+	// rejects when fallDistance >= this value, so maxSafeFallBlocks+1 allows
+	// drops of at most maxSafeFallBlocks.
+	walkMaxFallDistance = maxSafeFallBlocks + 1
 )
 
 // pathSource is the world as the pathfinder is allowed to see it: positions
@@ -67,18 +78,55 @@ func pathfindBudget(dist float64) (maxVisited int, maxDistanceFromStart float64)
 	return maxVisited, maxDistanceFromStart
 }
 
+// walkEvaluatorConfig returns the WalkNodeEvaluator settings used for bot
+// navigation. CanFloat must be true: with the lib default (false), AcceptedNode
+// early-returns OPEN nodes over air voids before MaxFallDistance runs, so
+// paths bridge pits and the bot falls in while following.
+//
+// @param box Entity collision box.
+// @param pos Entity feet position.
+// @returns config for evaluator.WalkNodeEvaluatorConfig.New.
+func walkEvaluatorConfig(box cube.BBox, pos mgl64.Vec3) evaluator.WalkNodeEvaluatorConfig {
+	return evaluator.WalkNodeEvaluatorConfig{
+		Box:             box,
+		Pos:             pos,
+		CanPathDoors:    true,
+		CanOpenDoors:    true,
+		CanFloat:        true,
+		MaxFallDistance: walkMaxFallDistance,
+	}
+}
+
+// pathHasExcessiveFall reports whether any single step in p drops more than
+// maxDrop blocks (lib seam belt-and-suspenders).
+//
+// @param p Computed path.
+// @param maxDrop Maximum allowed Y drop between consecutive nodes.
+// @returns true if a deeper drop is present.
+func pathHasExcessiveFall(p *pathfind.Path, maxDrop int) bool {
+	if p == nil {
+		return false
+	}
+	for i := 1; i < p.Count(); i++ {
+		if p.Node(i-1).Y()-p.Node(i).Y() > maxDrop {
+			return true
+		}
+	}
+	return false
+}
+
 // Navigate builds a path to the destination position.
 func (a *Actor) Navigate(target cube.Pos) {
-	cfg := evaluator.WalkNodeEvaluatorConfig{
-		Box:          a.State().Box(),
-		Pos:          a.Position(),
-		CanPathDoors: true,
-		CanOpenDoors: true,
-	}
+	cfg := walkEvaluatorConfig(a.State().Box(), a.Position())
 	pos := cube.PosFromVec3(a.Position())
 	dist := a.Position().Sub(target.Vec3()).Len()
 	maxVisited, maxDist := pathfindBudget(dist)
-	a.path = pathfind.FindPath(cfg.New(), pathSource{a.world}, pos, target, maxVisited, maxDist, 1)
+	p := pathfind.FindPath(cfg.New(), pathSource{a.world}, pos, target, maxVisited, maxDist, 1)
+	if pathHasExcessiveFall(p, maxSafeFallBlocks) {
+		// Treat as unreachable so recovery teleport can take over immediately.
+		p = pathfind.NewPath(nil, false, target)
+	}
+	a.path = p
 	a.navigationTarget = target
 }
 
@@ -103,17 +151,21 @@ func (a *Actor) tickNavigating() {
 	}
 
 	path := a.path
-	destination := path.NextNode().Pos
 	pos := cube.PosFromVec3(a.Position())
 
-	if pos == destination {
+	// Check done before NextNode: a continuation can leave the path already
+	// exhausted at tick start (manual Advance in tests, or last tick's Advance).
+	if !path.IsDone() && pos == path.NextNode().Pos {
 		path.Advance()
 	}
 
 	if path.IsDone() {
-		// creating continuation for the path.
+		// Partial path finished without reaching the goal (e.g. target only
+		// reachable by falling into a pit). Count as fruitless so we fail fast
+		// instead of re-pathing forever around the rim; real progress while
+		// walking the previous segment already reset fruitlessRepaths.
 		if !path.Reached() {
-			a.repathTowardTarget(false)
+			a.repathTowardTarget(true)
 			return
 		}
 		a.path = nil
@@ -121,6 +173,8 @@ func (a *Actor) tickNavigating() {
 		a.Handler().HandleReachTarget(a)
 		return
 	}
+
+	destination := path.NextNode().Pos
 
 	input := movement.Input{Forward: true}
 	if destination.Y() > pos.Y() {
