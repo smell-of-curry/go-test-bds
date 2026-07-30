@@ -566,6 +566,7 @@ async function handleCapture(
       test: mark.test,
       label: frame.label,
     });
+    await uploadJsonUiDump(stillsPage, opts, mark, frame.label, tick, log);
     log.info(`capture: uploaded still id=${frame.id} tick=${tick}`);
   } catch (err) {
     // Carry the real error: run 15 reported "within 239999ms" for a failure
@@ -611,15 +612,70 @@ async function uploadFailureStill(
       test: mark.test,
       label: "failure",
     });
+    await uploadJsonUiDump(page, opts, mark, "failure", tick, log);
     log.info(`capture: uploaded failure still tick=${tick}`);
   } catch (err) {
     log.warn(`capture: failure still failed: ${String(err)}`);
   }
 }
 
+/**
+ * Dump visible JSON UI nodes next to a still (always-on, best-effort).
+ *
+ * @param page - Playwright page with `__viewer.debugJsonUiDump`.
+ * @param opts - Harness options (stream / bot / size).
+ * @param mark - Current run/suite/test.
+ * @param label - Still label (becomes `<label>-jsonui.json`).
+ * @param tick - World tick at capture.
+ * @param log - Logger.
+ */
+async function uploadJsonUiDump(
+  page: Page,
+  opts: HarnessOptions,
+  mark: MarkState,
+  label: string | undefined,
+  tick: number,
+  log: Logger,
+): Promise<void> {
+  try {
+    const dump = await page.evaluate(() => {
+      const v = (
+        window as unknown as {
+          __viewer?: { debugJsonUiDump?: () => unknown };
+        }
+      ).__viewer;
+      return v?.debugJsonUiDump?.() ?? null;
+    });
+    if (!dump) {
+      log.warn("capture: jsonui dump skipped (no debugJsonUiDump)");
+      return;
+    }
+    const body = Buffer.from(JSON.stringify(dump), "utf8");
+    const base = label && label.length > 0 ? label : "still";
+    await postArtifact(opts.stream, {
+      kind: "jsonui-dump",
+      ext: "json",
+      bot: opts.bot,
+      body,
+      tick,
+      width: opts.width,
+      height: opts.height,
+      runId: mark.runId,
+      suite: mark.suite,
+      test: mark.test,
+      label: `${base}-jsonui`,
+    });
+    log.info(
+      `capture: uploaded jsonui dump label=${base}-jsonui bytes=${body.length}`,
+    );
+  } catch (err) {
+    log.warn(`capture: jsonui dump failed: ${String(err)}`);
+  }
+}
+
 interface ArtifactHeaders {
-  kind: "screenshot" | "video";
-  ext: "png" | "webm";
+  kind: "screenshot" | "video" | "jsonui-dump";
+  ext: "png" | "webm" | "json";
   bot: string;
   body: Buffer;
   captureId?: string;

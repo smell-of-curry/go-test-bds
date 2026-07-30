@@ -5,6 +5,7 @@ import { columnKey, sectionIndex } from "./protocol";
 import type { ViewerScene } from "./scene";
 import type { Store } from "./store";
 import type { HudHandle } from "./ui";
+import { collectJsonUiDump, type JsonUiDump } from "./ui/jsonui/debugDump";
 
 /** Exact shape exposed on `window.__viewer` for Playwright / the capture harness. */
 export interface ViewerHandle {
@@ -77,6 +78,11 @@ export interface ViewerHandle {
     pendingRemesh: number;
     gl: string | null;
   };
+  /**
+   * Visible JSON UI nodes + live PHUD map for capture stills.
+   * Always-on debug artefact (cheap DOM walk).
+   */
+  debugJsonUiDump: () => JsonUiDump;
 }
 
 declare global {
@@ -283,6 +289,13 @@ export function installViewerHandle(
         pendingRemesh: scene.pendingRemeshCount,
         gl: gl ? `${gl.drawingBufferWidth}x${gl.drawingBufferHeight}` : null,
       };
+    },
+    debugJsonUiDump: () => {
+      const state = store.getState();
+      const host =
+        (document.querySelector(".jsonui-hud-host") as HTMLElement | null) ??
+        (document.getElementById("json-hud") as HTMLElement | null);
+      return collectJsonUiDump(host, state.tick, state.phud);
     },
   };
 }

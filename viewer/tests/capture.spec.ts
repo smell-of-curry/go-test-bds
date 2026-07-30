@@ -461,10 +461,17 @@ test("capture harness: stills + one run video against fake bot", async () => {
     expect(bot.artifacts.filter((a) => a.kind === "video")).toHaveLength(1);
 
     for (const a of bot.artifacts) {
-      expect(a.kind === "screenshot" || a.kind === "video").toBe(true);
-      expect(a.ext === "png" || a.ext === "webm").toBe(true);
+      expect(
+        a.kind === "screenshot" ||
+          a.kind === "video" ||
+          a.kind === "jsonui-dump",
+      ).toBe(true);
+      expect(a.ext === "png" || a.ext === "webm" || a.ext === "json").toBe(
+        true,
+      );
       expect(a.bot).toBe("TestBot");
     }
+    expect(bot.artifacts.some((a) => a.kind === "jsonui-dump")).toBe(true);
 
     const code = await exitPromise;
     expect(code).toBe(0);
