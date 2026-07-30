@@ -111,6 +111,31 @@ describe("layoutTree sizing", () => {
     assert.deepEqual(boxOf(tree), { x: 0, y: 0, w: 60, h: 32 });
   });
 
+  it("%c uses child AABB, not distance from parent origin", () => {
+    // player_ping: Black tip sizes to 100%c + pad around a bottom-anchored row.
+    const root = el(
+      "panel",
+      {
+        size: ["100%c + 6px", "100%c + 2px"],
+        anchor_from: "bottom_middle",
+        anchor_to: "bottom_middle",
+      },
+      [
+        child(
+          "content",
+          el("panel", {
+            size: [80, 10],
+            anchor_from: "bottom_middle",
+            anchor_to: "bottom_middle",
+          }),
+        ),
+      ],
+    );
+    const tree = layoutTree(root, VP, { measureText: measureStub });
+    assert.equal(tree.box.w, 86);
+    assert.equal(tree.box.h, 12);
+  });
+
   it("resolves %cm as max child", () => {
     const root = el(
       "panel",

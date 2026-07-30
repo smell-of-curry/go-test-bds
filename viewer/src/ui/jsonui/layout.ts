@@ -1007,10 +1007,11 @@ function measureChildren(
     maxY = Math.max(maxY, node.box.y + node.box.h);
   }
 
-  // %c = total width/height of children bounding box (relative to content parent origin).
-  // When children were laid out in a 0-origin contentParent, prefer sum-of-extents from 0.
-  const childrenW = any ? Math.max(0, maxX - Math.min(0, minX)) : 0;
-  const childrenH = any ? Math.max(0, maxY - Math.min(0, minY)) : 0;
+  // %c = axis-aligned bounding box of children (not "from origin"). Including
+  // the origin (`min(0,min)`) bloated bottom/right-anchored tips like
+  // `player_ping.main` (Black.png) to ~full HUD — live run-43 center black box.
+  const childrenW = any ? Math.max(0, maxX - minX) : 0;
+  const childrenH = any ? Math.max(0, maxY - minY) : 0;
 
   return { nodes, childrenW, childrenH, maxChildW, maxChildH };
 }

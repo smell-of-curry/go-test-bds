@@ -318,7 +318,7 @@ test("empty slots hidden; air/armor/xp gated; no fat green XP", async ({
       ),
     ).toBe(true);
 
-    // Sidebar-only: loadingScreen dirt must stay hidden (was the ~70% black box).
+    // Sidebar-only: loadingScreen dirt must stay hidden.
     const loadingHidden = await page.evaluate(() => {
       const el = document.querySelector(
         '[data-jsonui-name="phud_loadingScreen.main"]',
@@ -327,6 +327,63 @@ test("empty slots hidden; air/armor/xp gated; no fat green XP", async ({
       return getComputedStyle(el).display === "none";
     });
     expect(loadingHidden).toBe(true);
+
+    // Live run-43: player_ping.main Black.png bloated to ~608×580 via broken
+    // %c AABB (origin padding). Tip must hug the label row.
+    await page.evaluate(() => {
+      (
+        window as unknown as {
+          __jsonUi: {
+            setHud: (
+              phud: Record<string, string>,
+              v: {
+                v: 1;
+                type: "vitals";
+                bot: string;
+                tick: number;
+                health: number;
+                maxHealth: number;
+                food: number;
+                air: number;
+                maxAir: number;
+                xpLevel: number;
+                xpProgress: number;
+                selectedSlot: number;
+                hotbar: null[];
+              },
+            ) => void;
+          };
+        }
+      ).__jsonUi.setHud(
+        { playerPing: "§a0" },
+        {
+          v: 1,
+          type: "vitals",
+          bot: "TestBot",
+          tick: 4,
+          health: 20,
+          maxHealth: 20,
+          food: 18,
+          air: 300,
+          maxAir: 300,
+          xpLevel: 0,
+          xpProgress: 0,
+          selectedSlot: 0,
+          hotbar: Array.from({ length: 9 }, () => null),
+        },
+      );
+    });
+    const pingBox = await page.evaluate(() => {
+      const el = document.querySelector(
+        '[data-jsonui-name="player_ping.main"]',
+      ) as HTMLElement | null;
+      if (!el || getComputedStyle(el).display === "none") return null;
+      const r = el.getBoundingClientRect();
+      return { w: r.width, h: r.height };
+    });
+    expect(pingBox).not.toBeNull();
+    expect(pingBox!.h).toBeLessThan(40);
+    expect(pingBox!.w).toBeLessThan(280);
 
     // Live land glitch: AirSupply=0 must not paint a bubble row.
     await page.evaluate(() => {
