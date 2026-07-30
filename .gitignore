@@ -16,3 +16,5 @@ artifacts/.cache/
 **/.cache/baseline/
 
 viewer/dist.sha
+
+viewer/testdata/jsonui/live-v2.18.5*
