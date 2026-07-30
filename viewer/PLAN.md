@@ -686,6 +686,10 @@ noon so goldens need no regen.
       pack stack so a server's custom UI appears. **Punt for recordings:** the
       DOM approximation (forms panel + `#player-hud`) is the deliberate scope —
       JSON UI is a fidelity goal, not what capture needs to read as gameplay.
+      _(PokeBedrock's PHUD tokens do get a dedicated DOM renderer —
+      `viewer/src/ui/phud/`: party sidebar, top banner/currency/ping, battle
+      bottom bar, waypoint strip — driven by the raw `phud` SSE lane rather
+      than by parsing the pack's JSON UI files.)_
 - [ ] Render text with the client's font atlas, including glyph pages, format
       codes and the custom glyph sheets packs ship. The vanilla atlas is not in
       `bedrock-samples`, so this stage owns the answer to where it comes from.
