@@ -74,6 +74,9 @@ export function hudTitleString(
   state: WorldState,
   lastPhudTitle: string,
 ): string {
+  // PHUD writes land on the title channel; a stale plain `ui.title` (nametag
+  // echo, leftover SetTitle) must not win and leave tip Black chrome painted.
+  if (PHUD_TITLE_RE.test(lastPhudTitle)) return lastPhudTitle;
   const plain = state.ui?.title ?? "";
   if (plain) return plain;
   return lastPhudTitle;
@@ -199,12 +202,12 @@ export function bindingSourceFromState(
  * @returns global binding map for survival HUD.
  */
 function vitalsGlobals(v: VitalsFrame): Record<string, BindingValue> {
-  const airMax = v.maxAir > 0 ? v.maxAir : 300;
+  const airMax = (v.maxAir ?? 0) > 0 ? (v.maxAir as number) : 300;
   return {
     "#show_survival_ui": true,
     "#hotbar_visible": true,
     "#hud_visible_centered": true,
-    "#is_armor_visible": v.armor > 0,
+    "#is_armor_visible": (v.armor ?? 0) > 0,
     "#exp_progress": v.xpProgress,
     "#level_number": String(v.xpLevel),
     // Vanilla: level glyph only when xpLevel > 0.
@@ -216,8 +219,8 @@ function vitalsGlobals(v: VitalsFrame): Record<string, BindingValue> {
     "#player_health": v.health,
     "#player_max_health": v.maxHealth,
     "#hunger": v.food,
-    "#player_armor": v.armor,
-    "#player_air": v.air,
+    "#player_armor": v.armor ?? 0,
+    "#player_air": v.air ?? airMax,
     "#player_max_air": airMax,
     // Bubbles only when submerged (air below max).
     "#is_not_riding_bubbles": airBubblesVisible(v),
@@ -833,7 +836,9 @@ function applyRendererSizing(
       break;
     case "armor_renderer":
       out.size = [ICON * HEART_COUNT, ICON];
-      if (!vitals || vitals.armor <= 0) out.visible = false;
+      // `undefined <= 0` is false — missing armor must hide (empty icons look
+      // like a red/white row next to hearts).
+      if (!vitals || !((vitals.armor ?? 0) > 0)) out.visible = false;
       break;
     case "bubbles_renderer": {
       out.size = [ICON * HEART_COUNT, ICON];
@@ -879,16 +884,20 @@ export function applyTitleQuirk(root: ResolvedElement, title: string): void {
  * @param el - Tree node.
  */
 function hideTitleSubtree(el: ResolvedElement): void {
+  const n = el.name;
   if (
-    el.name === "hud_title_text" ||
-    el.name === "title_frame" ||
-    el.name === "title_background" ||
-    el.name === "title" ||
-    el.name === "subtitle_frame" ||
-    el.name === "subtitle" ||
-    el.name === "subtitle_background"
+    n === "hud_title_text" ||
+    n === "title_frame" ||
+    n === "title_background" ||
+    n === "title" ||
+    n === "subtitle_frame" ||
+    n === "subtitle" ||
+    n === "subtitle_background" ||
+    n.endsWith("title_background") ||
+    n.endsWith("subtitle_background")
   ) {
     el.props.visible = false;
+    el.props.alpha = 0;
   }
   for (const c of el.controls) hideTitleSubtree(c.element);
 }
@@ -896,13 +905,23 @@ function hideTitleSubtree(el: ResolvedElement): void {
 /**
  * True when the air-bubble row should paint (submerged / air below max).
  *
+ * Missing/`undefined` air fields hide (omit ≠ full tank). `air <= 0` also
+ * hides: BDS often reports AirSupply=0 on land, and empty-bubble textures
+ * still paint a full blue row.
+ *
  * @param v - Vitals frame.
  * @returns whether bubbles are visible.
  */
-function airBubblesVisible(v: VitalsFrame): boolean {
-  const maxAir = v.maxAir > 0 ? v.maxAir : 300;
+export function airBubblesVisible(v: VitalsFrame): boolean {
+  if (v.air === undefined || v.air === null) return false;
+  if (v.maxAir === undefined || v.maxAir === null) return false;
+  const maxAir = Number(v.maxAir);
   const air = Number(v.air);
-  if (!Number.isFinite(air)) return false;
+  if (!Number.isFinite(air) || !Number.isFinite(maxAir) || maxAir <= 0)
+    return false;
+  // Fully empty tank on the wire is treated as "not submerged" — drowning at
+  // exactly 0 is rare in captures; land AirSupply=0 is common.
+  if (air <= 0) return false;
   return air < maxAir;
 }
 
@@ -1008,14 +1027,15 @@ function paintOneRenderer(
         true,
       );
       break;
-    case "armor_renderer":
-      if (!vitals || vitals.armor <= 0) {
+    case "armor_renderer": {
+      const armorPts = vitals?.armor ?? 0;
+      if (!vitals || !(armorPts > 0)) {
         el.style.display = "none";
         return;
       }
       paintIconRow(
         el,
-        heartIcons(vitals.armor),
+        heartIcons(armorPts),
         {
           full: "textures/ui/armor_full",
           half: "textures/ui/armor_half",
@@ -1026,12 +1046,13 @@ function paintOneRenderer(
         false,
       );
       break;
+    }
     case "bubbles_renderer": {
       if (!vitals || !airBubblesVisible(vitals)) {
         el.style.display = "none";
         return;
       }
-      const maxAir = vitals.maxAir > 0 ? vitals.maxAir : 300;
+      const maxAir = (vitals.maxAir ?? 0) > 0 ? (vitals.maxAir as number) : 300;
       const air = Number(vitals.air);
       const pts = Math.round((air / maxAir) * 20);
       paintIconRow(

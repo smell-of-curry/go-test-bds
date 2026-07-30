@@ -460,7 +460,7 @@ describe("layoutTree layer and visibility", () => {
   });
 });
 
-describe("layoutTree grid", () => {
+describe("layoutTree grid placement", () => {
   it("places children in a uniform grid", () => {
     const root = el(
       "grid",
@@ -541,5 +541,53 @@ describe("layoutTree self-axis %x/%y", () => {
     );
     const tree = layoutTree(root, VP, { measureText: measureStub });
     assert.deepEqual(boxOf(tree.children[0]!), { x: 0, y: 0, w: 32, h: 32 });
+  });
+});
+
+describe("layoutTree grid", () => {
+  it("sizes 100%c height from rows × item height (starter picker)", () => {
+    const items: ResolvedChild[] = [];
+    for (let i = 0; i < 12; i++) {
+      items.push(
+        child(
+          `b${i}`,
+          el("panel", {
+            size: ["15%", 30],
+            anchor_from: "top_middle",
+            anchor_to: "top_middle",
+            collection_index: i,
+          }),
+        ),
+      );
+    }
+    const root = el(
+      "grid",
+      {
+        size: ["100%", "100%c"],
+        grid_dimensions: [6, 2],
+        anchor_from: "top_left",
+        anchor_to: "top_left",
+      },
+      items,
+      "picker_panel_grid",
+    );
+    const tree = layoutTree(
+      root,
+      { width: 600, height: 400 },
+      {
+        measureText: measureStub,
+      },
+    );
+    // 2 rows × 30px item height — must not collapse to 0.
+    assert.equal(tree.box.h, 60);
+    assert.equal(tree.box.w, 600);
+    // Item width 15% of grid → ~90% of cell (cell = 100px) → ~90px.
+    assert.ok(
+      tree.children[0]!.box.w > 50,
+      `cell item w=${tree.children[0]!.box.w}`,
+    );
+    assert.equal(tree.children[0]!.box.h, 30);
+    // Second row drops below the first.
+    assert.ok(tree.children[6]!.box.y > tree.children[0]!.box.y);
   });
 });

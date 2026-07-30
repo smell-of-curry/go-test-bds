@@ -438,6 +438,34 @@ test("battle form renders the bottom battle bar and hover follows formHover", as
     expect(bar.menuH).toBeGreaterThan(40);
     expect(bar.solidFace).toBe(false);
 
+    // Live pack: button_grid_middle has alpha:0 on the image host — children
+    // (move grid) must remain opaque (run-41 white-slab / empty-moves bug).
+    const alphaHost = await page.evaluate(() => {
+      const middle = document.querySelector(
+        '[data-jsonui-name="battle.main"] .jsonui[data-ui-name="button_grid_middle"]',
+      ) as HTMLElement | null;
+      const face = middle?.querySelector(
+        ":scope > .jsonui-image-face",
+      ) as HTMLElement | null;
+      const moves = [
+        ...document.querySelectorAll<HTMLElement>(
+          '[data-jsonui-name="battle.main"] .jsonui[data-ui-name="grid_button_check_id"]',
+        ),
+      ].filter((el) => {
+        if (el.style.display === "none") return false;
+        const r = el.getBoundingClientRect();
+        return r.width > 20 && r.height > 8;
+      });
+      return {
+        hostOpacity: middle?.style.opacity || "1",
+        faceOpacity: face?.style.opacity || "1",
+        moveOnScreen: moves.length,
+      };
+    });
+    expect(alphaHost.hostOpacity).toBe("1");
+    expect(Number(alphaHost.faceOpacity)).toBe(0);
+    expect(alphaHost.moveOnScreen).toBeGreaterThanOrEqual(3);
+
     // Default button faces (not hover/locked) must paint; a lone white
     // focus/White slab was the live-pack regression.
     const faces = await page.evaluate(() => {
@@ -675,6 +703,15 @@ test("starter picker pokemon.main_panel paints the live §p§o§k§e§1 grid", a
         ...form.querySelectorAll<HTMLElement>("[data-collection-index]"),
       ].map((el) => Number(el.dataset.collectionIndex));
       const unique = [...new Set(idxs)].sort((a, b) => a - b);
+      const grid = form.querySelector(
+        '.jsonui[data-ui-name="picker_panel_grid"]',
+      ) as HTMLElement | null;
+      const gridBox = grid?.getBoundingClientRect();
+      // Live pack sets alpha:0 on button_panel (image chrome only). Container
+      // opacity must stay 1 so children paint.
+      const panel = form.querySelector(
+        '.jsonui[data-ui-name="button_panel"]',
+      ) as HTMLElement | null;
       const painted = [
         ...form.querySelectorAll<HTMLElement>(
           '.jsonui[data-ui-name="picker_panel_grid"] .jsonui',
@@ -682,12 +719,14 @@ test("starter picker pokemon.main_panel paints the live §p§o§k§e§1 grid", a
       ].filter((el) => {
         if (el.style.display === "none") return false;
         const r = el.getBoundingClientRect();
-        return r.width > 8 && r.height > 8;
+        return r.width > 20 && r.height > 8;
       });
       return {
         welcome: text.includes("Welcome to PokéBedrock"),
         unique,
         painted: painted.length,
+        gridH: gridBox?.height ?? 0,
+        panelOpacity: panel?.style.opacity || "1",
         longFormAbsent: !document.querySelector(
           '[data-jsonui-name="server_form.long_form"]',
         ),
@@ -697,6 +736,8 @@ test("starter picker pokemon.main_panel paints the live §p§o§k§e§1 grid", a
     expect(got.welcome).toBe(true);
     expect(got.longFormAbsent).toBe(true);
     expect(got.unique).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8]);
+    expect(got.panelOpacity).toBe("1");
+    expect(got.gridH).toBeGreaterThan(40);
     expect(got.painted).toBeGreaterThanOrEqual(6);
 
     h.broadcast({

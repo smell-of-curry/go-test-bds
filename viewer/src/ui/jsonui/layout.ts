@@ -411,6 +411,11 @@ function layoutAnchored(
   );
 
   const selfBox: LayoutBox = { x: pos.x, y: pos.y, w: boxSize.w, h: boxSize.h };
+  clipRightOverflow(
+    selfBox,
+    parentBox,
+    readAnchor(el.props.anchor_from, "center"),
+  );
 
   // Re-layout children into final absolute parent box when we have controls.
   if (el.controls.length > 0) {
@@ -591,6 +596,11 @@ function layoutStack(
     w: stackSize.w,
     h: stackSize.h,
   };
+  clipRightOverflow(
+    selfBox,
+    parentBox,
+    readAnchor(el.props.anchor_from, "center"),
+  );
 
   // Final pass: place children along the stack.
   const outChildren: LayoutNode[] = [];
@@ -719,6 +729,11 @@ function layoutFactoryOverlay(
     w: boxSize.w,
     h: boxSize.h,
   };
+  clipRightOverflow(
+    selfBox,
+    parentBox,
+    readAnchor(el.props.anchor_from, "center"),
+  );
   const children = layoutControls(el.controls, selfBox, viewport, opts);
   return { element: el, box: selfBox, children, layer, visible };
 }
@@ -756,12 +771,16 @@ function layoutGrid(
   visible: boolean,
   layer: number,
 ): LayoutNode {
-  // Grid size like a normal panel first (no child-dependent probe for cell math).
   const sizeSpec = readSizePair(el.props.size);
   const minSpec = readSizePair(el.props.min_size);
   const maxSpec = readSizePair(el.props.max_size);
   const wParsed = parseSize(sizeSpec[0]);
   const hParsed = parseSize(sizeSpec[1]);
+  const contentSizedH = hParsed.needsChildren || hParsed.isDefault;
+
+  const dims = asNumberPair(el.props.grid_dimensions, [1, 1]) ?? [1, 1];
+  const cols = Math.max(1, Math.floor(dims[0]));
+  const rows = Math.max(1, Math.floor(dims[1]));
 
   const env: SizeEnv = {
     parentW: parentBox.w,
@@ -777,17 +796,57 @@ function layoutGrid(
     remainingW: parentBox.w,
     remainingH: parentBox.h,
   };
-  let gridSize = resolveSizePair(wParsed, hParsed, env, el, opts);
-  gridSize = clampSize(gridSize, minSpec, maxSpec, {
-    ...env,
-    selfW: gridSize.w,
-    selfH: gridSize.h,
-  });
 
-  const offset = resolveOffset(el.props.offset, gridSize, parentBox, viewport);
+  // Width: prefer parent %; if width itself is %c, fall back to parent width.
+  const gridW = finite(
+    wParsed.needsChildren ? parentBox.w : wParsed.eval(env, "w"),
+  );
+  const cellW = gridW / cols;
+
+  const items = el.controls.filter((c) => !isIgnored(c.element.props));
+
+  // Height: `100%c` grids (starter picker) size to rows × item height.
+  // Probe the first item in a tall cell; scale item `%` as grid-relative.
+  let cellH = 0;
+  if (contentSizedH) {
+    const probeEl = items[0]
+      ? scaleGridItemPercents(items[0].element, cols, rows)
+      : undefined;
+    if (probeEl) {
+      const probe = layoutElement(
+        probeEl,
+        { x: 0, y: 0, w: cellW, h: 1000 },
+        viewport,
+        opts,
+        { remainingW: cellW, remainingH: 1000 },
+      );
+      cellH = Math.max(1, probe.box.h);
+    } else {
+      cellH = 1;
+    }
+  }
+
+  let gridH = contentSizedH
+    ? cellH * rows
+    : finite(hParsed.eval({ ...env, selfW: gridW }, "h"));
+  if (!contentSizedH) cellH = gridH / rows;
+
+  const gridSize = clampSize({ w: gridW, h: gridH }, minSpec, maxSpec, {
+    ...env,
+    selfW: gridW,
+    selfH: gridH,
+    childrenW: gridW,
+    childrenH: gridH,
+  });
+  const finalCellW = gridSize.w / cols;
+  const finalCellH = contentSizedH ? cellH : gridSize.h / rows;
+  const finalGridH = contentSizedH ? finalCellH * rows : gridSize.h;
+  const finalSize = { w: gridSize.w, h: finalGridH };
+
+  const offset = resolveOffset(el.props.offset, finalSize, parentBox, viewport);
   const pos = positionWithAnchors(
     parentBox,
-    gridSize,
+    finalSize,
     readAnchor(el.props.anchor_from, "center"),
     readAnchor(el.props.anchor_to, "center"),
     offset,
@@ -795,19 +854,16 @@ function layoutGrid(
   const selfBox: LayoutBox = {
     x: pos.x,
     y: pos.y,
-    w: gridSize.w,
-    h: gridSize.h,
+    w: finalSize.w,
+    h: finalSize.h,
   };
+  clipRightOverflow(
+    selfBox,
+    parentBox,
+    readAnchor(el.props.anchor_from, "center"),
+  );
 
-  const dims = asNumberPair(el.props.grid_dimensions, [1, 1]) ?? [1, 1];
-  const cols = Math.max(1, Math.floor(dims[0]));
-  const rows = Math.max(1, Math.floor(dims[1]));
-  const cellW = selfBox.w / cols;
-  const cellH = selfBox.h / rows;
-
-  const items = el.controls.filter((c) => !isIgnored(c.element.props));
   const children: LayoutNode[] = [];
-
   for (let i = 0; i < items.length; i++) {
     const c = items[i]!;
     const gp = asNumberPair(c.element.props.grid_position, null);
@@ -816,20 +872,25 @@ function layoutGrid(
     if (row >= rows || col >= cols) continue;
 
     const cell: LayoutBox = {
-      x: selfBox.x + col * cellW,
-      y: selfBox.y + row * cellH,
-      w: cellW,
-      h: cellH,
+      x: selfBox.x + col * finalCellW,
+      y: selfBox.y + row * finalCellH,
+      w: finalCellW,
+      h: finalCellH,
     };
     children.push(
-      layoutElement(c.element, cell, viewport, opts, {
-        remainingW: cellW,
-        remainingH: cellH,
-      }),
+      layoutElement(
+        scaleGridItemPercents(c.element, cols, rows),
+        cell,
+        viewport,
+        opts,
+        {
+          remainingW: finalCellW,
+          remainingH: finalCellH,
+        },
+      ),
     );
   }
 
-  // grid_item_template hosts are expanded in collections.expandCollections.
   return {
     element: el,
     box: selfBox,
@@ -837,6 +898,54 @@ function layoutGrid(
     layer,
     visible,
   };
+}
+
+/**
+ * Grid item `%` sizes are authored relative to the grid (e.g. starter
+ * `pokemon.button` width `15%` with 6 columns), but cells are the layout
+ * parent. Scale plain `%` specs by cols/rows so `15%` → `90%` of a cell.
+ *
+ * @param item - Grid child element.
+ * @param cols - Column count.
+ * @param rows - Row count.
+ * @returns shallow clone with scaled size/offset percent axes when needed.
+ */
+function scaleGridItemPercents(
+  item: ResolvedElement,
+  cols: number,
+  rows: number,
+): ResolvedElement {
+  const size = item.props.size;
+  if (!Array.isArray(size) || size.length < 2) return item;
+  const w = scalePlainPercent(size[0], cols);
+  const h = scalePlainPercent(size[1], rows);
+  if (w === size[0] && h === size[1]) return item;
+  return {
+    ...item,
+    props: { ...item.props, size: [w, h] },
+  };
+}
+
+/**
+ * Multiply a plain `N%` size by `factor` (grid dimension). Leaves px / %c / fill.
+ *
+ * Only scales when `N * factor ≤ ~100` — i.e. the authoring looks like a
+ * grid-relative column share (`15%` × 6 cols). `100%` cell-fill stays put
+ * (`100 * cols` would exceed 100).
+ *
+ * @param spec - Size axis value.
+ * @param factor - Columns (width) or rows (height).
+ * @returns scaled spec or original.
+ */
+function scalePlainPercent(spec: unknown, factor: number): unknown {
+  if (typeof spec !== "string" || factor <= 0) return spec;
+  const m = /^(-?[0-9.]+)%$/.exec(spec.trim());
+  if (!m) return spec;
+  const n = Number(m[1]);
+  if (!Number.isFinite(n)) return spec;
+  // Cell-relative fill (`100%`) must not become `100% * cols`.
+  if (n * factor > 100 + 1) return spec;
+  return `${n * factor}%`;
 }
 
 function measureChildren(
@@ -924,7 +1033,8 @@ function visibleControls(controls: ResolvedChild[]): ResolvedChild[] {
  * @returns false only for explicit falsy forms; undefined defaults to visible.
  */
 function coerceVisible(v: unknown): boolean {
-  if (v === false || v === 0 || v === "false" || v === "") return false;
+  if (v === false || v === 0 || v === "false" || v === "null" || v === "")
+    return false;
   return true;
 }
 
@@ -1004,14 +1114,31 @@ function positionWithAnchors(
   const parentAy = parent.y + parent.h * from.y;
   const selfAx = size.w * to.x;
   const selfAy = size.h * to.y;
-  let x = parentAx - selfAx + offset.x;
-  const y = parentAy - selfAy + offset.y;
-  // Right-anchored controls with a +x offset (sidebar dock `47%`) hang past
-  // the parent; the real client clips to the screen edge, so flush right.
-  if (from.x >= 0.999 && x + size.w > parent.x + parent.w) {
-    x = parent.x + parent.w - size.w;
-  }
-  return { x, y };
+  return {
+    x: parentAx - selfAx + offset.x,
+    y: parentAy - selfAy + offset.y,
+  };
+}
+
+/**
+ * Clip a right-anchored box that hangs past the parent (sidebar dock `+47%`).
+ * Keep the left edge (offset stays meaningful) and shrink width so the right
+ * edge meets the parent — flushing left painted the full stretched dock as a
+ * black slab.
+ *
+ * @param box - Positioned box (mutated in place when clipped).
+ * @param parent - Parent layout box.
+ * @param anchorFrom - Element `anchor_from`.
+ */
+function clipRightOverflow(
+  box: LayoutBox,
+  parent: LayoutBox,
+  anchorFrom: Anchor,
+): void {
+  if (ANCHORS[anchorFrom].x < 0.999) return;
+  const parentRight = parent.x + parent.w;
+  if (box.x + box.w <= parentRight) return;
+  box.w = Math.max(0, parentRight - box.x);
 }
 
 function resolveOffset(

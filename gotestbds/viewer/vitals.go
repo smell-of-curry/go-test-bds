@@ -28,6 +28,16 @@ func collectVitals(bot string, a *actor.Actor) VitalsFrame {
 		}
 		hotbar[i] = &VitalsHotbarSlot{TypeID: name, Count: stack.Count()}
 	}
+	air, maxAir := int(st.Air()), int(st.MaxAir())
+	if maxAir <= 0 {
+		maxAir = 300
+	}
+	// BDS often reports AirSupply=0 while the player is on land; the real
+	// client hides bubbles then. Treat non-swimming zero as a full tank so
+	// the viewer does not paint a row of empty bubble icons.
+	if !a.Swimming() && air <= 0 {
+		air = maxAir
+	}
 	return VitalsFrame{
 		V:            SchemaVersion,
 		Type:         "vitals",
@@ -36,8 +46,8 @@ func collectVitals(bot string, a *actor.Actor) VitalsFrame {
 		Health:       roundVitalsFloat(attrs.Health()),
 		MaxHealth:    roundVitalsFloat(attrs.MaxHealth()),
 		Food:         roundVitalsFloat(attrs.Food()),
-		Air:          int(st.Air()),
-		MaxAir:       int(st.MaxAir()),
+		Air:          air,
+		MaxAir:       maxAir,
 		Armor:        0, // stub: no cheap armor-points attribute/computation
 		XPLevel:      int(math.Round(attrs.Level())),
 		XPProgress:   roundVitalsFloat(attrs.Experience()),

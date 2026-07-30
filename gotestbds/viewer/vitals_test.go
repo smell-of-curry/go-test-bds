@@ -91,6 +91,18 @@ func TestVitalsLaneEmitDedupeThrottleAndAttachReplay(t *testing.T) {
 		t.Fatalf("selectedSlot=%d", vf.SelectedSlot)
 	}
 
+	// Land AirSupply=0 must normalize to a full tank (hide bubbles).
+	a.State().Decode(protocol.EntityMetadata{
+		protocol.EntityDataKeyAirSupply:    int32(0),
+		protocol.EntityDataKeyAirSupplyMax: int32(300),
+	})
+	s.lastVitalsAt = time.Now().Add(-vitalsEmitInterval)
+	s.Tick(a)
+	land := mustVitals(t, sub)
+	if land.Air != 300 || land.MaxAir != 300 {
+		t.Fatalf("land air=0 normalize = %d/%d, want 300/300", land.Air, land.MaxAir)
+	}
+
 	// Same values within the throttle window must not emit again.
 	a.Attributes().Decode([]protocol.Attribute{
 		{AttributeValue: protocol.AttributeValue{Name: "minecraft:health", Value: 14, Max: 20}},

@@ -205,6 +205,17 @@ test("empty slots hidden; air/armor/xp gated; no fat green XP", async ({
           '[data-jsonui-name="phud_sidebar.ball_icon"]',
         ),
       ].filter((el) => getComputedStyle(el).display !== "none");
+      // active_icon@variable_parser stamps name `variable_parser`, not
+      // `active_icon` — find rings by texture path.
+      const rings = [
+        ...document.querySelectorAll<HTMLElement>(".jsonui-image-face"),
+      ].filter((face) => {
+        const bg = face.style.backgroundImage ?? "";
+        if (!bg.includes("sidebar/ring")) return false;
+        const host = face.closest(".jsonui") as HTMLElement | null;
+        if (!host) return false;
+        return getComputedStyle(host).display !== "none";
+      });
       const bubbles = [
         ...document.querySelectorAll<HTMLElement>(
           '.jsonui[data-ui-name="bubbles_renderer"]',
@@ -250,6 +261,7 @@ test("empty slots hidden; air/armor/xp gated; no fat green XP", async ({
       return {
         plateCount: dataPlates.length,
         ballCount: balls.length,
+        ringCount: rings.length,
         bubbleCount: bubbles.length,
         armorCount: armor.length,
         xpCount: xp.length,
@@ -268,6 +280,8 @@ test("empty slots hidden; air/armor/xp gated; no fat green XP", async ({
     expect(info.dockText).not.toMatch(/\|{3,}/);
     expect(info.plateCount).toBe(1);
     expect(info.ballCount).toBe(1);
+    // Empty slots send active="false"; only the selected occupied slot rings.
+    expect(info.ringCount).toBe(1);
     expect(info.bubbleCount).toBe(0);
     expect(info.armorCount).toBe(0);
     expect(info.xpCount).toBe(0);
@@ -277,6 +291,83 @@ test("empty slots hidden; air/armor/xp gated; no fat green XP", async ({
     expect(info.plateLeft).toBeGreaterThan(0);
     expect(info.plateRight).toBeLessThanOrEqual(info.hostRight + 1);
     expect(info.nameRight).toBeLessThanOrEqual(info.hostRight + 1);
+
+    // Live land glitch: AirSupply=0 must not paint a bubble row.
+    await page.evaluate(() => {
+      (
+        window as unknown as {
+          __jsonUi: {
+            setHud: (
+              phud: Record<string, string>,
+              v: {
+                v: 1;
+                type: "vitals";
+                bot: string;
+                tick: number;
+                health: number;
+                maxHealth: number;
+                food: number;
+                air: number;
+                maxAir: number;
+                armor?: number;
+                xpLevel: number;
+                xpProgress: number;
+                selectedSlot: number;
+                hotbar: null[];
+              },
+            ) => void;
+          };
+        }
+      ).__jsonUi.setHud(
+        {},
+        {
+          v: 1,
+          type: "vitals",
+          bot: "TestBot",
+          tick: 3,
+          health: 20,
+          maxHealth: 20,
+          food: 18,
+          air: 0,
+          maxAir: 300,
+          xpLevel: 0,
+          xpProgress: 0,
+          selectedSlot: 0,
+          hotbar: Array.from({ length: 9 }, () => null),
+        },
+      );
+    });
+    const afterAir0 = await page.evaluate(() => {
+      const bubbles = [
+        ...document.querySelectorAll<HTMLElement>(
+          '.jsonui[data-ui-name="bubbles_renderer"]',
+        ),
+      ].filter((el) => {
+        if (getComputedStyle(el).display === "none") return false;
+        return el.childElementCount > 0;
+      });
+      const armor = [
+        ...document.querySelectorAll<HTMLElement>(
+          '.jsonui[data-ui-name="armor_renderer"]',
+        ),
+      ].filter((el) => {
+        if (getComputedStyle(el).display === "none") return false;
+        return el.childElementCount > 0;
+      });
+      const titleBg = [
+        ...document.querySelectorAll<HTMLElement>(
+          '.jsonui[data-ui-name="title_background"], .jsonui[data-ui-name="subtitle_background"]',
+        ),
+      ].filter((el) => getComputedStyle(el).display !== "none");
+      return {
+        bubbleCount: bubbles.length,
+        armorCount: armor.length,
+        titleBgCount: titleBg.length,
+      };
+    });
+    expect(afterAir0.bubbleCount).toBe(0);
+    expect(afterAir0.armorCount).toBe(0);
+    expect(afterAir0.titleBgCount).toBe(0);
 
     const png = await page.screenshot({
       type: "png",

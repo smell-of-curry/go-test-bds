@@ -58,7 +58,15 @@ function isVisibilityGateTarget(target: string): boolean {
 function asVisibilityGate(value: BindingValue): boolean {
   if (typeof value === "boolean") return value;
   if (typeof value === "number") return value !== 0;
-  return value !== "";
+  // Sidebar active flag is the string "true"/"false" via `$visible: "#var"`.
+  // Non-empty alone must not win — "false" would keep every ring painted.
+  if (typeof value === "string") {
+    const t = value.trim().toLowerCase();
+    if (t === "" || t === "false" || t === "0" || t === "null") return false;
+    if (t === "true" || t === "1") return true;
+    return true;
+  }
+  return false;
 }
 
 /** Binding condition values seen in packs; currently all treated as always. */

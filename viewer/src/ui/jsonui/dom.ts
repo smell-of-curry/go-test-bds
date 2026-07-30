@@ -106,10 +106,11 @@ function paintNode(
   el.style.overflow =
     node.element.props.clips_children === true ? "hidden" : "visible";
 
-  const alpha =
-    typeof node.element.props.alpha === "number" ? node.element.props.alpha : 1;
-  if (alpha < 1) el.style.opacity = String(alpha);
-
+  // Bedrock `alpha` tints the control's own paint (image face / label glyphs).
+  // It must NOT become CSS opacity on the container — packs set `alpha: 0` on
+  // image hosts (`pokemon.button_panel`, `battle.button_grid_middle`) to hide
+  // the chrome texture while children stay fully opaque. Container opacity
+  // would wipe the starter grid / move buttons (run-41 live regressions).
   applyClip(el, node.element.props);
 
   switch (node.element.type) {
@@ -200,6 +201,10 @@ function applyImage(
   // Colorable whites (battle white_transparency): replace RGB with tint,
   // keep texture alpha. 404 background → nothing to filter → transparent.
   if (tint) face.style.filter = svgTintFilter(tint);
+
+  const alpha =
+    typeof node.element.props.alpha === "number" ? node.element.props.alpha : 1;
+  if (alpha < 1) face.style.opacity = String(alpha);
 
   el.appendChild(face);
 }
@@ -361,6 +366,10 @@ function applyLabel(
   if (node.element.props.shadow === true) {
     el.style.textShadow = `${opts.guiScale}px ${opts.guiScale}px 0 #000`;
   }
+
+  const alpha =
+    typeof node.element.props.alpha === "number" ? node.element.props.alpha : 1;
+  if (alpha < 1) el.style.opacity = String(alpha);
 
   el.appendChild(formatCodesToFragment(text));
 }

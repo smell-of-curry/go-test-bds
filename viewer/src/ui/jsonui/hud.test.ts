@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
+  airBubblesVisible,
   applyTitleQuirk,
   bindingSourceFromState,
   heartIcons,
@@ -62,9 +63,9 @@ describe("bindingSourceFromState / hudTitleString", () => {
     assert.equal(src.global("#hud_title_text_string"), title);
   });
 
-  it("prefers plain title over last phud title", () => {
+  it("prefers live PHUD title over stale plain ui.title", () => {
     const state = emptyState({ ui: { title: "Hello" } });
-    assert.equal(hudTitleString(state, "&_phone:ring"), "Hello");
+    assert.equal(hudTitleString(state, "&_phone:ring"), "&_phone:ring");
   });
 });
 
@@ -98,6 +99,14 @@ describe("title quirk", () => {
     assert.ok(PHUD_TITLE_RE.test("&_sidebar:x"));
     assert.ok(PHUD_TITLE_RE.test("&_phone:ring"));
     assert.equal(PHUD_TITLE_RE.test("Level Up!"), false);
+  });
+
+  it("prefers PHUD title over stale plain ui.title", () => {
+    const state = emptyState({
+      ui: { title: "TestBot" },
+      phud: new Map([["sidebar", "x"]]),
+    });
+    assert.equal(hudTitleString(state, "&_sidebar:x"), "&_sidebar:x");
   });
 
   it("force-hides title subtree for &_ tokens", () => {
@@ -231,6 +240,63 @@ describe("vitalsGlobals visibility", () => {
     assert.equal(src.global("#hotbar_no_xp_bar"), true);
     assert.equal(src.global("#is_not_riding_bubbles"), false);
     assert.equal(src.global("#is_armor_visible"), false);
+  });
+
+  it("hides bubbles when air is 0 / missing (land glitch)", () => {
+    assert.equal(
+      airBubblesVisible({
+        v: 1,
+        type: "vitals",
+        bot: "Bot",
+        tick: 1,
+        health: 20,
+        maxHealth: 20,
+        food: 20,
+        air: 0,
+        maxAir: 300,
+        armor: 0,
+        xpLevel: 0,
+        xpProgress: 0,
+        selectedSlot: 0,
+        hotbar: Array(9).fill(null),
+      }),
+      false,
+    );
+    assert.equal(
+      airBubblesVisible({
+        v: 1,
+        type: "vitals",
+        bot: "Bot",
+        tick: 1,
+        health: 20,
+        maxHealth: 20,
+        food: 20,
+        xpLevel: 0,
+        xpProgress: 0,
+        selectedSlot: 0,
+        hotbar: Array(9).fill(null),
+      }),
+      false,
+    );
+    assert.equal(
+      airBubblesVisible({
+        v: 1,
+        type: "vitals",
+        bot: "Bot",
+        tick: 1,
+        health: 20,
+        maxHealth: 20,
+        food: 20,
+        air: 120,
+        maxAir: 300,
+        armor: 0,
+        xpLevel: 0,
+        xpProgress: 0,
+        selectedSlot: 0,
+        hotbar: Array(9).fill(null),
+      }),
+      true,
+    );
   });
 
   it("shows level number when xpLevel > 0", () => {

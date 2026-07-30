@@ -468,10 +468,11 @@ export interface VitalsFrame {
   health: number;
   maxHealth: number;
   food: number;
-  air: number;
-  maxAir: number;
-  /** Armor points; currently stubbed at 0 on the Go side. */
-  armor: number;
+  /** Absent/undefined → hide bubbles (do not treat as full tank). */
+  air?: number;
+  maxAir?: number;
+  /** Armor points; currently stubbed at 0 on the Go side. Absent → hide. */
+  armor?: number;
   xpLevel: number;
   xpProgress: number;
   selectedSlot: number;
