@@ -11,6 +11,11 @@ const TICK_MS = 50; // 20 TPS
 const DEFAULT_FADE_IN = 10;
 const DEFAULT_STAY = 70;
 const DEFAULT_FADE_OUT = 20;
+/**
+ * Protocol / e2e smoke chat that must never paint in a recording. Matches
+ * `e2e-ping-<runId>` from the SDK suite and bare `ping-<epochMs>` leftovers.
+ */
+const CHAT_NOISE_RE = /^(?:e2e-ping-.+|ping-\d+)$/i;
 
 interface ChatLine {
   el: HTMLElement;
@@ -94,6 +99,8 @@ export function initHud(opts: {
 
   function pushChat(text: string, nowMs: number): void {
     if (!text) return;
+    const plain = stripFormatCodes(text).trim();
+    if (!plain || CHAT_NOISE_RE.test(plain)) return;
     const el = document.createElement("div");
     el.className = "hud-chat-line";
     el.appendChild(formatCodesToFragment(text));

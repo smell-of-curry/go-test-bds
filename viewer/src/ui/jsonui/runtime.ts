@@ -1,0 +1,212 @@
+/**
+ * JSON UI runtime: load pack ui files, mount the HUD, drive frames from WorldState.
+ */
+
+import { AssetClient } from "../../terrain/assetClient";
+import type { WorldState } from "../../store";
+import { loadUiFileSet, type UiLoadClient, type UiPackInfo } from "./load";
+import { buildResolver } from "./resolve";
+import { createHudRenderer, DEFAULT_GUI_SCALE, type HudRenderer } from "./hud";
+import { createFormRenderer, type FormRenderer } from "./forms";
+import type { UiResolver } from "./types";
+
+/** Options for {@link createJsonUiRuntime}. */
+export interface JsonUiRuntimeOptions {
+  /** Origin serving `/packs`, `/pack/{id}/{path}`, `/asset/{path}`. */
+  assetBaseUrl: string;
+  /** Gui scale (default 2 → 512×288 gui px on 1024×576). */
+  guiScale?: number;
+  /**
+   * Injectable pack client (tests / fixtures). Defaults to fetch over
+   * {@link assetBaseUrl}.
+   */
+  client?: UiLoadClient;
+  /** Host element; default creates `#json-hud` under `document.body`. */
+  host?: HTMLElement;
+}
+
+/** Public runtime handle (store-subscriber compatible with old PhudHandle). */
+export interface JsonUiRuntime {
+  /** Root HUD host. */
+  readonly root: HTMLElement;
+  /** Resolves when packs are loaded and the HUD is mounted. */
+  readonly ready: Promise<void>;
+  /** Last frame cost in ms (0 before first frame). */
+  readonly lastFrameMs: number;
+  /**
+   * Project store state onto the JSON UI HUD.
+   *
+   * @param state - Latest world state.
+   */
+  onFrame(state: WorldState): void;
+  /** Test helper — underlying resolver once ready. */
+  getResolver(): UiResolver | null;
+}
+
+/**
+ * Fetch-backed {@link UiLoadClient} over the viewer's pack HTTP API.
+ *
+ * @param assetBaseUrl - Origin (no trailing slash).
+ * @returns load client.
+ */
+export function createFetchUiClient(assetBaseUrl: string): UiLoadClient {
+  const base = assetBaseUrl.replace(/\/$/, "");
+  // AssetClient already implements getPacks + fetchPackJson.
+  const assets = new AssetClient(base);
+  return {
+    getPacks: () => assets.getPacks() as Promise<UiPackInfo[]>,
+    fetchPackJson: (packId, path) => assets.fetchPackJson(packId, path),
+  };
+}
+
+/**
+ * Create the JSON UI runtime and begin loading pack UI definitions.
+ *
+ * @param opts - Asset base URL and optional test client / host.
+ * @returns runtime handle; call {@link JsonUiRuntime.onFrame} from the store subscriber.
+ */
+export function createJsonUiRuntime(opts: JsonUiRuntimeOptions): JsonUiRuntime {
+  const guiScale = opts.guiScale ?? DEFAULT_GUI_SCALE;
+  const client = opts.client ?? createFetchUiClient(opts.assetBaseUrl);
+  const assetBase = opts.assetBaseUrl.replace(/\/$/, "");
+
+  const host = opts.host ?? document.createElement("div");
+  if (!opts.host) {
+    host.id = "json-hud";
+    document.body.appendChild(host);
+  }
+  ensureJsonHudStyles();
+  host.classList.add("jsonui-hud-host");
+
+  let resolver: UiResolver | null = null;
+  let hud: HudRenderer | null = null;
+  let forms: FormRenderer | null = null;
+  let lastFrameMs = 0;
+  let pendingState: WorldState | null = null;
+  let lastFormKey = "";
+  let lastHover: number | null = null;
+
+  const assets = {
+    textureUrl(path: string): string {
+      const withExt = /\.[a-z]{3,4}$/i.test(path) ? path : `${path}.png`;
+      if (!assetBase) return withExt;
+      return `${assetBase}/asset/${withExt.replace(/^\/+/, "")}`;
+    },
+  };
+
+  // HUD paints into a child layer so form host survives host.replaceChildren().
+  const hudLayer = document.createElement("div");
+  hudLayer.className = "jsonui-hud-layer";
+  hudLayer.style.cssText = "position:absolute;inset:0;pointer-events:none;";
+  host.appendChild(hudLayer);
+
+  const formsHost = document.createElement("div");
+  formsHost.className = "jsonui-forms-host";
+  formsHost.style.cssText = "position:absolute;inset:0;pointer-events:none;";
+  host.appendChild(formsHost);
+
+  const ready = (async () => {
+    const { files, globals } = await loadUiFileSet(client);
+    resolver = buildResolver(files, globals);
+    hud = createHudRenderer(resolver, hudLayer, {
+      guiScale,
+      assets,
+      viewportCss: {
+        width: 1024,
+        height: 576,
+      },
+    });
+    forms = createFormRenderer({
+      resolver,
+      globals,
+      assets,
+      host: formsHost,
+      guiScale,
+    });
+    if (pendingState) {
+      const state = pendingState;
+      pendingState = null;
+      lastFrameMs = hud.onFrame(state);
+      projectForm(state);
+    }
+  })().catch((err: unknown) => {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`[jsonui] failed to load UI packs: ${msg}`);
+    host.dataset.jsonuiError = msg;
+  });
+
+  /**
+   * Show/hide/hover the engine form from state (dirty-checked).
+   *
+   * @param state - Latest world state.
+   */
+  function projectForm(state: WorldState): void {
+    if (!forms) return;
+    const form = state.ui?.form ?? null;
+    const key = form ? `${form.title}\0${(form.buttons ?? []).join("\0")}` : "";
+    if (key !== lastFormKey) {
+      lastFormKey = key;
+      lastHover = null;
+      if (form) forms.show(form);
+      else forms.hide();
+    }
+    if (state.formHover !== lastHover) {
+      lastHover = state.formHover;
+      forms.hover(state.formHover);
+    }
+  }
+
+  return {
+    root: host,
+    ready,
+    get lastFrameMs() {
+      return lastFrameMs;
+    },
+    getResolver: () => resolver,
+    onFrame(state: WorldState): void {
+      if (!hud) {
+        pendingState = state;
+        return;
+      }
+      lastFrameMs = hud.onFrame(state);
+      projectForm(state);
+      // Occasional perf breadcrumb (once the cost spikes).
+      if (lastFrameMs > 8) {
+        host.dataset.jsonuiFrameMs = lastFrameMs.toFixed(2);
+      }
+    },
+  };
+}
+
+/**
+ * Install minimal host CSS once (fixed fullscreen overlay, no pointer events).
+ */
+function ensureJsonHudStyles(): void {
+  if (document.getElementById("jsonui-hud-style")) return;
+  const style = document.createElement("style");
+  style.id = "jsonui-hud-style";
+  style.textContent = `
+#json-hud, .jsonui-hud-host {
+  position: fixed;
+  inset: 0;
+  width: 1024px;
+  height: 576px;
+  max-width: 100vw;
+  max-height: 100vh;
+  margin: auto;
+  pointer-events: none;
+  z-index: 4;
+  overflow: hidden;
+}
+/* JSON UI owns title / vitals / hotbar; keep chat/actionbar from #player-hud. */
+body.jsonui-hud-active #player-hud .hud-title-wrap,
+body.jsonui-hud-active #player-hud .hud-hotbar-wrap {
+  display: none !important;
+}
+/* Forms: hide the top-right debug panel unless ?debugForms=1 cleared the class. */
+body.jh-owns-forms #ui-panel {
+  display: none !important;
+}
+`;
+  document.head.appendChild(style);
+}

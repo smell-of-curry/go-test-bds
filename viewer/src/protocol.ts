@@ -10,7 +10,8 @@ export type FrameType =
   | "chat"
   | "title"
   | "phud"
-  | "formHover";
+  | "formHover"
+  | "vitals";
 
 export type ColumnReceiptState = "requested" | "partial" | "complete";
 
@@ -449,6 +450,35 @@ export interface FormHoverFrame {
   index: number;
 }
 
+/** One hotbar stack on the vitals lane; null = empty slot. */
+export interface VitalsHotbarSlot {
+  typeId: string;
+  count: number;
+}
+
+/**
+ * Event-lane bot survival HUD stats (hearts/hunger/air/xp/hotbar). Emitted on
+ * change (throttled); latest frame is replayed on attach.
+ */
+export interface VitalsFrame {
+  v: number;
+  type: "vitals";
+  bot: string;
+  tick: number;
+  health: number;
+  maxHealth: number;
+  food: number;
+  air: number;
+  maxAir: number;
+  /** Armor points; currently stubbed at 0 on the Go side. */
+  armor: number;
+  xpLevel: number;
+  xpProgress: number;
+  selectedSlot: number;
+  /** Always length 9; null entries are empty slots. */
+  hotbar: Array<VitalsHotbarSlot | null>;
+}
+
 export type Frame =
   | HelloFrame
   | KeyframeFrame
@@ -459,7 +489,8 @@ export type Frame =
   | TitleFrame
   | ParticleFrame
   | PhudFrame
-  | FormHoverFrame;
+  | FormHoverFrame
+  | VitalsFrame;
 
 export function columnKey(x: number, z: number): string {
   return `${x},${z}`;

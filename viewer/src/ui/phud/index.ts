@@ -1,4 +1,4 @@
-export { initPhudHud, type PhudHandle } from "./phudHud";
+export { initPhudHud, type PhudHandle, type PhudFormEngine } from "./phudHud";
 export {
   isBattleForm,
   parseBattleForm,

@@ -682,14 +682,28 @@ noon so goldens need no regen.
       DOM panel showing the open form's title, body and buttons, or a container's
       name and slot count — which is the half that matters for a recording. JSON
       UI and the font atlas are the boxes below, and are untouched.
-- [ ] Implement JSON UI to the extent the HUD and forms require, driven by the
-      pack stack so a server's custom UI appears. **Punt for recordings:** the
-      DOM approximation (forms panel + `#player-hud`) is the deliberate scope —
-      JSON UI is a fidelity goal, not what capture needs to read as gameplay.
-      _(PokeBedrock's PHUD tokens do get a dedicated DOM renderer —
-      `viewer/src/ui/phud/`: party sidebar, top banner/currency/ping, battle
-      bottom bar, waypoint strip — driven by the raw `phud` SSE lane rather
-      than by parsing the pack's JSON UI files.)_
+- [x] Implement JSON UI driven by the pack stack, parsing the actual
+      `ui/*.json` files so a server's custom UI appears without hand-porting
+      (`viewer/src/ui/jsonui/`). The engine loads `_ui_defs.json` +
+      `_global_variables.json` from every pack (vanilla `bedrock-samples`
+      bottom, server packs above) via `/packs` + `/pack/{id}/{path}`, merges
+      per JSON UI semantics (`element@ns.base` inheritance, `$variables` with
+      global fallback, `modifications`), lays out anchors/`%`/`%c`/stack
+      panels/nineslice, and evaluates `#binding` expressions
+      (`#hud_title_text_string` string slicing, view bindings with
+      per-element latch state). HUD (`runtime.ts` + `hud.ts`): PokeBedrock
+      PHUD (sidebar/phone/ping/currency/battleWait) renders from the pack's
+      own `ui/phud/*.json`; vanilla hearts/hunger/bubbles/armor/hotbar/xp are
+      native-renderer stubs fed by the `vitals` SSE lane. Forms (`forms.ts`):
+      title-flag router (battle/pc/pokedex/chest/search) to the pack's
+      screens, collection bindings for `form_buttons`, hover from the
+      `formHover` lane. Known pack quirk documented in `RESEARCH.md`: the
+      shipped title-suppress expression is off-by-one (`%.1s` vs `'&_'`), so
+      the runtime force-hides the vanilla title for `&_<token>:` strings until
+      the pack fixes it. The legacy hand-coded `viewer/src/ui/phud/` renderer
+      is unmounted; the waypoint strip (viewer extra, no pack ui file) lives
+      on standalone. Punt list: scroll views, grid item templates,
+      interactive custom-form widgets (read-only display), hotbar item icons.
 - [ ] Render text with the client's font atlas, including glyph pages, format
       codes and the custom glyph sheets packs ship. The vanilla atlas is not in
       `bedrock-samples`, so this stage owns the answer to where it comes from.

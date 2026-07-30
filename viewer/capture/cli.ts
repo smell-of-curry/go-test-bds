@@ -20,13 +20,14 @@ Options:
   --browser <path>               Chromium executable path
   --video-out <file>             Write the run video here instead of POSTing it
   --timelapse <factor>           Speed-up for marked walking segments
-                                 (default GOTESTBDS_TIMELAPSE or 8; 1 disables)
+                                 (default GOTESTBDS_TIMELAPSE or 8; 1 disables
+                                 walk speed-up; loading:start/end cuts still apply)
   --keep-raw                     Keep the real-time original as run-full.webm
   --log-level <level>            debug | info | warn | error (default info)
   --help                         Show this help
 
 ffmpeg for --timelapse is resolved from the FFMPEG env var, then PATH, then
-Playwright's bundled build, and must carry the trim/setpts/concat/fps filters
+Playwright's bundled build, and must carry the setpts/fps filters
 (Playwright's bundled ffmpeg is filter-stripped and gets skipped). Without a
 capable ffmpeg the video is left real-time with a warning.
 `;

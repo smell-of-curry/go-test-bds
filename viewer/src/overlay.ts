@@ -4,14 +4,19 @@ import type { UI } from "./protocol";
 import { formatCodesToFragment } from "./ui/formatCodes";
 
 /**
- * DOM diagnostic HUD + burnt-in caption band + open-UI panel.
+ * DOM diagnostic HUD + open-UI panel.
  * Read-only projection of store + camera mode.
+ *
+ * The bottom caption band was removed: the top-left `mark` row already carries
+ * suite/test/status. Mark frames still flow through the store for the capture
+ * harness / timelapse; only the redundant burnt-in strip is gone.
  */
 export class Overlay {
   private readonly el: HTMLElement;
   private readonly errorEl: HTMLElement;
   private readonly captionEl: HTMLElement;
   private readonly uiEl: HTMLElement;
+  private lastCaptionText = "";
 
   constructor(
     el: HTMLElement,
@@ -23,6 +28,9 @@ export class Overlay {
     this.errorEl = errorEl;
     this.captionEl = captionEl;
     this.uiEl = uiEl;
+    // Ensure a leftover visible class from an older build cannot stick.
+    this.captionEl.classList.remove("visible", "failed");
+    this.captionEl.replaceChildren();
   }
 
   /**
@@ -77,51 +85,12 @@ export class Overlay {
     if (extras.streamError) lines.push(`stream    ${extras.streamError}`);
     this.el.textContent = lines.join("\n");
 
-    this.renderCaption(state);
-    this.renderUi(state.ui);
-  }
-
-  /**
-   * Bottom caption: suite / test / elapsed, plus assertion text on failure.
-   * Sized for a 1280×720 capture — the diagnostic block above stays small.
-   *
-   * @param state - World model carrying the latest `mark`.
-   */
-  private renderCaption(state: WorldState): void {
-    const mark = state.mark;
-    if (!mark || (!mark.suite && !mark.test && !mark.phase)) {
-      this.captionEl.classList.remove("visible");
-      this.captionEl.textContent = "";
-      return;
-    }
-
-    const suite = mark.suite ?? "";
-    const test = mark.test ?? mark.phase;
-    const elapsed =
-      typeof mark.elapsedMs === "number" ? formatElapsed(mark.elapsedMs) : "";
-    const head = [suite, test].filter(Boolean).join(" · ");
-    const status = mark.status ? mark.status.toUpperCase() : "";
-    const failed = mark.status === "failed";
-    const message =
-      failed && mark.message && mark.message.length > 0 ? mark.message : "";
-
-    const parts = [head];
-    if (elapsed) parts.push(elapsed);
-    if (status) parts.push(status);
-
-    this.captionEl.classList.add("visible");
-    this.captionEl.classList.toggle("failed", failed);
+    // Keep captionText for tests / debug; never paint the bottom band.
+    this.lastCaptionText = formatCaptionText(state);
+    this.captionEl.classList.remove("visible", "failed");
     this.captionEl.replaceChildren();
-    const line = document.createElement("div");
-    line.className = "caption-line";
-    line.textContent = parts.join("  ·  ");
-    this.captionEl.appendChild(line);
-    if (message) {
-      const msg = document.createElement("div");
-      msg.className = "caption-message";
-      msg.textContent = message;
-      this.captionEl.appendChild(msg);
-    }
+
+    this.renderUi(state.ui);
   }
 
   /**
@@ -178,10 +147,40 @@ export class Overlay {
     this.uiEl.replaceChildren(...chunks);
   }
 
-  /** Latest caption text (tests). */
+  /**
+   * Latest mark caption text (tests). No longer painted on screen — the
+   * top-left diagnostic `mark` row is the visible source of truth.
+   */
   get captionText(): string {
-    return this.captionEl.textContent ?? "";
+    return this.lastCaptionText;
   }
+}
+
+/**
+ * Build the legacy caption string from the active mark (for `__viewer.captionText`).
+ *
+ * @param state - World model carrying the latest `mark`.
+ * @returns caption text, or "" when no mark is active.
+ */
+function formatCaptionText(state: WorldState): string {
+  const mark = state.mark;
+  if (!mark || (!mark.suite && !mark.test && !mark.phase)) return "";
+
+  const suite = mark.suite ?? "";
+  const test = mark.test ?? mark.phase;
+  const elapsed =
+    typeof mark.elapsedMs === "number" ? formatElapsed(mark.elapsedMs) : "";
+  const head = [suite, test].filter(Boolean).join(" · ");
+  const status = mark.status ? mark.status.toUpperCase() : "";
+  const failed = mark.status === "failed";
+  const message =
+    failed && mark.message && mark.message.length > 0 ? mark.message : "";
+
+  const parts = [head];
+  if (elapsed) parts.push(elapsed);
+  if (status) parts.push(status);
+  const line = parts.join("  ·  ");
+  return message ? `${line}${message}` : line;
 }
 
 /**

@@ -14,7 +14,8 @@ import { SnapshotStream, streamUrlFromSearch } from "./stream";
 import { Store } from "./store";
 import { createTexturedMesher } from "./terrain";
 import { initHud } from "./ui";
-import { initPhudHud } from "./ui/phud";
+import { createJsonUiRuntime } from "./ui/jsonui/runtime";
+import { initWaypointStrip } from "./ui/waypointStrip";
 
 const canvas = document.getElementById("c") as HTMLCanvasElement;
 const overlayEl = document.getElementById("overlay") as HTMLElement;
@@ -171,17 +172,19 @@ const hud = initHud({
   particles,
   getParticleRegistry: () => particleRegistry,
 });
-// PokeBedrock JSON-UI overlay (sidebar / ping / currency / battle / forms).
-// Textures come from the hub's /asset route, same origin as the stream.
-let phudAssetBase = "";
+// Pack-driven JSON UI HUD (vanilla vitals + PokeBedrock PHUD). Textures /
+// ui/*.json come from the hub's /packs + /pack/{id}/{path} + /asset routes.
+let jsonUiAssetBase = "";
 try {
-  phudAssetBase = new URL(streamUrlFromSearch(location.search)).origin;
+  jsonUiAssetBase = new URL(streamUrlFromSearch(location.search)).origin;
 } catch {
-  /* fixture streams may be relative; CSS fallbacks still render */
+  /* fixture streams may be relative */
 }
-const phud = initPhudHud({ assetBaseUrl: phudAssetBase });
-// The one-to-one form modal owns forms by default; ?debugForms=1 restores
-// the top-right debug panel instead.
+const jsonUi = createJsonUiRuntime({ assetBaseUrl: jsonUiAssetBase });
+const waypointStrip = initWaypointStrip();
+document.body.classList.add("jsonui-hud-active");
+// The JSON UI runtime renders server forms through the pack's own screens;
+// ?debugForms=1 restores the top-right debug panel instead.
 document.body.classList.toggle(
   "jh-owns-forms",
   !new URLSearchParams(location.search).has("debugForms"),
@@ -199,6 +202,7 @@ installViewerHandle(
   overlay,
   assetsSettled,
   hud,
+  () => jsonUi.getResolver() !== null,
 );
 
 camera.bindOrbitControls(canvas);
@@ -264,7 +268,8 @@ store.subscribe((state) => {
   }
 
   hud.onFrame(state);
-  phud.onFrame(state);
+  jsonUi.onFrame(state);
+  waypointStrip.onFrame(state);
   if (state.pendingParticles.length) {
     for (const pf of state.pendingParticles) {
       void spawnStreamParticle(pf.name, pf.pos);

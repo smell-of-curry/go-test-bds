@@ -38,6 +38,11 @@ export interface ViewerHandle {
    * still never lands on the loading screen or accidental placeholders.
    */
   readonly assetsSettled: boolean;
+  /**
+   * True once the pack-driven JSON UI runtime has loaded and mounted
+   * (resolver ready). False while packs are still loading or if load failed.
+   */
+  readonly jsonUiReady: boolean;
   /** Force-drain the remesh queue (test helper). */
   flush: () => void;
   /**
@@ -102,6 +107,7 @@ declare global {
  * @param overlay - Caption / forms panel (for `captionText`).
  * @param getAssetsSettled - True once atlas load succeeded or failed.
  * @param hud - Player HUD (chat / hotbar) for test counters.
+ * @param getJsonUiReady - True once JSON UI packs loaded and HUD mounted.
  */
 export function installViewerHandle(
   store: Store,
@@ -112,6 +118,7 @@ export function installViewerHandle(
   overlay?: Overlay,
   getAssetsSettled: () => boolean = () => true,
   hud?: HudHandle,
+  getJsonUiReady: () => boolean = () => false,
 ): void {
   window.__viewerInternals = { store, scene, camera, THREE };
   window.__viewer = {
@@ -171,6 +178,9 @@ export function installViewerHandle(
     },
     get assetsSettled() {
       return getAssetsSettled();
+    },
+    get jsonUiReady() {
+      return getJsonUiReady();
     },
     flush: () => {
       scene.flush(store.getState());

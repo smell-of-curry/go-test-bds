@@ -1,12 +1,11 @@
 /**
- * Visual goldens for the JSON-UI-faithful PokeBedrock HUD: sidebar + top bar,
- * battle bar, and the centered vanilla form, rendered from fixture stream
- * frames onto a solid background (canvas hidden — the world render has its
- * own goldens; these lock the DOM overlay's layout).
+ * Visual goldens for the pack-driven JSON UI HUD: sidebar + top bar + ping
+ * (and battle / form screens), rendered from fixture stream frames onto a
+ * solid background (canvas hidden — the world render has its own goldens;
+ * these lock the DOM overlay's layout).
  *
- * No pack is served, so every texture falls back to its flat colour — that is
- * the deterministic contract. Same env knobs as golden.spec
- * (GOLDEN_UPDATE=1 / GOLDEN_SOFT=1).
+ * Packs come from testdata/jsonui; textures 404 → empty icons (deterministic).
+ * Same env knobs as golden.spec (GOLDEN_UPDATE=1 / GOLDEN_SOFT=1).
  */
 import { expect, test, type Page } from "@playwright/test";
 import {
@@ -24,6 +23,7 @@ import {
   type JsonlFrame,
 } from "./fixtureServer";
 import { assertGolden } from "./goldenCompare";
+import { handleJsonUiPackRequest } from "./jsonuiPackServer";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const viewerRoot = join(here, "..");
@@ -31,6 +31,7 @@ const goldensDir = join(viewerRoot, "testdata", "goldens");
 const resultsDir = join(viewerRoot, "test-results", "phud-golden");
 
 const VIEWPORT = { width: 1280, height: 720 } as const;
+const BATTLE_FLAG = "§b§a§t§l§e";
 
 test.use({ viewport: VIEWPORT, deviceScaleFactor: 1 });
 // Each golden boots its own vite + stream; serialise to keep startup timing
@@ -45,7 +46,7 @@ interface Harness {
 }
 
 /**
- * Vite app + pushable SSE fixture.
+ * Vite app + pushable SSE fixture + JSON UI packs on the stream origin.
  *
  * @returns live URLs and a broadcast handle.
  */
@@ -72,6 +73,7 @@ async function startHarness(): Promise<Harness> {
         stream.handle(req, res);
         return;
       }
+      if (handleJsonUiPackRequest(req, res)) return;
       res.writeHead(404);
       res.end("not found");
     },
@@ -105,16 +107,22 @@ async function openHudOnly(page: Page, appUrl: string): Promise<void> {
   await page.waitForFunction(
     () => {
       const v = window.__viewer;
-      return !!v && v.schemaOk && v.tick >= 100 && v.assetsSettled;
+      return (
+        !!v &&
+        v.schemaOk &&
+        v.tick >= 100 &&
+        v.assetsSettled &&
+        v.jsonUiReady === true
+      );
     },
     undefined,
-    { timeout: 30_000 },
+    { timeout: 60_000 },
   );
   // Solid background: the WebGL canvas, diagnostics and vanilla HUD have
   // their own coverage; goldens here lock ONLY the JSON-UI overlay.
   await page.addStyleTag({
     content: `
-      #c, #overlay, #crosshair, #labels, #player-hud, #loading { display: none !important; }
+      #c, #overlay, #crosshair, #labels, #player-hud, #loading, #waypoint-strip { display: none !important; }
       body { background: #0b0e14; }
     `,
   });
@@ -235,12 +243,22 @@ test("golden: sidebar + top bar + ping", async ({ page }) => {
     );
 
     await page.waitForFunction(
-      () =>
-        !document.querySelector<HTMLElement>('[data-jh="sidebar"]')?.hidden &&
-        !document.querySelector<HTMLElement>('[data-jh="ping"]')?.hidden &&
-        !document.querySelector<HTMLElement>('[data-jh="topbar"]')?.hidden,
+      () => {
+        const dock = document.querySelector(
+          '[data-jsonui-name="phud_sidebar.dock"]',
+        );
+        const ping = document.querySelector<HTMLElement>(
+          '[data-jsonui-name="player_ping.main"]',
+        );
+        return (
+          !!dock &&
+          !!ping &&
+          getComputedStyle(ping).display !== "none" &&
+          (dock.textContent ?? "").includes("Bulbasaur")
+        );
+      },
       undefined,
-      { timeout: 10_000 },
+      { timeout: 15_000 },
     );
     await shoot(page, "sidebar");
   } finally {
@@ -265,7 +283,7 @@ test("golden: battle bar", async ({ page }) => {
       ui: {
         form: {
           type: "menu",
-          title: "",
+          title: `${BATTLE_FLAG}§s§m`,
           content: "Turn 1\n\nNo Turn Timer\n\nWeatherClear\n\nNo Terrain",
           buttons: [
             moveLabel(1, "normal", "growl", "40/40", "§lGrowl§r\ndesc"),
@@ -298,10 +316,12 @@ test("golden: battle bar", async ({ page }) => {
 
     await page.waitForFunction(
       () =>
-        !document.querySelector<HTMLElement>('[data-jh="battlebar"]')?.hidden &&
-        !!document.querySelector('[data-jh="battlebar"] .jh-move.hovered'),
+        !!document.querySelector('[data-jsonui-name="battle.main"]') &&
+        !!document.querySelector(
+          '[data-collection-index="1"].jsonui-form-hovered',
+        ),
       undefined,
-      { timeout: 10_000 },
+      { timeout: 15_000 },
     );
     await shoot(page, "battle-bar");
   } finally {
@@ -347,10 +367,14 @@ test("golden: centered form modal", async ({ page }) => {
 
     await page.waitForFunction(
       () =>
-        !document.querySelector<HTMLElement>('[data-jh="form"]')?.hidden &&
-        !!document.querySelector('[data-jh="form"] .jh-form-button.hovered'),
+        !!document.querySelector(
+          '[data-jsonui-name="server_form.long_form"]',
+        ) &&
+        !!document.querySelector(
+          '[data-collection-index="0"].jsonui-form-hovered',
+        ),
       undefined,
-      { timeout: 10_000 },
+      { timeout: 15_000 },
     );
     await shoot(page, "form-modal");
   } finally {

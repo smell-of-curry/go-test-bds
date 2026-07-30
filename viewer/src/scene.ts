@@ -811,8 +811,11 @@ export class ViewerScene {
   }
 
   render(camera: CameraController): void {
-    this.renderer.render(this.scene, camera.perspective);
+    // Pose name tags before draw — after render would leave them a frame late
+    // and (worse) sample bone matrices that had not been updated yet on the
+    // first frames after a model load, parking the plate at the feet.
     this.updateNameTags(camera);
+    this.renderer.render(this.scene, camera.perspective);
   }
 
   /**
@@ -1268,7 +1271,16 @@ export class ViewerScene {
       node.nameTag.setText(text);
       node.nameTag.setVisible(true);
       const h = ent?.bbox[1] ?? 1.8;
-      nameTagAnchor(node.model?.bones, node.group, h, this.nameTagScratch);
+      // Measure the textured model when present — the wireframe child stays in
+      // the group (hidden) and would otherwise inflate / skew the AABB.
+      const visual = node.model?.root ?? node.group;
+      nameTagAnchor(
+        node.model?.bones,
+        visual,
+        node.group,
+        h,
+        this.nameTagScratch,
+      );
       node.nameTag.update(cam, this.nameTagScratch);
     }
   }

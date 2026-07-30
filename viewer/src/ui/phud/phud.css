@@ -64,52 +64,6 @@
   white-space: nowrap;
 }
 
-/* ---- waypoint locator strip ---- */
-.jh-waypoint {
-  position: absolute;
-  top: calc(var(--jh-px) * 16);
-  left: 50%;
-  transform: translateX(-50%);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: calc(var(--jh-px) * 1);
-}
-
-.jh-waypoint-track {
-  width: calc(var(--jh-px) * 120);
-  height: calc(var(--jh-px) * 5);
-  background: rgba(0, 0, 0, 0.55);
-  border: 1px solid rgba(255, 255, 255, 0.35);
-  border-radius: calc(var(--jh-px) * 2.5);
-  position: relative;
-}
-
-.jh-waypoint-dot {
-  position: absolute;
-  top: 50%;
-  width: calc(var(--jh-px) * 4);
-  height: calc(var(--jh-px) * 4);
-  transform: translate(-50%, -50%);
-  background: #4fc3f7;
-  border-radius: 50%;
-  box-shadow: 0 0 calc(var(--jh-px) * 2) #4fc3f7;
-}
-
-.jh-waypoint-arrow {
-  width: 0;
-  height: 0;
-  border-left: calc(var(--jh-px) * 4) solid transparent;
-  border-right: calc(var(--jh-px) * 4) solid transparent;
-  border-bottom: calc(var(--jh-px) * 6) solid #fff;
-}
-
-.jh-waypoint-text {
-  font-size: calc(var(--jh-px) * 7);
-  text-shadow: 1px 1px 0 #000;
-  white-space: nowrap;
-}
-
 /* ---- right-edge Pokémon sidebar (ui/phud/sidebar.json) ---- */
 .jh-sidebar {
   position: absolute;
@@ -525,4 +479,19 @@
    ?debugForms=1 (main.ts toggles this class) */
 body.jh-owns-forms #ui-panel {
   display: none !important;
+}
+
+/* Full-screen host for JSON UI engine form screens (battle / long_form / …). */
+.jh-form-engine {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 40;
+}
+
+.jsonui-form-hovered {
+  outline: calc(var(--jh-px, 2px) * 1) solid #fff;
+  outline-offset: calc(var(--jh-px, 2px) * -0.5);
+  box-shadow: 0 0 calc(var(--jh-px, 2px) * 3) rgba(255, 255, 220, 0.85);
+  filter: brightness(1.15);
 }

@@ -18,6 +18,7 @@ import {
   type Registries,
   type TitleFrame,
   type UI,
+  type VitalsFrame,
   type WorldMeta,
   SCHEMA_VERSION,
   columnKey,
@@ -110,6 +111,11 @@ export interface WorldState {
    */
   formHover: number | null;
   /**
+   * Latest bot survival HUD stats from the `vitals` event lane, or null until
+   * the first frame (attach replay or change emit).
+   */
+  vitals: VitalsFrame | null;
+  /**
    * Active waypoint mark (`phase: "waypoint"`, message `x,y,z|label`), or
    * null after a `clear` message. Kept off `mark` so the caption band ignores
    * it.
@@ -149,6 +155,7 @@ function emptyState(): WorldState {
     camera: null,
     phud: new Map(),
     formHover: null,
+    vitals: null,
     waypoint: null,
   };
 }
@@ -294,6 +301,9 @@ export class Store {
       case "formHover":
         this.applyFormHover(frame);
         break;
+      case "vitals":
+        this.applyVitals(frame);
+        break;
       default:
         return;
     }
@@ -358,6 +368,16 @@ export class Store {
   private applyFormHover(frame: FormHoverFrame): void {
     this.state.tick = frame.tick;
     this.state.formHover = frame.index;
+  }
+
+  /**
+   * Replace the latest survival HUD snapshot.
+   *
+   * @param frame - Event-lane vitals frame.
+   */
+  private applyVitals(frame: VitalsFrame): void {
+    this.state.tick = frame.tick;
+    this.state.vitals = frame;
   }
 
   /**

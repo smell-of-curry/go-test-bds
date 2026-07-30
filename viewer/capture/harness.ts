@@ -27,7 +27,8 @@ export interface HarnessOptions {
   /**
    * Speed-up factor for walking segments (mark phase `segment`,
    * `walk:start`/`walk:end`) applied to the run video after it is written.
-   * 1 disables the pass. Only applies with {@link videoOut}.
+   * Loading segments (`loading:start`/`loading:end`) are cut regardless.
+   * 1 disables walk speed-up only. Only applies with {@link videoOut}.
    */
   timelapse: number;
   /** Keep the untouched real-time recording as `run-full.webm`. */
@@ -455,11 +456,15 @@ async function handleMark(
   if (frame.suite !== undefined) ctx.mark.suite = frame.suite;
   if (frame.test !== undefined) ctx.mark.test = frame.test;
 
-  // Walking legs, timed against the video for the timelapse pass after the
-  // recording is written. `segment` marks are timeline metadata only.
+  // Walk / loading legs, timed against the video for the timelapse pass
+  // after the recording is written. `segment` marks are timeline metadata
+  // only — message strings pass through untouched.
   if (
     frame.phase === "segment" &&
-    (frame.message === "walk:start" || frame.message === "walk:end")
+    (frame.message === "walk:start" ||
+      frame.message === "walk:end" ||
+      frame.message === "loading:start" ||
+      frame.message === "loading:end")
   ) {
     ctx.walkMarks.push({
       message: frame.message,

@@ -9,6 +9,8 @@
  */
 import type { UI } from "../../protocol";
 import type { WorldState } from "../../store";
+import { createFormRenderer, type FormRenderer } from "../jsonui/forms";
+import type { PropertyBag, UiResolver } from "../jsonui/types";
 import {
   isBattleForm,
   parseBattleForm,
@@ -29,14 +31,25 @@ export interface PhudHandle {
   readonly root: HTMLElement;
 }
 
+/** Optional JSON UI engine deps for server-form rendering. */
+export interface PhudFormEngine {
+  resolver: UiResolver;
+  globals?: PropertyBag;
+}
+
 /**
  * Install the PokeBedrock HUD overlay under `document.body`.
  *
  * @param opts.assetBaseUrl - Origin serving `/asset/…` ("" = no textures,
  * CSS fallbacks only).
+ * @param opts.formEngine - When set, server forms render via the JSON UI
+ * engine (`createFormRenderer`); otherwise the legacy CSS battle/form panels.
  * @returns handle wired into the store loop.
  */
-export function initPhudHud(opts: { assetBaseUrl?: string }): PhudHandle {
+export function initPhudHud(opts: {
+  assetBaseUrl?: string;
+  formEngine?: PhudFormEngine;
+}): PhudHandle {
   const assetBase = (opts.assetBaseUrl ?? "").replace(/\/$/, "");
   const root = document.createElement("div");
   root.id = "json-hud";
@@ -53,6 +66,7 @@ export function initPhudHud(opts: { assetBaseUrl?: string }): PhudHandle {
     </div>
     <div class="jh-battlebar" data-jh="battlebar" hidden></div>
     <div class="jh-form" data-jh="form" hidden></div>
+    <div class="jh-form-engine" data-jh="form-engine" hidden></div>
   `;
   document.body.appendChild(root);
 
@@ -68,6 +82,22 @@ export function initPhudHud(opts: { assetBaseUrl?: string }): PhudHandle {
   const battlelogLinesEl = el("battlelog-lines");
   const battlebarEl = el("battlebar");
   const formEl = el("form");
+  const formEngineEl = el("form-engine");
+
+  const formRenderer: FormRenderer | null = opts.formEngine
+    ? createFormRenderer({
+        resolver: opts.formEngine.resolver,
+        globals: opts.formEngine.globals,
+        host: formEngineEl,
+        assets: {
+          textureUrl(path: string): string {
+            if (!assetBase) return "";
+            const withExt = /\.[a-z]{3,4}$/i.test(path) ? path : `${path}.png`;
+            return `${assetBase}/asset/${withExt}`;
+          },
+        },
+      })
+    : null;
 
   let pingKey: string | null = null;
   let currencyKey: string | null = null;
@@ -393,6 +423,21 @@ export function initPhudHud(opts: { assetBaseUrl?: string }): PhudHandle {
     if (key === formRenderKey) return;
     formRenderKey = key;
 
+    if (formRenderer) {
+      battlebarEl.hidden = true;
+      formEl.hidden = true;
+      if (!form) {
+        formEngineEl.hidden = true;
+        formRenderer.hide();
+        return;
+      }
+      formEngineEl.hidden = false;
+      formRenderer.show(form);
+      formRenderer.hover(hover);
+      return;
+    }
+
+    formEngineEl.hidden = true;
     if (!form) {
       battlebarEl.hidden = true;
       formEl.hidden = true;
@@ -461,7 +506,7 @@ export function initPhudHud(opts: { assetBaseUrl?: string }): PhudHandle {
       renderForms(state.ui, state.formHover);
       renderBattleLog(
         state.phud.get("battleWait"),
-        !battlebarEl.hidden || !formEl.hidden,
+        !battlebarEl.hidden || !formEl.hidden || !formEngineEl.hidden,
       );
       renderWaypoint(state);
     },

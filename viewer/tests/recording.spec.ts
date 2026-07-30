@@ -141,7 +141,7 @@ test("follow camera frames the actor from behind and above", async ({
   }
 });
 
-test("caption band shows a failing test's assertion message", async ({
+test("failing test mark is exposed on captionText and the debug pane", async ({
   page,
 }) => {
   const h = await startHarness();
@@ -176,10 +176,17 @@ test("caption band shows a failing test's assertion message", async ({
     expect(text).toContain("FAILED");
     expect(text).toContain("expected pokeb:crate, got minecraft:air");
 
-    const failed = await page.evaluate(() =>
-      document.getElementById("caption")?.classList.contains("failed"),
-    );
-    expect(failed).toBe(true);
+    // Bottom caption strip is gone — mark lives in the top-left debug pane.
+    const ui = await page.evaluate(() => ({
+      captionVisible: document
+        .getElementById("caption")!
+        .classList.contains("visible"),
+      overlay: document.getElementById("overlay")?.textContent ?? "",
+    }));
+    expect(ui.captionVisible).toBe(false);
+    expect(ui.overlay).toContain("machines");
+    expect(ui.overlay).toContain("places a crate");
+    expect(ui.overlay).toContain("failed");
   } finally {
     await page.close().catch(() => undefined);
     await h.close();

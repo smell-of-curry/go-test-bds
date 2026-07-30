@@ -1,0 +1,394 @@
+{
+  "namespace": "phud_sidebar",
+
+  "variable_parser": {
+    "$visible|default": "true",
+    "bindings": [
+      {
+        "binding_name": "#null",
+        "binding_type": "view",
+        "source_control_name": "elements",
+        "source_property_name": "#sidebar",
+        "target_property_name": "#string"
+      },
+      {
+        "binding_name": "#null",
+        "binding_type": "view",
+        "source_property_name": "$string_parser",
+        "target_property_name": "#var"
+      },
+      {
+        "binding_name": "#null",
+        "binding_type": "view",
+        "source_property_name": "$visible",
+        "target_property_name": "#visible"
+      }
+    ]
+  },
+
+  "pokemon_sidebar_pokemon": {
+    "type": "panel",
+    "size": ["100%", 32],
+    "$pokemon_stats_index|default": 0,
+    "$pokemon_id_index|default": 1,
+    "$pokemon_name_index|default": 2,
+    "$pokemon_active_index|default": 3,
+    "$pokemon_caughtWith_index|default": 4,
+    "$pokemon_icon_index|default": 5,
+    "$pokemon_xp_index|default": 6,
+    "$var_index": "$pokemon_id_index",
+    "controls": [
+      {
+        "pokemon_data@variable_parser": {
+          "type": "image",
+          "offset": ["-11%", "0%"],
+          "texture": "textures/ui/sidebar/data",
+          "size": ["80%", 27],
+          "layer": 2,
+          "$visible": "(not(#var = 'null'))",
+          "controls": [
+            {
+              "pokemon_data_stack": {
+                "type": "stack_panel",
+                "anchor_from": "top_middle",
+                "anchor_to": "top_middle",
+                "offset": [0, 8],
+                "size": ["100%", "90%c"],
+                "controls": [
+                  {
+                    "pokemon_name_wrapper": {
+                      "type": "panel",
+                      "$var_index": "$pokemon_name_index",
+                      "size": ["100%", 5],
+                      "controls": [
+                        {
+                          "pokemon_name@variable_parser": {
+                            "type": "label",
+                            "enable_profanity_filter": true,
+                            "text_alignment": "right",
+                            "line_padding": 2,
+                            "layer": 5,
+                            "color": "$color",
+                            "alpha": 1,
+                            "text": "#var",
+                            "font_scale_factor": 0.7
+                          }
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "padding": {
+                      "type": "panel",
+                      "size": ["100%", 1]
+                    }
+                  },
+                  {
+                    "pokemon_stats_wrapper": {
+                      "type": "panel",
+                      "$var_index": "$pokemon_stats_index",
+                      "size": ["100%", 5],
+                      "controls": [
+                        {
+                          "pokemon_stats@variable_parser": {
+                            "type": "label",
+                            "text": "#var",
+                            "layer": 5,
+                            "text_alignment": "right",
+                            "line_padding": 2,
+                            "color": "$color",
+                            "font_scale_factor": 0.5
+                          }
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "xp_bar_padding": {
+                      "type": "panel",
+                      "size": ["100%", 1]
+                    }
+                  },
+                  {
+                    "xp_bar_wrapper": {
+                      "type": "panel",
+                      "$var_index": "$pokemon_xp_index",
+                      "size": ["100%", 2],
+                      "controls": [
+                        {
+                          "xp_bar": {
+                            "type": "panel",
+                            "size": [62, "100%"],
+                            "offset": [2, 0],
+                            "controls": [
+                              {
+                                "xp_bar_background": {
+                                  "type": "image",
+                                  "texture": "textures/ui/Black",
+                                  "alpha": 0.8,
+                                  "size": ["100%", "100%"],
+                                  "layer": 4
+                                }
+                              },
+                              {
+                                "xp_bar_fill": {
+                                  "type": "image",
+                                  "texture": "textures/ui/filled_progress_bar",
+                                  "color": [0.25, 0.6, 1.0],
+                                  "clip_direction": "left",
+                                  "clip_pixelperfect": false,
+                                  "clip_ratio": 1.0,
+                                  "size": ["100%", "100%"],
+                                  "layer": 5,
+                                  "$percent_to_ratio": 0.01,
+                                  "bindings": [
+                                    {
+                                      "binding_name": "#null",
+                                      "binding_type": "view",
+                                      "source_control_name": "elements",
+                                      "source_property_name": "#sidebar",
+                                      "target_property_name": "#string"
+                                    },
+                                    {
+                                      "binding_name": "#null",
+                                      "binding_type": "view",
+                                      "source_property_name": "((('%.' + $var_size + 's') * (#string - (('%.' + ($var_size * $var_index) + 's') * #string))) - '|')",
+                                      "target_property_name": "#field"
+                                    },
+                                    {
+                                      "binding_name": "#null",
+                                      "binding_type": "view",
+                                      "source_property_name": "((#field * 1) * $percent_to_ratio)",
+                                      "target_property_name": "#clip_ratio",
+                                      "binding_condition": "always"
+                                    }
+                                  ]
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      {
+        "pokemon_icon_wrapper": {
+          "type": "panel",
+          "$var_index": "$pokemon_caughtWith_index",
+          "controls": [
+            {
+              "ball_icon": {
+                "type": "image",
+                "size": ["100%y", "100%"],
+                "layer": 3,
+                "texture": "#texture",
+                "bindings": [
+                  {
+                    "binding_name": "#null",
+                    "binding_type": "view",
+                    "source_control_name": "elements",
+                    "source_property_name": "#sidebar",
+                    "target_property_name": "#string"
+                  },
+                  {
+                    "binding_name": "#null",
+                    "binding_type": "view",
+                    "source_property_name": "$string_parser",
+                    "target_property_name": "#ball_type"
+                  },
+                  {
+                    "binding_name": "#null",
+                    "binding_type": "view",
+                    "source_property_name": "('textures/ui/sidebar/balls/' + #ball_type)",
+                    "target_property_name": "#texture"
+                  }
+                ],
+                "controls": [
+                  {
+                    "pokemon_icon": {
+                      "type": "image",
+                      "offset": ["0%", "-15%"],
+                      "size": ["100%y", "100%"],
+                      "$var_index": "$pokemon_icon_index",
+                      "layer": 4,
+                      "bindings": [
+                        {
+                          "binding_name": "#null",
+                          "binding_type": "view",
+                          "source_control_name": "elements",
+                          "source_property_name": "#sidebar",
+                          "target_property_name": "#string"
+                        },
+                        {
+                          "binding_name": "#null",
+                          "binding_type": "view",
+                          "source_property_name": "$string_parser",
+                          "target_property_name": "#pokemon_icon"
+                        },
+                        {
+                          "binding_name": "#null",
+                          "binding_type": "view",
+                          "source_property_name": "('textures/sprites/' + #pokemon_icon)",
+                          "target_property_name": "#texture"
+                        },
+                        {
+                          "binding_name": "#null",
+                          "binding_type": "view",
+                          "source_property_name": "(not (#pokemon_icon = 'null'))",
+                          "target_property_name": "#visible"
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      {
+        "pokemon_selected_indicator": {
+          "type": "panel",
+          "$var_index": "$pokemon_active_index",
+          "controls": [
+            {
+              "active_icon@variable_parser": {
+                "type": "image",
+                "size": ["100%y", "100%"],
+                "layer": 5,
+                "texture": "textures/ui/sidebar/ring",
+                "$visible": "#var"
+              }
+            }
+          ]
+        }
+      }
+    ]
+  },
+
+  "main": {
+    "type": "panel",
+    "anchor_from": "right_middle",
+    "anchor_to": "right_middle",
+    "size": ["222.22%y", 192],
+    "controls": [
+      {
+        "dock": {
+          "type": "image",
+          "texture": "textures/ui/sidebar/dock",
+          "anchor_from": "right_middle",
+          "anchor_to": "right_middle",
+          "size": ["100%", "100%"],
+          "offset": ["47%", "0%"],
+          "layer": 1,
+          "$var_size": 121,
+          "alpha": 1,
+          "controls": [
+            {
+              "pokemon_holder": {
+                "type": "stack_panel",
+                "orientation": "vertical",
+                "size": ["100%", "100%c"],
+                "controls": [
+                  {
+                    "pokemon1@pokemon_sidebar_pokemon": {
+                      "$pokemon_stats_index": 0,
+                      "$pokemon_name_index": 1,
+                      "$pokemon_id_index": 2,
+                      "$pokemon_active_index": 3,
+                      "$pokemon_caughtWith_index": 4,
+                      "$pokemon_icon_index": 5,
+                      "$pokemon_xp_index": 6
+                    }
+                  },
+                  {
+                    "pokemon2@pokemon_sidebar_pokemon": {
+                      "$pokemon_stats_index": 7,
+                      "$pokemon_name_index": 8,
+                      "$pokemon_id_index": 9,
+                      "$pokemon_active_index": 10,
+                      "$pokemon_caughtWith_index": 11,
+                      "$pokemon_icon_index": 12,
+                      "$pokemon_xp_index": 13
+                    }
+                  },
+                  {
+                    "pokemon3@pokemon_sidebar_pokemon": {
+                      "$pokemon_stats_index": 14,
+                      "$pokemon_name_index": 15,
+                      "$pokemon_id_index": 16,
+                      "$pokemon_active_index": 17,
+                      "$pokemon_caughtWith_index": 18,
+                      "$pokemon_icon_index": 19,
+                      "$pokemon_xp_index": 20
+                    }
+                  },
+                  {
+                    "pokemon4@pokemon_sidebar_pokemon": {
+                      "$pokemon_stats_index": 21,
+                      "$pokemon_name_index": 22,
+                      "$pokemon_id_index": 23,
+                      "$pokemon_active_index": 24,
+                      "$pokemon_caughtWith_index": 25,
+                      "$pokemon_icon_index": 26,
+                      "$pokemon_xp_index": 27
+                    }
+                  },
+                  {
+                    "pokemon5@pokemon_sidebar_pokemon": {
+                      "$pokemon_stats_index": 28,
+                      "$pokemon_name_index": 29,
+                      "$pokemon_id_index": 30,
+                      "$pokemon_active_index": 31,
+                      "$pokemon_caughtWith_index": 32,
+                      "$pokemon_icon_index": 33,
+                      "$pokemon_xp_index": 34
+                    }
+                  },
+                  {
+                    "pokemon6@pokemon_sidebar_pokemon": {
+                      "$pokemon_stats_index": 35,
+                      "$pokemon_name_index": 36,
+                      "$pokemon_id_index": 37,
+                      "$pokemon_active_index": 38,
+                      "$pokemon_caughtWith_index": 39,
+                      "$pokemon_icon_index": 40,
+                      "$pokemon_xp_index": 41
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    ],
+    "bindings": [
+      {
+        "binding_name": "#null",
+        "binding_type": "view",
+        "source_control_name": "elements",
+        "source_property_name": "#sidebar",
+        "target_property_name": "#sidebar"
+      },
+      {
+        "binding_name": "#null",
+        "binding_type": "view",
+        "source_property_name": "(not (#sidebar = ''))",
+        "target_property_name": "#visible"
+      },
+      {
+        "binding_name": "#null",
+        "binding_type": "view",
+        "source_property_name": "(not (#sidebar = ''))",
+        "target_property_name": "#enabled"
+      }
+    ]
+  }
+}

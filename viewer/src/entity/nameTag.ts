@@ -19,6 +19,10 @@ export interface NameTagSprite {
 const PLATE_PAD_X = 4;
 const PLATE_PAD_Y = 3;
 const FONT_PX = 14;
+/** Gap above the visual top / head pivot, in blocks. */
+const NAME_TAG_MARGIN = 0.25;
+
+const _box = new THREE.Box3();
 
 /**
  * Create a canvas-textured name tag (white §-coloured text on translucent black).
@@ -47,6 +51,7 @@ export function createNameTag(): NameTagSprite {
   });
   const root = new THREE.Sprite(mat);
   root.visible = false;
+  // Bottom-center at the world anchor so the plate sits above the head.
   root.center.set(0.5, 0);
 
   let lastText = "";
@@ -130,26 +135,36 @@ function paintNameTag(
 }
 
 /**
- * World-space anchor above the head bone, or bbox top fallback.
+ * World-space anchor above the entity: max of head pivot, rendered AABB top,
+ * and snapshot bbox height (all + margin). Feet origin stays on `feet`.
  *
  * @param bones - Model bones (optional).
- * @param group - Entity group (feet origin).
+ * @param visualRoot - Mesh root to measure (model root, or group for wireframe).
+ * @param feet - Entity group (feet origin / world x-z).
  * @param bboxH - Snapshot bbox height.
  * @param out - Vector to write.
  * @returns out.
  */
 export function nameTagAnchor(
   bones: Map<string, THREE.Group> | null | undefined,
-  group: THREE.Object3D,
+  visualRoot: THREE.Object3D,
+  feet: THREE.Object3D,
   bboxH: number,
   out: THREE.Vector3,
 ): THREE.Vector3 {
+  visualRoot.updateMatrixWorld(true);
+  _box.setFromObject(visualRoot);
+  let topY = feet.position.y + Math.max(bboxH, 0.01) + NAME_TAG_MARGIN;
+  if (!_box.isEmpty() && Number.isFinite(_box.max.y)) {
+    topY = Math.max(topY, _box.max.y + NAME_TAG_MARGIN);
+  }
+
   const head = bones?.get("head") ?? bones?.get("Head") ?? bones?.get("HEAD");
   if (head) {
     head.getWorldPosition(out);
-    out.y += 0.35;
+    out.y = Math.max(out.y + 0.35, topY);
     return out;
   }
-  out.set(group.position.x, group.position.y + bboxH + 0.25, group.position.z);
+  out.set(feet.position.x, topY, feet.position.z);
   return out;
 }

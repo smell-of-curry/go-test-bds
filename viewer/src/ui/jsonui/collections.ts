@@ -1,0 +1,381 @@
+/**
+ * Collection factory expansion + collection-scoped binding application.
+ *
+ * Vanilla `server_form.long_form_dynamic_buttons_panel` and PokeBedrock
+ * `battle.button_stack` both use `collection_name` + `factory` to instantiate
+ * one control per form button. Per-item bindings (`#form_button_text`,
+ * `#form_button_texture`, `#collection_index`) resolve against that item.
+ */
+
+import {
+  applyBindings,
+  stripHash,
+  type ApplyBindingsOptions,
+} from "./bindings.js";
+import type {
+  BindingSource,
+  BindingValue,
+  PropertyBag,
+  ResolvedChild,
+  ResolvedElement,
+  UiResolver,
+} from "./types.js";
+
+/** One row in a named collection (keys are binding names, usually `#…`). */
+export type CollectionItem = Record<string, BindingValue>;
+
+/** Named collections available while expanding / binding a tree. */
+export type CollectionMap = Record<string, CollectionItem[]>;
+
+/** Active collection scope for nested binding application. */
+export interface CollectionScope {
+  name: string;
+  index: number;
+}
+
+/**
+ * Build form_buttons collection items from ActionForm button labels + images.
+ *
+ * @param buttons - Button label strings.
+ * @param images - Parallel image paths (optional; `""` when absent).
+ * @returns items for `form_buttons`.
+ */
+export function formButtonsCollection(
+  buttons: string[],
+  images?: string[],
+): CollectionItem[] {
+  return buttons.map((text, i) => {
+    const texture = images?.[i] ?? "";
+    return {
+      "#form_button_text": text,
+      "#form_button_texture": texture,
+      // Bedrock uses FileSystem for http/custom pack paths; empty = packed.
+      "#form_button_texture_file_system": texture ? "FileSystem" : "",
+      "#collection_index": i,
+    };
+  });
+}
+
+/**
+ * Deep-clone a resolved element tree (JSON round-trip; ui trees are JSON).
+ *
+ * @param el - Source element.
+ * @returns independent copy.
+ */
+export function cloneResolved(el: ResolvedElement): ResolvedElement {
+  return JSON.parse(JSON.stringify(el)) as ResolvedElement;
+}
+
+/**
+ * Look up a value on a collection item (accepts `#name` or bare `name`).
+ *
+ * @param item - Collection row.
+ * @param bindingName - Binding name with or without `#`.
+ * @returns value, or undefined.
+ */
+export function readCollectionItem(
+  item: CollectionItem,
+  bindingName: string,
+): BindingValue | undefined {
+  if (bindingName in item) return item[bindingName];
+  const hashed = bindingName.startsWith("#") ? bindingName : `#${bindingName}`;
+  if (hashed in item) return item[hashed];
+  const bare = stripHash(bindingName);
+  if (bare in item) return item[bare];
+  return undefined;
+}
+
+/**
+ * Parse a factory control ref (`battle.grid_button`, `@server_form.dynamic_button`).
+ *
+ * @param ref - Control reference string.
+ * @param fallbackNs - Namespace when the ref has no dot.
+ * @returns namespace + name, or null.
+ */
+export function parseControlRef(
+  ref: string,
+  fallbackNs: string,
+): { namespace: string; name: string } | null {
+  let s = ref.trim();
+  if (!s) return null;
+  if (s.startsWith("@")) s = s.slice(1);
+  const dot = s.indexOf(".");
+  if (dot < 0) return { namespace: fallbackNs, name: s };
+  return { namespace: s.slice(0, dot), name: s.slice(dot + 1) };
+}
+
+/**
+ * Resolve the factory template element for a collection host.
+ *
+ * Prefers `factory.control_name`; falls back to `factory.control_ids.button`.
+ *
+ * @param host - Element with `factory` + `collection_name`.
+ * @param resolver - UI resolver.
+ * @returns template element, or undefined.
+ */
+export function resolveFactoryTemplate(
+  host: ResolvedElement,
+  resolver: UiResolver,
+): ResolvedElement | undefined {
+  const factory = host.props.factory;
+  if (!factory || typeof factory !== "object" || Array.isArray(factory)) {
+    return undefined;
+  }
+  const f = factory as PropertyBag;
+  let ref: string | undefined;
+  if (typeof f.control_name === "string" && f.control_name) {
+    ref = f.control_name;
+  } else if (f.control_ids && typeof f.control_ids === "object") {
+    const ids = f.control_ids as PropertyBag;
+    if (typeof ids.button === "string") ref = ids.button;
+  }
+  if (!ref) return undefined;
+  const parsed = parseControlRef(ref, host.namespace);
+  if (!parsed) return undefined;
+  return resolver.resolve(parsed.namespace, parsed.name);
+}
+
+/**
+ * Expand every `collection_name` + `factory` host in `el` into N children.
+ * Does not apply bindings — call {@link bindResolvedTree} after.
+ *
+ * @param el - Root resolved element (mutated / replaced via return).
+ * @param resolver - For factory template resolution.
+ * @param collections - Named item lists.
+ * @returns element with collection children instantiated.
+ */
+export function expandCollections(
+  el: ResolvedElement,
+  resolver: UiResolver,
+  collections: CollectionMap,
+): ResolvedElement {
+  const out = cloneResolved(el);
+  expandInPlace(out, resolver, collections);
+  return out;
+}
+
+/**
+ * Apply global + collection + view bindings, then materialize `#prop` refs.
+ * Walks children; uses `scope` for collection-typed bindings.
+ * Parent `$variables` inherit into children (Bedrock scope) so expressions
+ * like `$bag_button_id` on a child resolve.
+ *
+ * @param el - Element to bind (mutated).
+ * @param source - Global binding source.
+ * @param collections - Named item lists.
+ * @param scope - Active collection item, if any.
+ * @param parentVars - Inherited `$…` variables from ancestors.
+ */
+export function bindResolvedTree(
+  el: ResolvedElement,
+  source: BindingSource,
+  collections: CollectionMap,
+  scope?: CollectionScope,
+  parentVars: PropertyBag = {},
+): void {
+  const opts: ApplyBindingsOptions = {};
+  if (scope) {
+    const items = collections[scope.name] ?? [];
+    const item = items[scope.index];
+    opts.collectionIndex = scope.index;
+    opts.collection = (collName, bindingName) => {
+      if (collName !== scope.name || !item) return undefined;
+      return readCollectionItem(item, bindingName);
+    };
+  }
+
+  // Inherit parent $vars; local props win.
+  const scopedProps: PropertyBag = { ...parentVars, ...el.props };
+  const bindEl: ResolvedElement = { ...el, props: scopedProps };
+  const out: PropertyBag = { ...scopedProps };
+  applyBindings(bindEl, source, out, opts);
+  materializeHashProps(out, source, scope, collections);
+  el.props = out;
+
+  // Propagate collection_index onto the root of a factory instance for hover.
+  if (scope && out.collection_index === undefined) {
+    el.props.collection_index = scope.index;
+  }
+
+  const childVars = pickDollarVars(out);
+  const childScope = factoryChildScope(el, collections, scope);
+  for (const child of el.controls) {
+    const nextScope =
+      childScope !== undefined
+        ? { name: childScope.name, index: childScope.indexFor(child) }
+        : scope;
+    bindResolvedTree(child.element, source, collections, nextScope, childVars);
+  }
+}
+
+/** @param props - Property bag. @returns only `$…` keys. */
+function pickDollarVars(props: PropertyBag): PropertyBag {
+  const out: PropertyBag = {};
+  for (const [k, v] of Object.entries(props)) {
+    if (k.startsWith("$")) out[k] = v;
+  }
+  return out;
+}
+
+/**
+ * Expand collections then bind the whole tree.
+ *
+ * @param el - Resolved root.
+ * @param resolver - UI resolver.
+ * @param source - Global bindings.
+ * @param collections - Named collections.
+ * @returns fully expanded + bound tree.
+ */
+export function prepareCollectionTree(
+  el: ResolvedElement,
+  resolver: UiResolver,
+  source: BindingSource,
+  collections: CollectionMap,
+): ResolvedElement {
+  const expanded = expandCollections(el, resolver, collections);
+  bindResolvedTree(expanded, source, collections);
+  return expanded;
+}
+
+/**
+ * Count factory instances under `el` for a collection (test helper).
+ *
+ * @param el - Tree root.
+ * @param collectionName - Collection to count.
+ * @returns instance count (sum of direct factory children across hosts).
+ */
+export function countCollectionInstances(
+  el: ResolvedElement,
+  collectionName: string,
+): number {
+  let n = 0;
+  if (el.props.collection_name === collectionName && el.props.factory) {
+    n += el.controls.length;
+  }
+  for (const c of el.controls) {
+    n += countCollectionInstances(c.element, collectionName);
+  }
+  return n;
+}
+
+/**
+ * Collect bound `#form_button_text` values from nodes with a collection index.
+ *
+ * @param el - Tree root.
+ * @returns texts keyed by collection index (first wins).
+ */
+export function collectFormButtonTexts(
+  el: ResolvedElement,
+): Map<number, string> {
+  const out = new Map<number, string>();
+  walk(el, (node) => {
+    const idx = node.props.collection_index;
+    const text = node.props.form_button_text;
+    if (typeof idx === "number" && typeof text === "string" && !out.has(idx)) {
+      out.set(idx, text);
+    }
+  });
+  return out;
+}
+
+function expandInPlace(
+  el: ResolvedElement,
+  resolver: UiResolver,
+  collections: CollectionMap,
+): void {
+  const collName =
+    typeof el.props.collection_name === "string"
+      ? el.props.collection_name
+      : "";
+  if (collName && el.props.factory) {
+    const items = collections[collName] ?? [];
+    const template = resolveFactoryTemplate(el, resolver);
+    if (template) {
+      const children: ResolvedChild[] = [];
+      for (let i = 0; i < items.length; i++) {
+        const inst = cloneResolved(template);
+        inst.props = { ...inst.props, collection_index: i };
+        expandInPlace(inst, resolver, collections);
+        children.push({ id: `${inst.name}_${i}`, element: inst });
+      }
+      el.controls = children;
+    }
+  }
+
+  for (const child of el.controls) {
+    expandInPlace(child.element, resolver, collections);
+  }
+}
+
+/**
+ * When `el` is a collection host that already has factory children, map each
+ * child id suffix / order to a collection index.
+ */
+function factoryChildScope(
+  el: ResolvedElement,
+  collections: CollectionMap,
+  parentScope: CollectionScope | undefined,
+): { name: string; indexFor(child: ResolvedChild): number } | undefined {
+  const collName =
+    typeof el.props.collection_name === "string"
+      ? el.props.collection_name
+      : "";
+  if (!collName || !el.props.factory) return undefined;
+  const items = collections[collName] ?? [];
+  return {
+    name: collName,
+    indexFor(child: ResolvedChild): number {
+      const fromProps = child.element.props.collection_index;
+      if (typeof fromProps === "number") return fromProps;
+      const m = /_(\d+)$/.exec(child.id);
+      if (m) return Number.parseInt(m[1]!, 10);
+      const idx = el.controls.indexOf(child);
+      return idx >= 0 && idx < items.length ? idx : (parentScope?.index ?? 0);
+    },
+  };
+}
+
+/**
+ * Replace property values that are bare `#binding` refs with looked-up values.
+ *
+ * @param props - Property bag to mutate.
+ * @param source - Global source.
+ * @param scope - Optional collection scope.
+ * @param collections - Named collections.
+ */
+function materializeHashProps(
+  props: PropertyBag,
+  source: BindingSource,
+  scope: CollectionScope | undefined,
+  collections: CollectionMap,
+): void {
+  for (const [key, value] of Object.entries(props)) {
+    if (typeof value !== "string") continue;
+    if (!/^#[A-Za-z_][A-Za-z0-9_]*$/.test(value)) continue;
+    let resolved: BindingValue | undefined;
+    if (scope) {
+      const item = collections[scope.name]?.[scope.index];
+      if (item) resolved = readCollectionItem(item, value);
+    }
+    if (resolved === undefined) {
+      resolved = source.global(value) ?? source.global(stripHash(value));
+    }
+    // Also allow already-written props (e.g. collection bind → form_button_text).
+    if (resolved === undefined) {
+      const fromProps = props[stripHash(value)] ?? props[value];
+      if (
+        typeof fromProps === "string" ||
+        typeof fromProps === "number" ||
+        typeof fromProps === "boolean"
+      ) {
+        resolved = fromProps;
+      }
+    }
+    if (resolved !== undefined) props[key] = resolved;
+  }
+}
+
+function walk(el: ResolvedElement, visit: (el: ResolvedElement) => void): void {
+  visit(el);
+  for (const c of el.controls) walk(c.element, visit);
+}

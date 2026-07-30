@@ -93,45 +93,10 @@
         font-size: 11px;
         white-space: nowrap;
       }
-      /* Burnt-in caption for 1280×720 capture — large enough to read in a montage. */
+      /* Caption element kept in the DOM for call-site compat; never shown —
+         the top-left debug `mark` row is the visible source of truth. */
       #caption {
-        display: none;
-        position: fixed;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        padding: 14px 20px 16px;
-        background: linear-gradient(
-          transparent,
-          rgba(0, 0, 0, 0.82) 30%,
-          rgba(0, 0, 0, 0.9)
-        );
-        pointer-events: none;
-        z-index: 3;
-        font-family: ui-sans-serif, system-ui, Segoe UI, sans-serif;
-      }
-      #caption.visible {
-        display: block;
-      }
-      #caption .caption-line {
-        font-size: 28px;
-        font-weight: 700;
-        line-height: 1.25;
-        color: #f0f3f6;
-        text-shadow: 0 1px 2px #000;
-      }
-      #caption.failed .caption-line {
-        color: #ffb4b4;
-      }
-      #caption .caption-message {
-        margin-top: 6px;
-        font-size: 22px;
-        font-weight: 600;
-        line-height: 1.3;
-        color: #ffdddd;
-        text-shadow: 0 1px 2px #000;
-        white-space: pre-wrap;
-        word-break: break-word;
+        display: none !important;
       }
       #ui-panel {
         display: none;

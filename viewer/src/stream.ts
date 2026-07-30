@@ -76,6 +76,7 @@ export class SnapshotStream {
       "particle",
       "phud",
       "formHover",
+      "vitals",
     ] as const) {
       es.addEventListener(type, (ev: MessageEvent<string>) => {
         try {
