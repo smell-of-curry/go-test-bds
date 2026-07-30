@@ -31,6 +31,12 @@ type movementData struct {
 
 	path             *pathfind.Path
 	navigationTarget cube.Pos
+	// repathCooldown skips FindPath for this many ticks after a re-path.
+	// Tick loop is 20 Hz and single-threaded — unthrottled FindPath on every
+	// stuck tick stalls the bot.
+	repathCooldown int
+	// fruitlessRepaths counts consecutive re-paths that made no progress.
+	fruitlessRepaths int
 
 	mc *physics.Computer
 }
