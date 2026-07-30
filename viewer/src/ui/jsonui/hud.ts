@@ -5,6 +5,7 @@
 
 import { applyBindings } from "./bindings";
 import { renderTree, type JsonUiAssets } from "./dom";
+import { evalExpr, parseExpr } from "./expr";
 import { layoutTree, type LayoutNode, type MeasureText } from "./layout";
 import type {
   BindingSource,
@@ -135,12 +136,41 @@ export function bindingSourceFromState(
     "#status_effects_visible": false,
     "#hotbar_visible_not_centered": false,
     "#hotbar_visible_not_centered_resizable": false,
+    "#hud_visible": true,
     "#hud_visible_centered": true,
     "#hud_visible_centered_gui_elements": true,
+    "#hud_visible_centered_touch": false,
+    "#hud_visible_not_centered": false,
     "#is_not_riding": true,
     "#is_riding": false,
     "#is_not_riding_bubbles": true,
     "#is_riding_bubbles": false,
+    "#is_spectator_mode": false,
+    // Unset → default-visible: touch inventory ellipses ("…"), tips, paper doll.
+    "#hotbar_elipses_left_visible": false,
+    "#hotbar_elipses_right_visible": false,
+    "#inventory_touch_button": false,
+    "#paper_doll_visible": false,
+    "#player_position_visible": false,
+    "#number_of_days_played_visible": false,
+    "#interact_visible": false,
+    "#auto_save_animation_visible": false,
+    "#tooltip_visible": false,
+    "#left_tips_visible": false,
+    "#emote_tips_visible": false,
+    "#scoreboard_sidebar_visible": false,
+    "#layout_customization_main_panel_visible": false,
+    "#layout_customization_sub_panel_visible": false,
+    "#scale_option_visible": false,
+    "#opacity_option_visible": false,
+    "#apply_to_all_option_visible": false,
+    "#creative_horse_hearts": false,
+    "#survival_horse_hearts": false,
+    "#horse_hearts_touch": false,
+    "#level_number_visible": false,
+    "#hotbar_with_xp_bar": false,
+    "#hotbar_no_xp_bar": false,
+    "#hotbar_with_locator_bar": false,
   };
 
   if (vitals) {
@@ -174,6 +204,12 @@ function vitalsGlobals(v: VitalsFrame): Record<string, BindingValue> {
     "#is_armor_visible": v.armor > 0,
     "#exp_progress": v.xpProgress,
     "#level_number": String(v.xpLevel),
+    // Vanilla: level glyph only when xpLevel > 0.
+    "#level_number_visible": v.xpLevel > 0,
+    // Survival desktop: XP bar + hotbar (not creative / locator variants).
+    "#hotbar_with_xp_bar": true,
+    "#hotbar_no_xp_bar": false,
+    "#hotbar_with_locator_bar": false,
     "#player_health": v.health,
     "#player_max_health": v.maxHealth,
     "#hunger": v.food,
@@ -524,6 +560,29 @@ function bindTree(
   applyPropertyRefs(out);
   applyRendererSizing(el, out, vitals);
   applyVisibilityChangedLatch(el, out, source, prev);
+  // Pack grid uses grid_item_template + collection — we don't expand those.
+  // Size the host and inject one full-width hotbar_renderer stub instead.
+  if (el.name === "hotbar_grid" && vitals) {
+    out.size = [HOTBAR_SLOT_W * HOTBAR_SLOTS + 2, HOTBAR_H];
+    out.grid_dimensions = [1, 1];
+  }
+  // XP strip panels are height-5 hosts that wrap the hotbar; grow them so the
+  // hanging bar isn't clipped by a short stacking-context box.
+  if (
+    vitals &&
+    (el.name === "empty_progress_bar" ||
+      el.name === "full_progress_bar" ||
+      el.name === "progress_bar_nub" ||
+      el.name === "resizing_xp_bar_with_hotbar" ||
+      el.name === "exp_progress_bar_and_hotbar")
+  ) {
+    const h = 5 + 16 + HOTBAR_H;
+    out.size = [HOTBAR_SLOT_W * HOTBAR_SLOTS + 10, h];
+    // Pack pins max_size height to 5 on the nub — lift the clamp.
+    if (Array.isArray(out.max_size)) {
+      out.max_size = [out.max_size[0] ?? 400, h];
+    }
+  }
 
   store.set(path, { ...out });
   // Index by leaf id for source_control_name lookups.
@@ -545,6 +604,25 @@ function bindTree(
     ),
   }));
 
+  if (
+    el.name === "hotbar_grid" &&
+    vitals &&
+    !controls.some((c) => c.element.props.renderer === "hotbar_renderer")
+  ) {
+    const stub = makeHotbarRendererStub();
+    controls.push({
+      id: "hotbar_renderer",
+      element: bindTree(
+        stub,
+        `${path}/hotbar_renderer`,
+        source,
+        store,
+        idIndex,
+        vitals,
+      ),
+    });
+  }
+
   // Cheap dirty: always rebuild bound tree (props are new objects); paint is the cost.
   return {
     type: el.type,
@@ -553,6 +631,27 @@ function bindTree(
     props: out,
     bindings: el.bindings,
     controls,
+  };
+}
+
+/**
+ * Synthetic `hotbar_renderer` host for the empty pack grid (no collection
+ * expansion). Native paint fills all nine slots into this one control.
+ *
+ * @returns unbound stub element.
+ */
+function makeHotbarRendererStub(): ResolvedElement {
+  return {
+    type: "custom",
+    name: "hotbar_renderer",
+    namespace: "hud",
+    props: {
+      renderer: "hotbar_renderer",
+      size: [HOTBAR_SLOT_W * HOTBAR_SLOTS + 2, HOTBAR_H],
+      layer: 1,
+    },
+    bindings: [],
+    controls: [],
   };
 }
 
@@ -634,22 +733,46 @@ function applyVisibilityChangedLatch(
 }
 
 /**
- * Resolve `text` / `texture` values that are `#property` refs.
+ * Resolve `text` / `texture` values that are `#property` refs or `(…)` exprs.
  *
  * @param out - Bound props.
  */
 function applyPropertyRefs(out: PropertyBag): void {
   for (const key of ["text", "texture"] as const) {
     const v = out[key];
-    if (typeof v !== "string" || !v.startsWith("#")) continue;
-    const ref = v.slice(1);
-    const got = out[ref] ?? out[v];
-    if (
-      typeof got === "string" ||
-      typeof got === "number" ||
-      typeof got === "boolean"
-    ) {
-      out[key] = typeof got === "string" ? got : String(got);
+    if (typeof v !== "string") continue;
+    if (v.startsWith("#")) {
+      const ref = v.slice(1);
+      const got = out[ref] ?? out[v];
+      if (
+        typeof got === "string" ||
+        typeof got === "number" ||
+        typeof got === "boolean"
+      ) {
+        out[key] = typeof got === "string" ? got : String(got);
+      }
+      continue;
+    }
+    // Pack textures like `('textures/ui/phud/' + $name)` stay as exprs until
+    // bind time — evaluate so a missing texture path is a real 404, not a
+    // literal `(` URL that paints a broken framed box.
+    const trimmed = v.trim();
+    if (!trimmed.startsWith("(") && !trimmed.includes(" + ")) continue;
+    try {
+      const got = evalExpr(parseExpr(trimmed), {
+        binding: (name) => readBound(out, name),
+        variable: (name) => {
+          const raw = out[`$${name}`] ?? out[name];
+          return raw;
+        },
+      });
+      if (typeof got === "string") out[key] = got;
+      else if (typeof got === "number" || typeof got === "boolean") {
+        out[key] = String(got);
+      }
+    } catch {
+      // Leave unresolved — paint path treats non-texture strings as empty.
+      out[key] = "";
     }
   }
 }
@@ -694,6 +817,14 @@ function applyRendererSizing(
     case "hotbar_renderer":
       out.size = [HOTBAR_SLOT_W * HOTBAR_SLOTS + 2, HOTBAR_H];
       if (!vitals) out.visible = false;
+      break;
+    case "horse_jump_renderer":
+    case "dash_renderer":
+      // Pack nests hotbar_chooser under these with offset [4, 16] and a fixed
+      // height of 5 (XP strip). Expand so the hanging hotbar isn't clipped by
+      // the stacking-context border box (z-index + short parent).
+      if (vitals)
+        out.size = [HOTBAR_SLOT_W * HOTBAR_SLOTS + 10, 5 + 16 + HOTBAR_H];
       break;
     default:
       break;
@@ -749,8 +880,11 @@ function paintNativeRenderers(
   vitals: VitalsFrame | null,
 ): void {
   // Group by element.name — DOM nodes stamp data-ui-name from that field.
+  // Honour ancestor visibility: layout does not AND parent.visible into children,
+  // so hidden XP-bar / locator branches would otherwise still paint stubs.
   const byName = new Map<string, LayoutNode[]>();
-  walkLayout(layout, (node) => {
+  walkLayoutVisible(layout, true, (node, effectiveVisible) => {
+    if (!effectiveVisible) return;
     if (typeof node.element.props.renderer !== "string") return;
     const list = byName.get(node.element.name) ?? [];
     list.push(node);
@@ -758,19 +892,34 @@ function paintNativeRenderers(
   });
 
   for (const [name, nodes] of byName) {
+    // Skip DOM under display:none ancestors (parent visible=false); index
+    // must align with the effectively-visible layout list above.
     const els = [
       ...paintRoot.querySelectorAll<HTMLElement>(
         `.jsonui[data-ui-name="${cssEscape(name)}"]`,
       ),
-    ];
+    ].filter((el) => !hasDisplayNoneAncestor(el));
     for (let i = 0; i < nodes.length; i++) {
       const node = nodes[i]!;
       const el = els[i];
-      if (!el || !node.visible) continue;
+      if (!el) continue;
       const renderer = String(node.element.props.renderer);
       paintOneRenderer(el, renderer, assets, guiScale, vitals);
     }
   }
+}
+
+/**
+ * @param el - DOM node.
+ * @returns true when `el` or an ancestor has `display: none`.
+ */
+function hasDisplayNoneAncestor(el: HTMLElement): boolean {
+  let cur: HTMLElement | null = el;
+  while (cur) {
+    if (cur.style.display === "none") return true;
+    cur = cur.parentElement;
+  }
+  return false;
 }
 
 /**
@@ -864,6 +1013,12 @@ function paintOneRenderer(
       break;
     case "selected_hotbar_slot":
       break;
+    // XP/hotbar stack hosts: vanilla nests hotbar_chooser under these. Keep as
+    // transparent layout shells — hiding them collapses the whole survival strip.
+    case "horse_jump_renderer":
+    case "dash_renderer":
+    case "locator_bar":
+      break;
     default:
       if (!warnedRenderers.has(renderer)) {
         warnedRenderers.add(renderer);
@@ -933,6 +1088,7 @@ function paintHotbar(
   host.style.flexDirection = "row";
   host.style.alignItems = "flex-end";
   host.style.imageRendering = "pixelated";
+  host.style.gap = "0";
 
   const selected = vitals?.selectedSlot ?? 0;
   const slots = vitals?.hotbar ?? Array(HOTBAR_SLOTS).fill(null);
@@ -944,22 +1100,32 @@ function paintHotbar(
     slot.style.width = `${w}px`;
     slot.style.height = `${h}px`;
     slot.style.position = "relative";
+    slot.style.boxSizing = "border-box";
+    // CSS chrome first — pack textures 404 in fixtures / sit near-black on dark
+    // world shots; keep a readable frame regardless of texture availability.
+    slot.style.backgroundColor = "#2a2a2a";
+    slot.style.border = `${Math.max(1, guiScale)}px solid #8a8a8a`;
     slot.style.backgroundImage = `url("${assets.textureUrl(`textures/ui/hotbar_${i}`)}")`;
     slot.style.backgroundSize = "100% 100%";
+    slot.style.backgroundRepeat = "no-repeat";
     if (i === selected) {
-      slot.style.outline = `${guiScale}px solid #fff`;
-      slot.style.outlineOffset = `${-guiScale}px`;
+      slot.style.borderColor = "#ffffff";
+      slot.style.boxShadow = `inset 0 0 0 ${guiScale}px #000`;
+      slot.dataset.selected = "1";
     }
     const stack = slots[i];
     if (stack && stack.count > 1) {
       const badge = document.createElement("div");
+      badge.className = "jsonui-hotbar-count";
       badge.textContent = String(stack.count);
       badge.style.position = "absolute";
       badge.style.right = "1px";
       badge.style.bottom = "1px";
       badge.style.fontSize = `${8 * guiScale}px`;
+      badge.style.lineHeight = "1";
       badge.style.color = "#fff";
       badge.style.textShadow = "1px 1px 0 #000";
+      badge.style.pointerEvents = "none";
       slot.appendChild(badge);
     }
     // ponytail: item icons need ItemIconResolver + atlas; slot frame + count only.
@@ -969,11 +1135,17 @@ function paintHotbar(
 
 /**
  * @param node - Layout node.
- * @param visit - Visitor.
+ * @param ancestorVisible - Whether every ancestor is visible.
+ * @param visit - Visitor with effective (ancestor-ANDed) visibility.
  */
-function walkLayout(node: LayoutNode, visit: (n: LayoutNode) => void): void {
-  visit(node);
-  for (const child of node.children) walkLayout(child, visit);
+function walkLayoutVisible(
+  node: LayoutNode,
+  ancestorVisible: boolean,
+  visit: (n: LayoutNode, effectiveVisible: boolean) => void,
+): void {
+  const effective = ancestorVisible && node.visible;
+  visit(node, effective);
+  for (const child of node.children) walkLayoutVisible(child, effective, visit);
 }
 
 /**

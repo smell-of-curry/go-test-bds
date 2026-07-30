@@ -183,10 +183,14 @@ export function parseExpr(src: string): Expr {
     if (tok.t === "lp") {
       bump();
       const inner = parseOr();
-      if (peek().t !== "rp")
-        throw new Error(`expr: expected ')' in ${JSON.stringify(src)}`);
-      bump();
-      return inner;
+      if (peek().t === "rp") {
+        bump();
+        return inner;
+      }
+      // Shipping packs sometimes omit a trailing `)` (e.g. phone_background
+      // `$condition`). Real Bedrock still evaluates these — auto-close at EOF.
+      if (peek().t === "eof") return inner;
+      throw new Error(`expr: expected ')' in ${JSON.stringify(src)}`);
     }
     throw new Error(
       `expr: unexpected token ${JSON.stringify(tok)} in ${JSON.stringify(src)}`,
@@ -251,6 +255,8 @@ export function parseExpr(src: string): Expr {
   };
 
   const expr = parseOr();
+  // Extra trailing `)` also appears in shipping packs (oak_icon texture).
+  while (peek().t === "rp") bump();
   if (peek().t !== "eof")
     throw new Error(`expr: trailing junk in ${JSON.stringify(src)}`);
   return expr;
@@ -293,7 +299,8 @@ function isFormat(s: string): boolean {
  * - `+` concat if either side is string, else numeric add
  * - `('%.Ns' * str)` / `(%.Ns * str)` → first N chars
  * - `(str * 1)` (numeric string × number) → parseInt
- * - `(str - substr)` → remove first occurrence of substr
+ * - `(str - substr)` → remove **every** occurrence of substr
+ *   (sidebar `$string_parser` ends in `- '|'` to strip `|` pad)
  * - `=` equality (strings compare as strings)
  *
  * @param expr Parsed expression.
@@ -335,9 +342,10 @@ export function evalExpr(expr: Expr, scope: ExprScope): BindingValue {
           if (typeof left === "string" || typeof right === "string") {
             const l = asString(left);
             const r = asString(right);
-            const idx = l.indexOf(r);
-            if (idx < 0) return l;
-            return l.slice(0, idx) + l.slice(idx + r.length);
+            // Empty needle would infinite-loop / split every char — no-op.
+            if (r.length === 0) return l;
+            // Real client strips every occurrence (`- '|'` clears padEnd pipes).
+            return l.split(r).join("");
           }
           return asNumber(left) - asNumber(right);
         }

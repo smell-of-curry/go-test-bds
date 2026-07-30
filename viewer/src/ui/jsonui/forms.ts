@@ -349,6 +349,8 @@ function tagCollectionIndices(
   // `.jsonui` elements under domRoot.
   const order: import("./layout.js").LayoutNode[] = [];
   (function walk(n: import("./layout.js").LayoutNode): void {
+    // Must match paintNode: invisible subtrees are not emitted.
+    if (!n.visible) return;
     order.push(n);
     const kids = [...n.children].sort((a, b) => a.layer - b.layer);
     for (const k of kids) walk(k);

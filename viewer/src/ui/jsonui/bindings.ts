@@ -17,7 +17,9 @@
  * | Hotbar item slots | collection `hotbar_items` / `#inventory_stack_count`, … | collection bindings — not implemented here |
  * | Player position / days | `#player_position_text`, `#number_of_days_played_text` | |
  * | Chat | `#chat_text` | |
- * | XP | `#exp_progress`, `#level_number` | |
+ * | XP | `#exp_progress`, `#level_number`, `#level_number_visible` | visible only when level > 0 |
+ * | Hotbar mode | `#hotbar_with_xp_bar` / `#hotbar_no_xp_bar` / `#hotbar_with_locator_bar` | mutually exclusive |
+ * | Touch ellipses | `#hotbar_elipses_left_visible` / `#hotbar_elipses_right_visible` | off on desktop |
  *
  * PokeBedrock also synthesizes view-scoped properties (`#sidebar`, `#phone`,
  * `#player_ping_text`) by slicing `#hud_title_text_string` upstream of these
@@ -31,6 +33,33 @@ import type {
   PropertyBag,
   ResolvedElement,
 } from "./types.js";
+
+/**
+ * True when a view-binding target gates show/enable — failed / missing
+ * conditions must collapse the control (default-visible would leak HUD chrome).
+ *
+ * @param target - `target_property_name` (`#visible` / `visible` / …).
+ * @returns whether to coerce failures to `false`.
+ */
+function isVisibilityGateTarget(target: string): boolean {
+  const name = stripHash(target);
+  return name === "visible" || name === "enabled";
+}
+
+/**
+ * Coerce a bound visibility/enabled value to a real boolean.
+ *
+ * Layout treats anything other than strict `false` as visible, so writing
+ * `""` from a failed string expr would still paint.
+ *
+ * @param value - Raw eval result.
+ * @returns boolean gate.
+ */
+function asVisibilityGate(value: BindingValue): boolean {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value !== 0;
+  return value !== "";
+}
 
 /** Binding condition values seen in packs; currently all treated as always. */
 export type BindingCondition =
@@ -49,6 +78,15 @@ export interface ApplyBindingsOptions {
    */
   lookup?: (name: string) => BindingValue | undefined;
   /**
+   * Resolve a `source_control_name` target to its bound property bag
+   * (sibling / child control). Used by view bindings with
+   * `resolve_sibling_scope`.
+   *
+   * @param controlName - Leaf control id / name (e.g. `"image"`).
+   * @returns that control's props, or undefined.
+   */
+  resolveControl?: (controlName: string) => PropertyBag | undefined;
+  /**
    * Collection-scoped lookup for `binding_type: "collection"`.
    * Called with the collection name and binding name (with or without `#`).
    */
@@ -58,6 +96,12 @@ export interface ApplyBindingsOptions {
   ) => BindingValue | undefined;
   /** Current `#collection_index` for `binding_type: "collection_details"`. */
   collectionIndex?: number;
+  /**
+   * When true, only `binding_type: "view"` entries run. When false, view
+   * bindings are skipped (collection/global/`collection_details` only).
+   * Default: run every binding.
+   */
+  viewsOnly?: boolean;
 }
 
 /**
@@ -186,6 +230,28 @@ function writeTarget(
 }
 
 /**
+ * Read a binding value from a control property bag (`texture` / `#texture`).
+ *
+ * @param props - Control props.
+ * @param name - Name without `#`.
+ * @returns bound value, or undefined.
+ */
+function readControlProp(
+  props: PropertyBag,
+  name: string,
+): BindingValue | undefined {
+  const v = props[name] ?? props[`#${name}`];
+  if (
+    typeof v === "string" ||
+    typeof v === "number" ||
+    typeof v === "boolean"
+  ) {
+    return v;
+  }
+  return undefined;
+}
+
+/**
  * Apply an element's bindings array onto a property map.
  *
  * Supports:
@@ -214,6 +280,8 @@ export function applyBindings(
   const props = element.props;
   const scope = makeScope(source, out, props, opts?.lookup);
 
+  const viewsOnly = opts?.viewsOnly === true;
+
   for (const raw of element.bindings) {
     if (raw.ignored === true) continue;
 
@@ -223,6 +291,9 @@ export function applyBindings(
     void _condition;
 
     const type = (raw.binding_type as string | undefined) ?? "global";
+
+    if (viewsOnly && type !== "view") continue;
+    if (!viewsOnly && opts?.viewsOnly === false && type === "view") continue;
 
     if (type === "collection_details") {
       if (opts?.collectionIndex === undefined) continue;
@@ -255,17 +326,46 @@ export function applyBindings(
       if (typeof sourceProp !== "string" || typeof targetProp !== "string")
         continue;
 
-      // source_control_name / resolve_sibling_scope: integration fills `lookup`.
-      // When source is a bare property ref like `#sidebar`, eval still works.
+      const ctrl =
+        typeof raw.source_control_name === "string"
+          ? raw.source_control_name
+          : "";
+      // When a control index is in play, missing names mean "wrong scope"
+      // (parent re-applying a grandchild binding) — leave the target alone
+      // instead of fail-closing #visible.
+      let sib: PropertyBag | undefined;
+      if (ctrl && opts?.resolveControl) {
+        sib = opts.resolveControl(ctrl);
+        if (!sib) continue;
+      }
+      const viewScope = makeScope(source, out, props, (name) => {
+        if (sib) {
+          const fromSib = readControlProp(sib, name);
+          if (fromSib !== undefined) return fromSib;
+        }
+        return opts?.lookup?.(name);
+      });
 
+      const gate = isVisibilityGateTarget(targetProp);
       const expanded = expandBareVariable(sourceProp, props);
-      let value: BindingValue;
-      try {
-        value = evalExpr(parseExpr(expanded), scope);
-      } catch {
+      // Unresolved `$condition` (or similar) macro — hide, don't default-show.
+      if (
+        gate &&
+        /^\$[A-Za-z_][A-Za-z0-9_]*$/.test(sourceProp.trim()) &&
+        expanded.trim() === sourceProp.trim()
+      ) {
+        writeTarget(out, targetProp, false);
         continue;
       }
-      writeTarget(out, targetProp, value);
+
+      let value: BindingValue;
+      try {
+        value = evalExpr(parseExpr(expanded), viewScope);
+      } catch {
+        if (gate) writeTarget(out, targetProp, false);
+        continue;
+      }
+      writeTarget(out, targetProp, gate ? asVisibilityGate(value) : value);
       continue;
     }
 

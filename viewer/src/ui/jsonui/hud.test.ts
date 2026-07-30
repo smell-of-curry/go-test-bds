@@ -149,3 +149,70 @@ describe("heartIcons", () => {
     assert.deepEqual(heartIcons(0), { full: 0, half: 0, empty: 10 });
   });
 });
+
+describe("vitalsGlobals visibility", () => {
+  it("hides level number at xpLevel 0", () => {
+    const src = bindingSourceFromState(
+      emptyState({
+        vitals: {
+          v: 1,
+          type: "vitals",
+          bot: "Bot",
+          tick: 1,
+          health: 20,
+          maxHealth: 20,
+          food: 20,
+          air: 300,
+          maxAir: 300,
+          armor: 0,
+          xpLevel: 0,
+          xpProgress: 0.25,
+          selectedSlot: 0,
+          hotbar: Array(9).fill(null),
+        },
+      }),
+      "",
+    );
+    assert.equal(src.global("#level_number_visible"), false);
+    assert.equal(src.global("#level_number"), "0");
+    assert.equal(src.global("#hotbar_elipses_left_visible"), false);
+    assert.equal(src.global("#hotbar_elipses_right_visible"), false);
+    assert.equal(src.global("#hotbar_with_xp_bar"), true);
+    assert.equal(src.global("#hotbar_no_xp_bar"), false);
+    assert.equal(src.global("#hotbar_with_locator_bar"), false);
+  });
+
+  it("shows level number when xpLevel > 0", () => {
+    const src = bindingSourceFromState(
+      emptyState({
+        vitals: {
+          v: 1,
+          type: "vitals",
+          bot: "Bot",
+          tick: 1,
+          health: 20,
+          maxHealth: 20,
+          food: 20,
+          air: 300,
+          maxAir: 300,
+          armor: 0,
+          xpLevel: 12,
+          xpProgress: 0.5,
+          selectedSlot: 2,
+          hotbar: Array(9).fill(null),
+        },
+      }),
+      "",
+    );
+    assert.equal(src.global("#level_number_visible"), true);
+    assert.equal(src.global("#level_number"), "12");
+  });
+
+  it("hides ellipses / tips even without vitals", () => {
+    const src = bindingSourceFromState(emptyState(), "");
+    assert.equal(src.global("#hotbar_elipses_left_visible"), false);
+    assert.equal(src.global("#hotbar_elipses_right_visible"), false);
+    assert.equal(src.global("#paper_doll_visible"), false);
+    assert.equal(src.global("#hotbar_with_xp_bar"), false);
+  });
+});

@@ -3,6 +3,7 @@
  * Expects `?packs=` origin serving /packs + /pack/{id}/{path}.
  */
 import { createJsonUiRuntime } from "../../src/ui/jsonui/runtime";
+import type { VitalsFrame } from "../../src/protocol";
 import type { WorldState } from "../../src/store";
 
 const params = new URLSearchParams(location.search);
@@ -49,7 +50,17 @@ function sidebarPayload(): string {
   return fields.join("|");
 }
 
-function emptyState(): WorldState {
+/**
+ * @param phudExtra - Extra PHUD tokens merged over the default sidebar.
+ * @param vitals - Optional vitals frame (survival HUD).
+ * @returns fresh WorldState for one frame.
+ */
+function makeState(
+  phudExtra: Record<string, string> = {},
+  vitals: VitalsFrame | null = null,
+): WorldState {
+  const phud = new Map<string, string>([["sidebar", sidebarPayload()]]);
+  for (const [k, v] of Object.entries(phudExtra)) phud.set(k, v);
   return {
     schemaOk: true,
     schemaError: null,
@@ -77,16 +88,37 @@ function emptyState(): WorldState {
     fullReset: false,
     time: null,
     camera: null,
-    phud: new Map([["sidebar", sidebarPayload()]]),
+    phud,
     formHover: null,
-    vitals: null,
+    vitals,
     waypoint: null,
   };
 }
 
 void runtime.ready.then(() => {
-  runtime.onFrame(emptyState());
+  runtime.onFrame(makeState());
   document.body.dataset.ready = "1";
   document.body.dataset.frameMs = String(runtime.lastFrameMs);
-  (window as unknown as { __jsonUi: typeof runtime }).__jsonUi = runtime;
+  const api = {
+    runtime,
+    /**
+     * Re-render with an updated PHUD map (sidebar kept unless overridden).
+     *
+     * @param phudExtra - Token → value; use `""` to clear a token.
+     */
+    setPhud(phudExtra: Record<string, string>): void {
+      runtime.onFrame(makeState(phudExtra));
+      document.body.dataset.frameMs = String(runtime.lastFrameMs);
+    },
+    /**
+     * Re-render survival HUD from a vitals frame (clears PHUD extras).
+     *
+     * @param vitals - Vitals SSE payload.
+     */
+    setVitals(vitals: VitalsFrame): void {
+      runtime.onFrame(makeState({}, vitals));
+      document.body.dataset.frameMs = String(runtime.lastFrameMs);
+    },
+  };
+  (window as unknown as { __jsonUi: typeof api }).__jsonUi = api;
 });

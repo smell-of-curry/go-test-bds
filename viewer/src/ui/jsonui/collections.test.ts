@@ -182,3 +182,98 @@ describe("applyBindings collection", () => {
     assert.equal(out.text, undefined);
   });
 });
+
+describe("bindResolvedTree source_control_name", () => {
+  it("shows icon panel when child image texture is non-empty", () => {
+    const btn: ResolvedElement = {
+      type: "stack_panel",
+      name: "dynamic_button",
+      namespace: "test",
+      props: {
+        collection_name: "form_buttons",
+        factory: { control_name: "test.dynamic_button" },
+      },
+      bindings: [
+        {
+          binding_name: "#form_button_length",
+          binding_name_override: "#collection_length",
+        },
+      ],
+      controls: [],
+    };
+    const template: ResolvedElement = {
+      type: "stack_panel",
+      name: "dynamic_button",
+      namespace: "test",
+      props: {},
+      bindings: [],
+      controls: [
+        {
+          id: "panel_name",
+          element: {
+            type: "panel",
+            name: "panel_name",
+            namespace: "test",
+            props: {},
+            bindings: [
+              {
+                binding_name: "#null",
+                binding_type: "view",
+                source_control_name: "image",
+                source_property_name: "(not (#texture = ''))",
+                target_property_name: "#visible",
+              },
+            ],
+            controls: [
+              {
+                id: "image",
+                element: {
+                  type: "image",
+                  name: "image",
+                  namespace: "test",
+                  props: {},
+                  bindings: [
+                    {
+                      binding_type: "collection",
+                      binding_collection_name: "form_buttons",
+                      binding_name: "#form_button_texture",
+                      binding_name_override: "#texture",
+                    },
+                    {
+                      binding_name: "#null",
+                      binding_type: "view",
+                      source_property_name:
+                        "(not ((#texture = '') or (#texture = 'loading')))",
+                      target_property_name: "#visible",
+                    },
+                  ],
+                  controls: [],
+                },
+              },
+            ],
+          },
+        },
+      ],
+    };
+    const resolver: UiResolver = {
+      resolve(ns, name) {
+        if (ns === "test" && name === "dynamic_button") return template;
+        return undefined;
+      },
+      screens: () => [],
+    };
+    const tree = prepareCollectionTree(
+      btn,
+      resolver,
+      source({ "#form_button_length": 1 }),
+      {
+        form_buttons: formButtonsCollection(["HP"], ["textures/items/potion"]),
+      },
+    );
+    const panel = tree.controls[0]!.element.controls[0]!.element;
+    const image = panel.controls[0]!.element;
+    assert.equal(image.props.texture, "textures/items/potion");
+    assert.equal(image.props.visible, true);
+    assert.equal(panel.props.visible, true);
+  });
+});

@@ -77,7 +77,7 @@ describe("applyBindings view", () => {
   it("expands bare $string_parser variable then evaluates", () => {
     const STRING_PARSER =
       "((('%.' + $var_size + 's') * (#string - (('%.' + ($var_size * $var_index) + 's') * #string))) - '|')";
-    const pad120 = (s: string) => s.padEnd(120, " ").slice(0, 120);
+    const pad120 = (s: string) => s.padEnd(120, "|").slice(0, 120);
     const packed = `${pad120("stats")}|${pad120("Name")}`;
 
     const out: PropertyBag = { string: packed };
@@ -100,7 +100,8 @@ describe("applyBindings view", () => {
       source({}),
       out,
     );
-    assert.equal(out.var, pad120("Name"));
+    // `- '|'` strips every pad pipe → bare field value.
+    assert.equal(out.var, "Name");
   });
 
   it("visibility from comparison", () => {
@@ -155,6 +156,28 @@ describe("applyBindings view", () => {
     assert.equal(out.string, "from-parent");
   });
 
+  it("resolveControl feeds source_control_name into view exprs", () => {
+    const out: PropertyBag = {};
+    applyBindings(
+      el([
+        {
+          binding_name: "#null",
+          binding_type: "view",
+          source_control_name: "image",
+          source_property_name: "(not (#texture = ''))",
+          target_property_name: "#visible",
+        },
+      ]),
+      source({}),
+      out,
+      {
+        resolveControl: (n) =>
+          n === "image" ? { texture: "textures/items/potion" } : undefined,
+      },
+    );
+    assert.equal(out.visible, true);
+  });
+
   it("PokeBedrock &_ title suppress (hud_screen.json view binding)", () => {
     // Exact pack expression uses %.1s vs '&_' (1 char vs 2) — under char-truncate
     // semantics that never matches. Intended form is %.2s; assert that.
@@ -200,5 +223,66 @@ describe("applyBindings view", () => {
       visibleOut,
     );
     assert.equal(visibleOut.visible, true);
+  });
+
+  it("failed / missing $condition → #visible false (not default-show)", () => {
+    const missing: PropertyBag = {};
+    applyBindings(
+      el(
+        [
+          {
+            binding_name: "#null",
+            binding_type: "view",
+            source_property_name: "$condition",
+            target_property_name: "#visible",
+          },
+        ],
+        {},
+      ),
+      source({}),
+      missing,
+    );
+    assert.equal(missing.visible, false);
+
+    // Shipping phone_background omits a trailing `)` — must still gate.
+    const phoneBg: PropertyBag = { value: "" };
+    applyBindings(
+      el(
+        [
+          {
+            binding_name: "#null",
+            binding_type: "view",
+            source_property_name: "$condition",
+            target_property_name: "#visible",
+          },
+        ],
+        {
+          $condition: "((#value = 'ring') or (#value = 'standby')",
+        },
+      ),
+      source({}),
+      phoneBg,
+    );
+    assert.equal(phoneBg.visible, false);
+
+    phoneBg.value = "ring";
+    applyBindings(
+      el(
+        [
+          {
+            binding_name: "#null",
+            binding_type: "view",
+            source_property_name: "$condition",
+            target_property_name: "#visible",
+          },
+        ],
+        {
+          $condition: "((#value = 'ring') or (#value = 'standby')",
+        },
+      ),
+      source({}),
+      phoneBg,
+    );
+    assert.equal(phoneBg.visible, true);
   });
 });

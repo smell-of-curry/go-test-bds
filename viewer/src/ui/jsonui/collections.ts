@@ -188,7 +188,9 @@ export function bindResolvedTree(
   const scopedProps: PropertyBag = { ...parentVars, ...el.props };
   const bindEl: ResolvedElement = { ...el, props: scopedProps };
   const out: PropertyBag = { ...scopedProps };
-  applyBindings(bindEl, source, out, opts);
+  // Collection / global first — view bindings that read sibling `#texture`
+  // need children bound before they can resolve `source_control_name`.
+  applyBindings(bindEl, source, out, { ...opts, viewsOnly: false });
   materializeHashProps(out, source, scope, collections);
   el.props = out;
 
@@ -206,6 +208,47 @@ export function bindResolvedTree(
         : scope;
     bindResolvedTree(child.element, source, collections, nextScope, childVars);
   }
+
+  const byControl = indexControls(el.controls);
+  const resolveControl = (name: string): PropertyBag | undefined =>
+    byControl.get(name);
+
+  // Parent view bindings (e.g. panel_name ← child image.#texture).
+  applyBindings(bindEl, source, out, {
+    ...opts,
+    viewsOnly: true,
+    resolveControl,
+  });
+  el.props = out;
+
+  // Re-run each child's view bindings with sibling scope (progress ← image).
+  for (const child of el.controls) {
+    const childOut = { ...child.element.props };
+    applyBindings({ ...child.element, props: childOut }, source, childOut, {
+      ...opts,
+      viewsOnly: true,
+      resolveControl,
+    });
+    child.element.props = childOut;
+  }
+}
+
+/**
+ * Index direct children by control id and element name for
+ * `source_control_name` lookups.
+ *
+ * @param controls - Direct children.
+ * @returns map of name → props.
+ */
+function indexControls(
+  controls: readonly { id: string; element: ResolvedElement }[],
+): Map<string, PropertyBag> {
+  const map = new Map<string, PropertyBag>();
+  for (const c of controls) {
+    map.set(c.id, c.element.props);
+    map.set(c.element.name, c.element.props);
+  }
+  return map;
 }
 
 /** @param props - Property bag. @returns only `$…` keys. */

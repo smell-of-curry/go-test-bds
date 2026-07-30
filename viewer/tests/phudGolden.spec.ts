@@ -88,10 +88,16 @@ async function startHarness(): Promise<Harness> {
     broadcast: (frame) => stream.broadcast(frame),
     close: async () => {
       stream.closeAll();
-      await new Promise<void>((resolve, reject) =>
-        http.close((err) => (err ? reject(err) : resolve())),
-      );
-      await vite.close();
+      await Promise.race([
+        new Promise<void>((resolve, reject) =>
+          http.close((err) => (err ? reject(err) : resolve())),
+        ),
+        new Promise<void>((r) => setTimeout(r, 2_000)),
+      ]).catch(() => undefined);
+      await Promise.race([
+        vite.close(),
+        new Promise<void>((r) => setTimeout(r, 2_000)),
+      ]).catch(() => undefined);
     },
   };
 }
@@ -194,6 +200,21 @@ async function shoot(page: Page, name: string): Promise<void> {
   });
 }
 
+/**
+ * Tear down stream/vite before the page — `page.close` can hang after a
+ * heavy JSON-UI form DOM while the SSE socket is still open.
+ *
+ * @param page - Playwright page.
+ * @param h - Live harness.
+ */
+async function closeHarness(page: Page, h: Harness): Promise<void> {
+  await h.close().catch(() => undefined);
+  await Promise.race([
+    page.close(),
+    new Promise<void>((r) => setTimeout(r, 3_000)),
+  ]).catch(() => undefined);
+}
+
 test("golden: sidebar + top bar + ping", async ({ page }) => {
   const h = await startHarness();
   try {
@@ -262,8 +283,7 @@ test("golden: sidebar + top bar + ping", async ({ page }) => {
     );
     await shoot(page, "sidebar");
   } finally {
-    await page.close().catch(() => undefined);
-    await h.close();
+    await closeHarness(page, h);
   }
 });
 
@@ -325,8 +345,7 @@ test("golden: battle bar", async ({ page }) => {
     );
     await shoot(page, "battle-bar");
   } finally {
-    await page.close().catch(() => undefined);
-    await h.close();
+    await closeHarness(page, h);
   }
 });
 
@@ -378,7 +397,6 @@ test("golden: centered form modal", async ({ page }) => {
     );
     await shoot(page, "form-modal");
   } finally {
-    await page.close().catch(() => undefined);
-    await h.close();
+    await closeHarness(page, h);
   }
 });

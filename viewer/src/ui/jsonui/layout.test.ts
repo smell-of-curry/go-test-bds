@@ -199,6 +199,30 @@ describe("layoutTree sizing", () => {
     const tree = layoutTree(root, VP, { measureText: measureStub });
     assert.deepEqual(boxOf(tree), { x: 0, y: 0, w: 24, h: 16 });
   });
+
+  it("label default height is text metrics, not parent %", () => {
+    const root = el(
+      "panel",
+      {
+        size: [100, 80],
+        anchor_from: "top_left",
+        anchor_to: "top_left",
+      },
+      [
+        child(
+          "lab",
+          el("label", {
+            text: "Hi",
+            size: ["100%", "default"],
+            anchor_from: "top_left",
+            anchor_to: "top_left",
+          }),
+        ),
+      ],
+    );
+    const tree = layoutTree(root, VP, { measureText: measureStub });
+    assert.deepEqual(boxOf(tree.children[0]!), { x: 0, y: 0, w: 100, h: 8 });
+  });
 });
 
 describe("layoutTree anchors and offsets", () => {
@@ -214,6 +238,39 @@ describe("layoutTree anchors and offsets", () => {
       { measureText: measureStub },
     );
     assert.deepEqual(boxOf(tree), { x: 5, y: 7, w: 20, h: 10 });
+  });
+
+  it("parses negative percent offsets (battle bag/run)", () => {
+    const tree = layoutTree(
+      el(
+        "panel",
+        {
+          size: [200, 100],
+          anchor_from: "top_left",
+          anchor_to: "top_left",
+        },
+        [
+          child(
+            "bag",
+            el("panel", {
+              size: [40, 20],
+              anchor_from: "top_left",
+              anchor_to: "top_left",
+              offset: ["-10%", "-13%"],
+            }),
+          ),
+        ],
+      ),
+      VP,
+      { measureText: measureStub },
+    );
+    // -10% of 200 = -20; -13% of 100 = -13
+    assert.deepEqual(boxOf(tree.children[0]!), {
+      x: -20,
+      y: -13,
+      w: 40,
+      h: 20,
+    });
   });
 
   it("positions center", () => {
@@ -397,7 +454,9 @@ describe("layoutTree layer and visibility", () => {
     const tree = layoutTree(root, VP, { measureText: measureStub });
     assert.equal(tree.children.length, 1);
     assert.equal(tree.children[0]!.visible, false);
-    assert.deepEqual(boxOf(tree.children[0]!), { x: 0, y: 0, w: 10, h: 10 });
+    // Invisible trees are stubbed (0×0, no children) — full layout is skipped.
+    assert.deepEqual(boxOf(tree.children[0]!), { x: 0, y: 0, w: 0, h: 0 });
+    assert.equal(tree.children[0]!.children.length, 0);
   });
 });
 
@@ -445,17 +504,42 @@ describe("layoutTree grid", () => {
   });
 });
 
-describe("layoutTree viewport %x/%y", () => {
-  it("resolves %x/%y against viewport", () => {
+describe("layoutTree self-axis %x/%y", () => {
+  it("resolves width as % of own height (%y)", () => {
+    // Sidebar main: ["222.22%y", 192] → w = 2.2222 * 192.
     const tree = layoutTree(
       el("panel", {
-        size: ["50%x", "50%y"],
+        size: ["222.22%y", 192],
         anchor_from: "top_left",
         anchor_to: "top_left",
       }),
       VP,
       { measureText: measureStub },
     );
-    assert.deepEqual(boxOf(tree), { x: 0, y: 0, w: 100, h: 50 });
+    assert.equal(tree.box.h, 192);
+    assert.ok(Math.abs(tree.box.w - 2.2222 * 192) < 0.01);
+  });
+
+  it("makes square icons with [100%y, 100%]", () => {
+    const root = el(
+      "panel",
+      {
+        size: [80, 32],
+        anchor_from: "top_left",
+        anchor_to: "top_left",
+      },
+      [
+        child(
+          "ball",
+          el("image", {
+            size: ["100%y", "100%"],
+            anchor_from: "top_left",
+            anchor_to: "top_left",
+          }),
+        ),
+      ],
+    );
+    const tree = layoutTree(root, VP, { measureText: measureStub });
+    assert.deepEqual(boxOf(tree.children[0]!), { x: 0, y: 0, w: 32, h: 32 });
   });
 });

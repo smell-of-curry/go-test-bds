@@ -2,13 +2,15 @@
  * Pure Bedrock JSON UI layout math. No DOM.
  *
  * Size/anchor semantics follow
- * https://wiki.bedrock.dev/json-ui/json-ui-documentation with one deliberate
- * simplification: `%x` / `%y` resolve against the viewport (task contract),
- * not the element’s own width/height.
+ * https://wiki.bedrock.dev/json-ui/json-ui-documentation:
+ * `%` → parent axis, `%x` → this element's width, `%y` → this element's height
+ * (e.g. sidebar `["222.22%y", 192]` and ball icons `["100%y", "100%"]`).
  */
 
+import { evalExpr, parseExpr } from "./expr.js";
 import type {
   LayoutBox,
+  PropertyBag,
   ResolvedChild,
   ResolvedElement,
   Viewport,
@@ -127,11 +129,10 @@ function layoutElement(
   opts: LayoutOptions,
   fill: { remainingW: number; remainingH: number },
 ): LayoutNode {
-  const visible = el.props.visible !== false;
+  const visible = coerceVisible(el.props.visible);
   const layer = asInt(el.props.layer, 0);
-  const ignored = el.props.ignored === true;
 
-  if (ignored) {
+  if (isIgnored(el.props)) {
     return {
       element: el,
       box: { x: parentBox.x, y: parentBox.y, w: 0, h: 0 },
@@ -141,7 +142,54 @@ function layoutElement(
     };
   }
 
+  // Invisible factory siblings (battle bag/move slots) — stub only. Full
+  // layout of hidden trees made battle.main multi-second on the golden path.
+  if (!visible) {
+    return {
+      element: el,
+      box: { x: parentBox.x, y: parentBox.y, w: 0, h: 0 },
+      children: [],
+      layer,
+      visible: false,
+    };
+  }
+
+  // scroll_view: paint content statically clipped (no scroll interaction).
+  // Drop scrollbar chrome so `fill` viewport gets full width — track/%c
+  // siblings otherwise collapse the pane to a sliver.
+  if (el.type === "scroll_view") {
+    const forced: ResolvedElement = {
+      ...stripScrollChrome(el),
+      props: { ...el.props, clips_children: true },
+    };
+    return layoutAnchored(
+      forced,
+      parentBox,
+      viewport,
+      opts,
+      fill,
+      visible,
+      layer,
+    );
+  }
+
   if (el.type === "stack_panel") {
+    // Collection hosts sized to the parent (100%, not %c) overlay factory
+    // children — battle move/action buttons share one grid origin.
+    if (el.props.factory && el.props.collection_name) {
+      const hSpec = parseSize(readSizePair(el.props.size)[1]);
+      if (!hSpec.needsChildren && !hSpec.isDefault) {
+        return layoutFactoryOverlay(
+          el,
+          parentBox,
+          viewport,
+          opts,
+          fill,
+          visible,
+          layer,
+        );
+      }
+    }
     return layoutStack(el, parentBox, viewport, opts, fill, visible, layer);
   }
   if (el.type === "grid") {
@@ -149,6 +197,61 @@ function layoutElement(
   }
 
   return layoutAnchored(el, parentBox, viewport, opts, fill, visible, layer);
+}
+
+/**
+ * Mark scrollbar track/box controls ignored under a scroll_view.
+ *
+ * @param el - scroll_view element.
+ * @returns shallow-cloned tree with bar chrome ignored.
+ */
+function stripScrollChrome(el: ResolvedElement): ResolvedElement {
+  return {
+    ...el,
+    controls: el.controls.map((c) => {
+      const name = `${c.id} ${c.element.name}`.toLowerCase();
+      if (name.includes("bar_and_track") || name.includes("scroll_bar")) {
+        return {
+          ...c,
+          element: {
+            ...c.element,
+            props: { ...c.element.props, ignored: true },
+          },
+        };
+      }
+      return {
+        ...c,
+        element: stripScrollChrome(c.element),
+      };
+    }),
+  };
+}
+
+/**
+ * Resolve `ignored` (bool or `$touch` / `(not $touch)`-style expr).
+ *
+ * @param props - Element props (may carry `$variables`).
+ * @returns true when the control must be dropped from layout.
+ */
+function isIgnored(props: PropertyBag): boolean {
+  const raw = props.ignored;
+  if (raw === true) return true;
+  if (raw === false || raw === undefined || raw === null) return false;
+  if (typeof raw !== "string") return false;
+  const src = raw.trim();
+  if (!src) return false;
+  try {
+    const value = evalExpr(parseExpr(src.startsWith("(") ? src : `(${src})`), {
+      binding: () => undefined,
+      variable: (name) => props[`$${name}`] ?? props[name],
+    });
+    if (typeof value === "boolean") return value;
+    if (typeof value === "number") return value !== 0;
+    return value !== "";
+  } catch {
+    // Unresolved expr — keep the control (mouse path wins over a hard drop).
+    return false;
+  }
 }
 
 function layoutAnchored(
@@ -473,8 +576,8 @@ function layoutStack(
   let cursor = 0;
 
   for (const c of el.controls) {
-    if (c.element.props.ignored === true) continue;
-    if (c.element.props.visible === false) {
+    if (isIgnored(c.element.props)) continue;
+    if (!coerceVisible(c.element.props.visible)) {
       const node = layoutElement(c.element, selfBox, viewport, opts, {
         remainingW: selfBox.w,
         remainingH: selfBox.h,
@@ -533,6 +636,68 @@ function layoutStack(
     layer,
     visible,
   };
+}
+
+/**
+ * Lay out a factory collection host as overlapping children (panel-like).
+ *
+ * @param el - stack_panel with factory + collection_name.
+ * @param parentBox - Parent box.
+ * @param viewport - Viewport.
+ * @param opts - Layout options.
+ * @param fill - Remaining fill space.
+ * @param visible - Host visibility.
+ * @param layer - Host layer.
+ * @returns layout node.
+ */
+function layoutFactoryOverlay(
+  el: ResolvedElement,
+  parentBox: LayoutBox,
+  viewport: Viewport,
+  opts: LayoutOptions,
+  fill: { remainingW: number; remainingH: number },
+  visible: boolean,
+  layer: number,
+): LayoutNode {
+  const sizeSpec = readSizePair(el.props.size);
+  const wParsed = parseSize(sizeSpec[0]);
+  const hParsed = parseSize(sizeSpec[1]);
+  const boxSize = resolveSizePair(
+    wParsed,
+    hParsed,
+    {
+      parentW: parentBox.w,
+      parentH: parentBox.h,
+      selfW: 0,
+      selfH: 0,
+      childrenW: 0,
+      childrenH: 0,
+      maxChildW: 0,
+      maxChildH: 0,
+      viewportW: viewport.width,
+      viewportH: viewport.height,
+      remainingW: fill.remainingW,
+      remainingH: fill.remainingH,
+    },
+    el,
+    opts,
+  );
+  const offset = resolveOffset(el.props.offset, boxSize, parentBox, viewport);
+  const pos = positionWithAnchors(
+    parentBox,
+    boxSize,
+    readAnchor(el.props.anchor_from, "center"),
+    readAnchor(el.props.anchor_to, "center"),
+    offset,
+  );
+  const selfBox: LayoutBox = {
+    x: pos.x,
+    y: pos.y,
+    w: boxSize.w,
+    h: boxSize.h,
+  };
+  const children = layoutControls(el.controls, selfBox, viewport, opts);
+  return { element: el, box: selfBox, children, layer, visible };
 }
 
 /** Like layoutElement but optionally forces top_left anchors (stack slots). */
@@ -617,7 +782,7 @@ function layoutGrid(
   const cellW = selfBox.w / cols;
   const cellH = selfBox.h / rows;
 
-  const items = el.controls.filter((c) => c.element.props.ignored !== true);
+  const items = el.controls.filter((c) => !isIgnored(c.element.props));
   const children: LayoutNode[] = [];
 
   for (let i = 0; i < items.length; i++) {
@@ -673,8 +838,8 @@ function measureChildren(
   let any = false;
 
   for (const c of el.controls) {
-    if (c.element.props.ignored === true) continue;
-    if (c.element.props.visible === false) {
+    if (isIgnored(c.element.props)) continue;
+    if (!coerceVisible(c.element.props.visible)) {
       // Still produce a node later in final pass; skip content contribution.
       continue;
     }
@@ -708,7 +873,7 @@ function layoutControls(
 ): LayoutNode[] {
   const out: LayoutNode[] = [];
   for (const c of controls) {
-    if (c.element.props.ignored === true) continue;
+    if (isIgnored(c.element.props)) continue;
     out.push(
       layoutElement(c.element, parentBox, viewport, opts, {
         remainingW: parentBox.w,
@@ -722,8 +887,22 @@ function layoutControls(
 function visibleControls(controls: ResolvedChild[]): ResolvedChild[] {
   return controls.filter(
     (c) =>
-      c.element.props.ignored !== true && c.element.props.visible !== false,
+      !isIgnored(c.element.props) && coerceVisible(c.element.props.visible),
   );
+}
+
+/**
+ * Coerce a `#visible` / `visible` prop to a boolean.
+ *
+ * Pack bindings often write the string `"true"` / `"false"` (sidebar selected
+ * flag) — those must not stay truthy as non-empty strings.
+ *
+ * @param v - Raw property value.
+ * @returns false only for explicit falsy forms; undefined defaults to visible.
+ */
+function coerceVisible(v: unknown): boolean {
+  if (v === false || v === 0 || v === "false" || v === "") return false;
+  return true;
 }
 
 function resolveSizePair(
@@ -746,17 +925,11 @@ function resolveSizePair(
   let w = wParsed.eval(e, "w");
   let h = hParsed.eval(e, "h");
 
-  // default → 100% parent (already). For labels with both default and no useful parent
-  // (0), fall back to intrinsic text size.
+  // Labels: `default` means text metrics, never parent %.
   if (intrinsic && el.type === "label") {
-    if (wParsed.isDefault && (e.parentW === 0 || !Number.isFinite(w)))
-      w = intrinsic.w;
-    if (hParsed.isDefault && (e.parentH === 0 || !Number.isFinite(h)))
-      h = intrinsic.h;
+    if (wParsed.isDefault) w = intrinsic.w;
+    if (hParsed.isDefault) h = intrinsic.h;
   }
-
-  // If width is %y-of-viewport (or height %x), already handled in eval.
-  // Re-eval once opposite self known for any needsSelf (element-cross) — we map %x/%y to viewport, so no-op.
 
   return { w: finite(w), h: finite(h) };
 }
@@ -852,12 +1025,17 @@ function readAnchor(raw: unknown, fallback: Anchor): Anchor {
 
 function parseSize(raw: unknown): ParsedSize {
   if (raw === undefined || raw === null || raw === "default") {
+    // Content-sized when children exist; else parent (empty panels keep fill).
     return {
-      needsChildren: false,
+      needsChildren: true,
       needsSelf: false,
       isFill: false,
       isDefault: true,
-      eval: (env, axis) => (axis === "w" ? env.parentW : env.parentH),
+      eval: (env, axis) => {
+        const content = axis === "w" ? env.childrenW : env.childrenH;
+        if (content > 0) return content;
+        return axis === "w" ? env.parentW : env.parentH;
+      },
     };
   }
   if (raw === "fill") {
@@ -886,7 +1064,7 @@ function parseSize(raw: unknown): ParsedSize {
   if (s === "default") return parseSize("default");
   if (s === "fill") return parseSize("fill");
 
-  // Arithmetic: "100% - 8px", "75% + 12px"
+  // Arithmetic: "100% - 8px", "75% + 12px" (not bare "-13%")
   if (/[+-]/.test(s.slice(1)) && /%|px|\d/.test(s)) {
     return parseArithmetic(s);
   }
@@ -934,7 +1112,8 @@ function parseSizeAtom(s: string): ParsedSize {
   if (t === "default") return parseSize("default");
   if (t === "fill") return parseSize("fill");
 
-  let m = /^([0-9.]+)px$/i.exec(t);
+  // Leading `-` required for battle offsets ("-45.5%", "-13%").
+  let m = /^(-?[0-9.]+)px$/i.exec(t);
   if (m) {
     const n = Number(m[1]);
     return {
@@ -946,7 +1125,7 @@ function parseSizeAtom(s: string): ParsedSize {
     };
   }
 
-  m = /^([0-9.]+)%cm$/i.exec(t);
+  m = /^(-?[0-9.]+)%cm$/i.exec(t);
   if (m) {
     const n = Number(m[1]) / 100;
     return {
@@ -958,7 +1137,7 @@ function parseSizeAtom(s: string): ParsedSize {
     };
   }
 
-  m = /^([0-9.]+)%c$/i.exec(t);
+  m = /^(-?[0-9.]+)%c$/i.exec(t);
   if (m) {
     const n = Number(m[1]) / 100;
     return {
@@ -970,7 +1149,7 @@ function parseSizeAtom(s: string): ParsedSize {
     };
   }
 
-  m = /^([0-9.]+)%sm$/i.exec(t);
+  m = /^(-?[0-9.]+)%sm$/i.exec(t);
   if (m) {
     // Sibling max — not tracked; treat as 0 (punted).
     return {
@@ -982,32 +1161,33 @@ function parseSizeAtom(s: string): ParsedSize {
     };
   }
 
-  m = /^([0-9.]+)%x$/i.exec(t);
+  m = /^(-?[0-9.]+)%x$/i.exec(t);
   if (m) {
     const n = Number(m[1]) / 100;
     return {
       needsChildren: false,
-      needsSelf: false,
+      needsSelf: true,
       isFill: false,
       isDefault: false,
-      // Task: viewport-relative. Wiki would use element width.
-      eval: (env) => n * env.viewportW,
+      // Percent of this element's own width (resolved on the second pass).
+      eval: (env) => n * env.selfW,
     };
   }
 
-  m = /^([0-9.]+)%y$/i.exec(t);
+  m = /^(-?[0-9.]+)%y$/i.exec(t);
   if (m) {
     const n = Number(m[1]) / 100;
     return {
       needsChildren: false,
-      needsSelf: false,
+      needsSelf: true,
       isFill: false,
       isDefault: false,
-      eval: (env) => n * env.viewportH,
+      // Percent of this element's own height (resolved on the second pass).
+      eval: (env) => n * env.selfH,
     };
   }
 
-  m = /^([0-9.]+)%$/i.exec(t);
+  m = /^(-?[0-9.]+)%$/i.exec(t);
   if (m) {
     const n = Number(m[1]) / 100;
     return {
@@ -1019,7 +1199,7 @@ function parseSizeAtom(s: string): ParsedSize {
     };
   }
 
-  m = /^([0-9.]+)$/i.exec(t);
+  m = /^(-?[0-9.]+)$/i.exec(t);
   if (m) {
     const n = Number(m[1]);
     return {

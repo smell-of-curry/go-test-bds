@@ -58,9 +58,12 @@ describe("parseExpr / evalExpr operators", () => {
     assert.equal(ev("(%.2s * #t)", scope({ bindings: { t: "XYZZ" } })), "XY");
   });
 
-  it("(str - substr) removes", () => {
+  it("(str - substr) removes every occurrence", () => {
     assert.equal(ev("('foobar' - 'oba')"), "for");
     assert.equal(ev("(#s - '|')", scope({ bindings: { s: "abc|" } })), "abc");
+    // Sidebar padEnd(120,'|') relies on stripping ALL pipes, not just one.
+    assert.equal(ev("('a|b|c' - '|')"), "abc");
+    assert.equal(ev("('Bulbasaur||||||||' - '|')"), "Bulbasaur");
   });
 
   it("composed format ('%.' + $n + 's')", () => {
@@ -96,6 +99,23 @@ describe("parseExpr / evalExpr operators", () => {
   it("unary minus", () => {
     assert.equal(ev("-3 + 5"), 2);
   });
+
+  it("auto-closes missing trailing ) (phone_background $condition)", () => {
+    const src = "((#value = 'ring') or (#value = 'standby')";
+    assert.equal(ev(src, scope({ bindings: { value: "" } })), false);
+    assert.equal(ev(src, scope({ bindings: { value: "ring" } })), true);
+    assert.equal(ev(src, scope({ bindings: { value: "standby" } })), true);
+  });
+
+  it("tolerates extra trailing ) (oak_icon texture)", () => {
+    assert.equal(
+      ev(
+        "('textures/ui/phud/oak_' + $name))",
+        scope({ vars: { name: "start" } }),
+      ),
+      "textures/ui/phud/oak_start",
+    );
+  });
 });
 
 describe("sidebar field extraction (real $string_parser)", () => {
@@ -104,7 +124,7 @@ describe("sidebar field extraction (real $string_parser)", () => {
     "((('%.' + $var_size + 's') * (#string - (('%.' + ($var_size * $var_index) + 's') * #string))) - '|')";
 
   function pad120(s: string): string {
-    return s.padEnd(120, " ").slice(0, 120);
+    return s.padEnd(120, "|").slice(0, 120);
   }
 
   it("extracts field 1 from a 2-field &_sidebar payload", () => {
@@ -123,7 +143,7 @@ describe("sidebar field extraction (real $string_parser)", () => {
         vars: { var_size: 121, var_index: 1 },
       }),
     );
-    assert.equal(got, field1);
+    assert.equal(got, "Pikachu");
 
     const got0 = ev(
       STRING_PARSER,
@@ -132,7 +152,7 @@ describe("sidebar field extraction (real $string_parser)", () => {
         vars: { var_size: 121, var_index: 0 },
       }),
     );
-    assert.equal(got0, field0);
+    assert.equal(got0, "Lv5 20/20");
 
     // Title-prefix suppress idiom from hud_screen.json
     assert.equal(

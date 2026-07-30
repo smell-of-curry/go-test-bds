@@ -79,10 +79,16 @@ async function startHarness(): Promise<Harness> {
     broadcast: (frame) => stream.broadcast(frame),
     close: async () => {
       stream.closeAll();
-      await new Promise<void>((resolve, reject) =>
-        http.close((err) => (err ? reject(err) : resolve())),
-      );
-      await vite.close();
+      await Promise.race([
+        new Promise<void>((resolve, reject) =>
+          http.close((err) => (err ? reject(err) : resolve())),
+        ),
+        new Promise<void>((r) => setTimeout(r, 2_000)),
+      ]).catch(() => undefined);
+      await Promise.race([
+        vite.close(),
+        new Promise<void>((r) => setTimeout(r, 2_000)),
+      ]).catch(() => undefined);
     },
   };
 }
@@ -279,8 +285,11 @@ test("phud lanes render ping, banner+currency and the sidebar", async ({
       { timeout: 15_000 },
     );
   } finally {
-    await page.close().catch(() => undefined);
-    await h.close();
+    await h.close().catch(() => undefined);
+    await Promise.race([
+      page.close(),
+      new Promise<void>((r) => setTimeout(r, 3_000)),
+    ]).catch(() => undefined);
   }
 });
 
@@ -363,6 +372,67 @@ test("battle form renders the bottom battle bar and hover follows formHover", as
       expect.arrayContaining(["0", "1", "2", "3", "4", "5", "6"]),
     );
 
+    // Bottom bar: action buttons on-screen; tinted faces must not paint a
+    // solid white/colored slab when textures 404.
+    const bar = await page.evaluate(() => {
+      const battle = document.querySelector(
+        '[data-jsonui-name="battle.main"]',
+      ) as HTMLElement;
+      const menu = battle.querySelector(
+        '.jsonui[data-ui-name="battle_menu"]',
+      ) as HTMLElement | null;
+      // First bag_button in DOM is often a hidden factory sibling —
+      // pick a painted instance (display not none, non-zero box).
+      const bag = [
+        ...battle.querySelectorAll<HTMLElement>(
+          '.jsonui[data-ui-name="bag_button"]',
+        ),
+      ].find((el) => {
+        if (el.style.display === "none") return false;
+        const r = el.getBoundingClientRect();
+        return r.width > 0 && r.height > 0;
+      });
+      const moves = [
+        ...battle.querySelectorAll<HTMLElement>(
+          '.jsonui[data-ui-name="grid_button_check_id"]',
+        ),
+      ].filter((el) => {
+        if (el.style.display === "none") return false;
+        const r = el.getBoundingClientRect();
+        return r.width > 0 && r.height > 0;
+      });
+      const faces = [
+        ...battle.querySelectorAll<HTMLElement>(".jsonui-image-face"),
+      ];
+      const solidFace = faces.some((f) => {
+        const bg = f.style.backgroundColor;
+        return (
+          !!bg &&
+          bg !== "transparent" &&
+          bg !== "rgba(0, 0, 0, 0)" &&
+          !f.style.backgroundImage &&
+          !f.style.filter
+        );
+      });
+      const menuBox = menu?.getBoundingClientRect();
+      const bagBox = bag?.getBoundingClientRect();
+      return {
+        moveVisible: moves.length,
+        bagOnScreen:
+          !!bagBox &&
+          bagBox.width > 0 &&
+          bagBox.height > 0 &&
+          bagBox.bottom > 0 &&
+          bagBox.top < window.innerHeight,
+        menuH: menuBox?.height ?? 0,
+        solidFace,
+      };
+    });
+    expect(bar.moveVisible).toBeGreaterThanOrEqual(3);
+    expect(bar.bagOnScreen).toBe(true);
+    expect(bar.menuH).toBeGreaterThan(40);
+    expect(bar.solidFace).toBe(false);
+
     // Hover the second move button (index 1 on the form).
     h.broadcast({
       v: 1,
@@ -394,8 +464,11 @@ test("battle form renders the bottom battle bar and hover follows formHover", as
       { timeout: 15_000 },
     );
   } finally {
-    await page.close().catch(() => undefined);
-    await h.close();
+    await h.close().catch(() => undefined);
+    await Promise.race([
+      page.close(),
+      new Promise<void>((r) => setTimeout(r, 3_000)),
+    ]).catch(() => undefined);
   }
 });
 
@@ -442,7 +515,9 @@ test("ordinary server form renders the centered vanilla modal with icons", async
       )!;
       const text = form.textContent ?? "";
       const images = [
-        ...form.querySelectorAll<HTMLElement>(".jsonui-image"),
+        ...form.querySelectorAll<HTMLElement>(
+          ".jsonui-image, .jsonui-image-face",
+        ),
       ].filter((el) =>
         (el.style.backgroundImage || "").includes("textures/items"),
       );
@@ -482,8 +557,110 @@ test("ordinary server form renders the centered vanilla modal with icons", async
       { timeout: 15_000 },
     );
   } finally {
-    await page.close().catch(() => undefined);
-    await h.close();
+    await h.close().catch(() => undefined);
+    await Promise.race([
+      page.close(),
+      new Promise<void>((r) => setTimeout(r, 3_000)),
+    ]).catch(() => undefined);
+  }
+});
+
+test("starter picker long_form paints all image buttons inside the scroll body", async ({
+  page,
+}) => {
+  const h = await startHarness();
+  try {
+    await openViewer(
+      page,
+      `${h.base}?stream=${encodeURIComponent(h.streamUrl)}`,
+    );
+
+    const starters = [
+      "Bulbasaur",
+      "Ivysaur",
+      "Venusaur",
+      "Charmander",
+      "Charmeleon",
+      "Charizard",
+      "Squirtle",
+      "Wartortle",
+      "Blastoise",
+    ];
+    h.broadcast({
+      v: 1,
+      type: "delta",
+      bot: "TestBot",
+      tick: 150,
+      ui: {
+        form: {
+          type: "menu",
+          title: "Choose Your Starter!",
+          content: "Pick a Pokemon to begin your journey.",
+          buttons: starters,
+          buttonImages: starters.map(() => "textures/items/poke_ball"),
+        },
+      },
+    } as unknown as JsonlFrame);
+
+    await page.waitForFunction(
+      () =>
+        !!document.querySelector(
+          '[data-jsonui-name="server_form.long_form"]',
+        ) &&
+        (
+          document.querySelector('[data-jsonui-name="server_form.long_form"]')
+            ?.textContent ?? ""
+        ).includes("Bulbasaur"),
+      undefined,
+      { timeout: 15_000 },
+    );
+
+    const got = await page.evaluate((names: string[]) => {
+      const form = document.querySelector(
+        '[data-jsonui-name="server_form.long_form"]',
+      )!;
+      const text = form.textContent ?? "";
+      const idxs = [
+        ...form.querySelectorAll<HTMLElement>("[data-collection-index]"),
+      ].map((el) => Number(el.dataset.collectionIndex));
+      const unique = [...new Set(idxs)].sort((a, b) => a - b);
+      // Scroll viewport must not collapse to a zero-width sliver.
+      const viewport = form.querySelector(
+        '.jsonui[data-ui-name="scrolling_view_port"]',
+      ) as HTMLElement | null;
+      const vw = viewport?.getBoundingClientRect().width ?? 0;
+      return {
+        allLabels: names.every((n) => text.includes(n)),
+        unique,
+        viewportW: vw,
+      };
+    }, starters);
+
+    expect(got.allLabels).toBe(true);
+    expect(got.unique).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8]);
+    expect(got.viewportW).toBeGreaterThan(120);
+
+    h.broadcast({
+      v: 1,
+      type: "formHover",
+      bot: "TestBot",
+      tick: 155,
+      index: 3,
+    } as unknown as JsonlFrame);
+    await page.waitForFunction(
+      () =>
+        !!document.querySelector(
+          '[data-collection-index="3"].jsonui-form-hovered',
+        ),
+      undefined,
+      { timeout: 15_000 },
+    );
+  } finally {
+    await h.close().catch(() => undefined);
+    await Promise.race([
+      page.close(),
+      new Promise<void>((r) => setTimeout(r, 3_000)),
+    ]).catch(() => undefined);
   }
 });
 
@@ -587,7 +764,10 @@ test("battleWait renders the log panel; waypoint marks drive the locator strip",
       { timeout: 15_000 },
     );
   } finally {
-    await page.close().catch(() => undefined);
-    await h.close();
+    await h.close().catch(() => undefined);
+    await Promise.race([
+      page.close(),
+      new Promise<void>((r) => setTimeout(r, 3_000)),
+    ]).catch(() => undefined);
   }
 });

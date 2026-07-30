@@ -78,6 +78,10 @@ function paintNode(
   opts: RenderOptions,
   parentOrigin: { x: number; y: number },
 ): void {
+  // Drop invisible subtrees (battle factory expands every button template;
+  // hidden bag/move slots must not flood the DOM with 404 image faces).
+  if (!node.visible) return;
+
   const el = document.createElement("div");
   el.className = `jsonui jsonui-${cssType(node.element.type)}`;
   el.dataset.uiName = node.element.name;
@@ -99,13 +103,11 @@ function paintNode(
   el.style.overflow =
     node.element.props.clips_children === true ? "hidden" : "visible";
 
-  if (!node.visible) {
-    el.style.display = "none";
-  }
-
   const alpha =
     typeof node.element.props.alpha === "number" ? node.element.props.alpha : 1;
   if (alpha < 1) el.style.opacity = String(alpha);
+
+  applyClip(el, node.element.props);
 
   switch (node.element.type) {
     case "image":
@@ -149,37 +151,82 @@ function applyImage(
     typeof node.element.props.texture === "string"
       ? node.element.props.texture
       : "";
-  if (!texture) return;
+  // Unresolved expr / empty / bogus pack tokens (`t__20`, `t:_default`) —
+  // paint nothing. Never fill a white/colored box for a missing texture.
+  // CSS `background-image` 404s stay transparent; do not probe with async
+  // Image() (that races golden screenshots).
+  if (!texture || texture.startsWith("(") || texture.startsWith("$")) return;
+  if (!looksLikeTexturePath(texture)) return;
 
   const url = opts.assets.textureUrl(texture);
-  el.style.imageRendering = "pixelated";
-  el.style.backgroundRepeat = "no-repeat";
+  // Face layer so tint filters never recolor nested controls.
+  const face = document.createElement("div");
+  face.className = "jsonui-image-face";
+  face.style.position = "absolute";
+  face.style.inset = "0";
+  face.style.pointerEvents = "none";
+  face.style.imageRendering = "pixelated";
+  face.style.backgroundRepeat = "no-repeat";
+  face.style.backgroundColor = "transparent";
+  face.style.zIndex = "0";
 
+  const tint = asColor(node.element.props.color);
   const nine = node.element.props.nineslice_size;
   if (nine !== undefined && nine !== null) {
-    applyNineslice(el, url, nine, opts.guiScale);
-    return;
-  }
-
-  el.style.backgroundImage = `url("${cssUrl(url)}")`;
-
-  const uv = asIntPair(node.element.props.uv);
-  const uvSize = asIntPair(node.element.props.uv_size);
-  const natural = opts.textureSizes?.[texture];
-
-  if (uv && uvSize && natural && uvSize[0]! > 0 && uvSize[1]! > 0) {
-    const ew = Math.max(0, node.box.w * opts.guiScale);
-    const eh = Math.max(0, node.box.h * opts.guiScale);
-    const [u, v] = uv;
-    const [uw, uh] = uvSize;
-    const bw = (natural.w * ew) / uw!;
-    const bh = (natural.h * eh) / uh!;
-    el.style.backgroundSize = `${bw}px ${bh}px`;
-    el.style.backgroundPosition = `${(-u! * ew) / uw!}px ${(-v! * eh) / uh!}px`;
+    applyNineslice(face, url, nine, opts.guiScale);
   } else {
-    el.style.backgroundSize = "100% 100%";
-    el.style.backgroundPosition = "0 0";
+    face.style.backgroundImage = `url("${cssUrl(url)}")`;
+    const uv = asIntPair(node.element.props.uv);
+    const uvSize = asIntPair(node.element.props.uv_size);
+    const natural = opts.textureSizes?.[texture];
+    if (uv && uvSize && natural && uvSize[0]! > 0 && uvSize[1]! > 0) {
+      const ew = Math.max(0, node.box.w * opts.guiScale);
+      const eh = Math.max(0, node.box.h * opts.guiScale);
+      const [u, v] = uv;
+      const [uw, uh] = uvSize;
+      const bw = (natural.w * ew) / uw!;
+      const bh = (natural.h * eh) / uh!;
+      face.style.backgroundSize = `${bw}px ${bh}px`;
+      face.style.backgroundPosition = `${(-u! * ew) / uw!}px ${(-v! * eh) / uh!}px`;
+    } else {
+      face.style.backgroundSize = "100% 100%";
+      face.style.backgroundPosition = "0 0";
+    }
   }
+
+  // Colorable whites (battle white_transparency): replace RGB with tint,
+  // keep texture alpha. 404 background → nothing to filter → transparent.
+  if (tint) face.style.filter = svgTintFilter(tint);
+
+  el.appendChild(face);
+}
+
+/**
+ * True when `texture` looks like a pack path, not a form buttonImages token.
+ *
+ * @param texture - Raw texture property.
+ * @returns whether to attempt a /asset fetch.
+ */
+function looksLikeTexturePath(texture: string): boolean {
+  if (texture.includes("/") || texture.includes("\\")) return true;
+  if (texture.startsWith("textures")) return true;
+  return false;
+}
+
+/**
+ * Build a CSS `filter: url(...)` that paints `tint` through the source alpha.
+ *
+ * @param tint - CSS `rgb(r, g, b)` color.
+ * @returns filter value.
+ */
+function svgTintFilter(tint: string): string {
+  const svg =
+    `<svg xmlns="http://www.w3.org/2000/svg">` +
+    `<filter id="t" color-interpolation-filters="sRGB">` +
+    `<feFlood flood-color="${tint}" result="f"/>` +
+    `<feComposite in="f" in2="SourceAlpha" operator="in"/>` +
+    `</filter></svg>`;
+  return `url("data:image/svg+xml,${encodeURIComponent(svg)}#t")`;
 }
 
 function applyNineslice(
@@ -223,6 +270,60 @@ function parseNineslice(nine: unknown): [number, number, number, number] {
     }
   }
   return [0, 0, 0, 0];
+}
+
+/**
+ * Apply Bedrock `clip_ratio` / `clip_direction` as a CSS clip-path.
+ *
+ * `clip_ratio` is the HIDDEN fraction (visible = 1 − ratio). Used by sidebar
+ * XP bars (`filled_progress_bar` + `clip_direction: "left"`).
+ *
+ * @param el - Painted element.
+ * @param props - Element property bag.
+ */
+function applyClip(
+  el: HTMLElement,
+  props: LayoutNode["element"]["props"],
+): void {
+  const ratioRaw = props.clip_ratio;
+  const ratio =
+    typeof ratioRaw === "number"
+      ? ratioRaw
+      : typeof ratioRaw === "string"
+        ? Number(ratioRaw)
+        : NaN;
+  if (!Number.isFinite(ratio) || ratio <= 0) return;
+  const hidden = Math.min(1, Math.max(0, ratio));
+  const visible = 1 - hidden;
+  if (visible <= 0) {
+    el.style.clipPath = "inset(100%)";
+    return;
+  }
+  if (visible >= 1) return;
+
+  const dir =
+    typeof props.clip_direction === "string"
+      ? props.clip_direction.toLowerCase()
+      : "left";
+  // inset(top right bottom left) — hide the trailing side along clip_direction.
+  switch (dir) {
+    case "right":
+      el.style.clipPath = `inset(0 ${hidden * 100}% 0 0)`;
+      break;
+    case "up":
+    case "top":
+      el.style.clipPath = `inset(0 0 ${hidden * 100}% 0)`;
+      break;
+    case "down":
+    case "bottom":
+      el.style.clipPath = `inset(${hidden * 100}% 0 0 0)`;
+      break;
+    case "left":
+    default:
+      // Hide from the right: bar empties right→left as clip_ratio rises.
+      el.style.clipPath = `inset(0 ${hidden * 100}% 0 0)`;
+      break;
+  }
 }
 
 function applyLabel(
