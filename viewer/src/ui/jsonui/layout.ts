@@ -415,6 +415,23 @@ function layoutAnchored(
   clampHorizontalInParent(selfBox, parentBox, anchorFrom);
   clampBattleActorPlateToViewport(selfBox, el, viewport);
 
+  // Sidebar main is authored `["222.22%y", 192]` ≈ 427gui on every screen.
+  // At capture's 640gui width that is ~67% and the clipped dock.png slab
+  // paints a tall black wall. Cap at 40% of the viewport (≈ large-monitor
+  // Bedrock proportions) and keep right alignment.
+  if (
+    el.namespace === "phud_sidebar" &&
+    el.name === "main" &&
+    ANCHORS[anchorFrom].x >= 0.999
+  ) {
+    const maxW = viewport.width * 0.4;
+    if (selfBox.w > maxW + 1) {
+      selfBox.w = maxW;
+      selfBox.x = parentBox.x + parentBox.w - selfBox.w;
+      clampHorizontalInParent(selfBox, parentBox, anchorFrom);
+    }
+  }
+
   // Sidebar dock: right-anchored + `offset: ["47%",0]` hangs past main so the
   // transparent left pad of dock.png sits off-screen. Clip the box to the
   // on-screen slice (plates/ring layout here) and right-align an oversized

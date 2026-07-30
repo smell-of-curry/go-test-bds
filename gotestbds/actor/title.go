@@ -83,24 +83,33 @@ func (a *Actor) TitleWriteSeq() uint64 {
 }
 
 // TitleWritesFromSeq returns buffered title-channel writes with sequence >
-// afterSeq, oldest first. Subtitle/action-bar sets are not recorded — the
-// PokeBedrock HUD convention rides the title channel only.
+// afterSeq, oldest first, plus the highest sequence included in the batch.
+// Callers must advance their cursor to that returned seq (not TitleWriteSeq):
+// advancing to the live counter races new writes and drops them forever —
+// live showcase-07 lost `&_loadingScreen:TUTORIAL COMPLETE` under sidebar flood.
+//
+// Subtitle/action-bar sets are not recorded — the PokeBedrock HUD convention
+// rides the title channel only.
 //
 // @param afterSeq The last sequence the caller has already consumed.
-// @returns the raw title texts written since, oldest first.
-func (a *Actor) TitleWritesFromSeq(afterSeq uint64) []string {
+// @returns the raw title texts written since (oldest first), and the max seq
+// among them (or afterSeq when the batch is empty).
+func (a *Actor) TitleWritesFromSeq(afterSeq uint64) (writes []string, lastSeq uint64) {
+	lastSeq = afterSeq
 	if a.title == nil {
-		return nil
+		return nil, lastSeq
 	}
 	a.title.mu.Lock()
 	defer a.title.mu.Unlock()
-	var out []string
 	for i, seq := range a.title.writeSeqs {
 		if seq > afterSeq {
-			out = append(out, a.title.writes[i])
+			writes = append(writes, a.title.writes[i])
+			if seq > lastSeq {
+				lastSeq = seq
+			}
 		}
 	}
-	return out
+	return writes, lastSeq
 }
 
 // recordWriteLocked appends one title-channel write. Caller holds t.mu.

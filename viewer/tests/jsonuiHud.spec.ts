@@ -224,12 +224,12 @@ test.describe("jsonui HUD fixtures", () => {
           balls,
         };
       });
-      // main size ["222.22%y", 192] at guiScale 2, viewport 576 → h=384 CSS,
-      // w ≈ 2.2222*192*2 ≈ 853 CSS (not full-viewport-wide).
+      // main authored ["222.22%y", 192] but live-capped at 40% viewport width
+      // (capture stills were ~67% dock slab otherwise). h stays 192gui×scale.
       expect(geom.main).not.toBeNull();
       expect(geom.main!.h).toBeCloseTo(384, 0);
-      expect(geom.main!.w).toBeLessThan(1000);
-      expect(geom.main!.w).toBeGreaterThan(400);
+      expect(geom.main!.w).toBeLessThanOrEqual(1024 * 0.4 + 2);
+      expect(geom.main!.w).toBeGreaterThan(300);
       // Ball icons ["100%y","100%"] of 32-tall row → ~64×64 CSS, not viewport-tall.
       for (const b of geom.balls) {
         expect(b.h).toBeLessThanOrEqual(72);

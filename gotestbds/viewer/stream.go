@@ -846,10 +846,8 @@ func (s *Stream) emitHudEvents(a *actor.Actor) {
 	// emits one phud frame. The write ring (not the latest-state snapshot)
 	// matters here — PokeBedrock's feeders write several tokens per tick, and
 	// the snapshot keeps only the last one.
-	writes := a.TitleWritesFromSeq(s.lastTitleWrite)
-	if seq := a.TitleWriteSeq(); seq > s.lastTitleWrite {
-		s.lastTitleWrite = seq
-	}
+	writes, lastWrite := a.TitleWritesFromSeq(s.lastTitleWrite)
+	s.lastTitleWrite = lastWrite
 	for _, w := range writes {
 		token, value, ok := parsePhudToken(flattenRawtext(w))
 		if !ok {
