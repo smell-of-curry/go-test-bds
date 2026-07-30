@@ -14,3 +14,5 @@ artifacts/.cache/
 .cache/
 **/.cache/viewer/
 **/.cache/baseline/
+
+viewer/dist.sha
