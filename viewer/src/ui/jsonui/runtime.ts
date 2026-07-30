@@ -14,7 +14,7 @@ import type { UiResolver } from "./types";
 export interface JsonUiRuntimeOptions {
   /** Origin serving `/packs`, `/pack/{id}/{path}`, `/asset/{path}`. */
   assetBaseUrl: string;
-  /** Gui scale (default 2 → 512×288 gui px on 1024×576). */
+  /** Gui scale (default 2 → half the host CSS size in gui px). */
   guiScale?: number;
   /**
    * Injectable pack client (tests / fixtures). Defaults to fetch over
@@ -109,14 +109,13 @@ export function createJsonUiRuntime(opts: JsonUiRuntimeOptions): JsonUiRuntime {
   const ready = (async () => {
     const { files, globals, lang } = await loadUiFileSet(client);
     resolver = buildResolver(files, globals);
+    // Layout viewport tracks the real host size (full window). A fixed
+    // 1024×576 letterbox made gui space 512×288 so the sidebar's
+    // `222.22%y × 192` dock ate most of the still — live run-43 black slab.
     hud = createHudRenderer(resolver, hudLayer, {
       guiScale,
       assets,
       lang,
-      viewportCss: {
-        width: 1024,
-        height: 576,
-      },
     });
     forms = createFormRenderer({
       resolver,
@@ -192,11 +191,8 @@ function ensureJsonHudStyles(): void {
 #json-hud, .jsonui-hud-host {
   position: fixed;
   inset: 0;
-  width: 1024px;
-  height: 576px;
-  max-width: 100vw;
-  max-height: 100vh;
-  margin: auto;
+  width: 100vw;
+  height: 100vh;
   pointer-events: none;
   z-index: 4;
   overflow: hidden;

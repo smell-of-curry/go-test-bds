@@ -83,6 +83,12 @@ export interface ViewerHandle {
    * Always-on debug artefact (cheap DOM walk).
    */
   debugJsonUiDump: () => JsonUiDump;
+  /**
+   * Live PHUD token → value map (SSE lane). Capture uses this to wait for
+   * short-lived tokens (loadingScreen) that the server cache sees before the
+   * bot/viewer does.
+   */
+  readonly phud: Record<string, string>;
 }
 
 declare global {
@@ -187,6 +193,11 @@ export function installViewerHandle(
     },
     get jsonUiReady() {
       return getJsonUiReady();
+    },
+    get phud() {
+      const out: Record<string, string> = {};
+      for (const [k, v] of store.getState().phud) out[k] = v;
+      return out;
     },
     flush: () => {
       scene.flush(store.getState());

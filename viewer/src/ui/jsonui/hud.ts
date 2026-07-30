@@ -23,7 +23,7 @@ import type { WorldState } from "../../store";
 /** PHUD control-token title (`&_sidebar:…`). */
 export const PHUD_TITLE_RE = /^&_[A-Za-z]+:/;
 
-/** Default gui scale for 1024×576 → 512×288 gui px. */
+/** Default gui scale (1280×720 capture → 640×360 gui px). */
 export const DEFAULT_GUI_SCALE = 2;
 
 /** Heart / hunger / armor / bubble icon size in gui px. */
@@ -339,8 +339,12 @@ export function createHudRenderer(
       }
       lastPaintKey = paintKey;
 
-      const cssW = opts.viewportCss?.width ?? 1024;
-      const cssH = opts.viewportCss?.height ?? 576;
+      const cssW =
+        opts.viewportCss?.width ??
+        (host.clientWidth > 0 ? host.clientWidth : 1280);
+      const cssH =
+        opts.viewportCss?.height ??
+        (host.clientHeight > 0 ? host.clientHeight : 720);
       const viewport: Viewport = {
         width: cssW / guiScale,
         height: cssH / guiScale,
@@ -633,6 +637,7 @@ function bindTree(
       const prop = phudTokenProp(token);
       if (!prop) continue;
       const key = prop.startsWith("#") ? prop.slice(1) : prop;
+      // Keep "" on clear — `(not (#token = ''))` needs the empty string present.
       if (phud.has(token)) out[key] = phud.get(token)!;
       else delete out[key];
     }
@@ -818,7 +823,11 @@ function applyVisibilityChangedLatch(
   if (title.includes(update)) {
     out.preserved_text = title;
   } else if (token && phud?.has(token)) {
-    out.preserved_text = `${update}${phud.get(token) ?? ""}`;
+    // Empty string is a deliberate clear (`setPhudToken(..., '')`) — do not
+    // latch `&_loadingScreen:` alone or the card stays "visible" with no text.
+    const value = phud.get(token) ?? "";
+    if (value) out.preserved_text = `${update}${value}`;
+    else delete out.preserved_text;
   } else if (token && phud && !phud.has(token)) {
     // Token dropped from the map — clear the latch (do not keep prev sidebar
     // / title junk that would keep loadingScreen dirt painted).

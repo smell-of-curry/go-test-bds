@@ -546,6 +546,33 @@ async function handleCapture(
             `capture: scene still meshing after ${SETTLE_GRACE_MS}ms; capturing anyway`,
           );
         });
+    } else if ((frame.label ?? "").includes("complete")) {
+      // Server getPhudToken sees the completion card before the title packet
+      // reaches the bot/viewer. Wait for the SSE lane (or the painted card)
+      // so showcase-07 doesn't shoot an empty loadingScreen clear.
+      await stillsPage
+        .waitForFunction(
+          () => {
+            const v = (
+              window as unknown as {
+                __viewer?: { phud?: Record<string, string> };
+              }
+            ).__viewer;
+            const text = v?.phud?.loadingScreen ?? "";
+            if (text.includes("TUTORIAL COMPLETE")) return true;
+            const el = document.querySelector(
+              '[data-jsonui-name="phud_loadingScreen.main"]',
+            );
+            return (el?.textContent ?? "").includes("TUTORIAL COMPLETE");
+          },
+          undefined,
+          { polling: 100, timeout: 8_000 },
+        )
+        .catch(() => {
+          log.warn(
+            "capture: loadingScreen card never reached the viewer; capturing anyway",
+          );
+        });
     }
 
     const tick = await stillsPage.evaluate(
