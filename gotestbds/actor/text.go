@@ -48,15 +48,16 @@ type rawText struct {
 
 // flattenText renders a JSON UI text value as a readable string.
 //
-// A translate part that carries `with` args is NOT flattened: rendering it
-// would drop the args, and the viewer's lang table can only substitute them
-// from the original envelope ("Accuracy: %s%" stayed unfilled on every battle
-// form because this flatten ran at packet-decode time). Argless shapes still
-// flatten to readable text.
+// Any translate part is kept as raw JSON: the viewer's pack lang table
+// (`flattenRawtext` / `resolveLangLines`) resolves keys the way a real client
+// does. Flattening argless translates to the bare key at decode time left
+// battle move labels as `showdown.moves.growl.name` (run 42) because §l-glued
+// keys are no longer whole-line bare keys for resolveLangLines. Keeping the
+// envelope also preserves `with` args ("Accuracy: %s%").
 //
 // @param data The raw JSON value.
 // @returns the flattened text, or the raw JSON when the shape is unrecognised
-// or must keep its substitution args.
+// or carries translate parts.
 func flattenText(data []byte) string {
 	var literal string
 	if json.Unmarshal(data, &literal) == nil {
@@ -67,7 +68,7 @@ func flattenText(data []byte) string {
 	if json.Unmarshal(data, &parsed) != nil {
 		return string(data)
 	}
-	if parsed.hasArgs() {
+	if parsed.hasTranslate() {
 		return string(data)
 	}
 
@@ -78,15 +79,15 @@ func flattenText(data []byte) string {
 	return rendered
 }
 
-// hasArgs reports whether any translate part in the tree carries "with" args.
+// hasTranslate reports whether any part of the tree is a translate key.
 //
-// @returns true when flattening would lose substitution arguments.
-func (r rawText) hasArgs() bool {
-	if r.Translate != nil && withHasValues(r.With) {
+// @returns true when the envelope must be kept for viewer-side lang resolve.
+func (r rawText) hasTranslate() bool {
+	if r.Translate != nil {
 		return true
 	}
 	for _, part := range r.RawText {
-		if part.hasArgs() {
+		if part.hasTranslate() {
 			return true
 		}
 	}

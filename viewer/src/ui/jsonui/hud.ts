@@ -187,6 +187,13 @@ export function bindingSourceFromState(
     globals["#is_armor_visible"] = false;
   }
 
+  // Seed PHUD token props from the map so a busy title lane (sidebar) cannot
+  // starve loadingScreen / phone / etc. when data_control latches lag.
+  for (const [token, value] of state.phud) {
+    const prop = phudTokenProp(token);
+    if (prop) globals[prop] = value;
+  }
+
   return {
     global(name: string): BindingValue | undefined {
       if (name in globals) return globals[name];
@@ -195,6 +202,30 @@ export function bindingSourceFromState(
       return undefined;
     },
   };
+}
+
+/**
+ * Map a PHUD token name to the property `phud.elements` bindings write.
+ *
+ * @param token - Token from the phud SSE lane (`sidebar`, `loadingScreen`, …).
+ * @returns `#prop` name, or null when unmapped.
+ */
+function phudTokenProp(token: string): string | null {
+  switch (token) {
+    case "currency":
+      return "#level_number";
+    case "battleWait":
+      return "#battleLog";
+    case "playerPing":
+      return "#player_ping_text";
+    case "phone":
+    case "sidebar":
+    case "loadingScreen":
+    case "evolutionWait":
+      return `#${token}`;
+    default:
+      return null;
+  }
 }
 
 /**
@@ -295,8 +326,10 @@ export function createHudRenderer(
         idIndex,
         state.vitals,
         lang,
+        state.phud,
       );
       applyTitleQuirk(bound, title);
+      applyPhudElementTokens(bound, state.phud);
 
       // Dirty check: skip layout/paint when bound props + vitals unchanged.
       const paintKey = boundPaintKey(bound, title, state.vitals);
@@ -526,6 +559,7 @@ function bindTree(
   idIndex: Map<string, PropertyBag>,
   vitals: VitalsFrame | null,
   lang?: Readonly<Record<string, string>>,
+  phud?: Map<string, string>,
 ): ResolvedElement {
   const prev = store.get(path) ?? {};
   const out: PropertyBag = { ...el.props };
@@ -583,7 +617,27 @@ function bindTree(
     if (ball === "empty" || ball === "null" || ball === "") out.visible = false;
   }
   applyRendererSizing(el, out, vitals);
-  applyVisibilityChangedLatch(el, out, source, prev);
+  applyVisibilityChangedLatch(el, out, source, prev, phud);
+  // Prefer live phud map on the elements panel before children bind, so
+  // loadingScreen/phone see tokens even when title-lane latches lag. Clear
+  // absent overlay tokens so a bad sibling latch cannot keep dirt painted.
+  if (el.name === "elements" && el.namespace === "phud" && phud) {
+    for (const token of [
+      "phone",
+      "sidebar",
+      "loadingScreen",
+      "evolutionWait",
+      "battleWait",
+      "playerPing",
+    ] as const) {
+      const prop = phudTokenProp(token);
+      if (!prop) continue;
+      const key = prop.startsWith("#") ? prop.slice(1) : prop;
+      if (phud.has(token)) out[key] = phud.get(token)!;
+      else delete out[key];
+    }
+    if (phud.has("currency")) out.level_number = phud.get("currency")!;
+  }
   // Hotbar grid uses grid_item_template; HUD seeds dimensions. Form grids
   // (starter picker) expand via collections.expandCollections.
   // Size the host and inject one full-width hotbar_renderer stub instead.
@@ -630,6 +684,7 @@ function bindTree(
       idIndex,
       vitals,
       lang,
+      phud,
     ),
   }));
 
@@ -649,6 +704,7 @@ function bindTree(
         idIndex,
         vitals,
         lang,
+        phud,
       ),
     });
   }
@@ -723,18 +779,22 @@ function applyElementBindings(
 
 /**
  * Latch `#preserved_text` when the title matches `$update_string`.
- * Compensates for `binding_condition: visibility_changed` (engine treats as always).
+ * Honours `binding_condition: visibility_changed` (skipped in applyBindings).
+ * Also mirrors the live phud map so a token stays latched while another
+ * token owns the title channel (sidebar flooding).
  *
  * @param el - Element (may carry `$update_string`).
  * @param out - Bound props.
  * @param source - Globals.
  * @param prev - Previous frame props.
+ * @param phud - Live PHUD token map.
  */
 function applyVisibilityChangedLatch(
   el: ResolvedElement,
   out: PropertyBag,
   source: BindingSource,
   prev: PropertyBag,
+  phud?: Map<string, string>,
 ): void {
   const update =
     typeof el.props.$update_string === "string"
@@ -752,14 +812,48 @@ function applyVisibilityChangedLatch(
   );
   if (!hadVisibilityChanged) return;
 
+  const token =
+    update.startsWith("&_") && update.endsWith(":") ? update.slice(2, -1) : "";
+
   if (title.includes(update)) {
     out.preserved_text = title;
+  } else if (token && phud?.has(token)) {
+    out.preserved_text = `${update}${phud.get(token) ?? ""}`;
+  } else if (token && phud && !phud.has(token)) {
+    // Token dropped from the map — clear the latch (do not keep prev sidebar
+    // / title junk that would keep loadingScreen dirt painted).
+    delete out.preserved_text;
   } else if (typeof prev.preserved_text === "string") {
-    // Restore prior latch — applyBindings always-applies visibility_changed.
     out.preserved_text = prev.preserved_text;
   } else {
     delete out.preserved_text;
   }
+}
+
+/**
+ * Write PHUD token values onto the `elements` panel so child widgets
+ * (`loadingScreen`, `phone`, …) see them even when sibling data_control
+ * latches are empty on the first frame.
+ *
+ * @param root - Bound HUD tree.
+ * @param phud - Live PHUD map.
+ */
+function applyPhudElementTokens(
+  root: ResolvedElement,
+  phud: Map<string, string>,
+): void {
+  const walk = (el: ResolvedElement): void => {
+    if (el.name === "elements" && el.namespace === "phud") {
+      for (const [token, value] of phud) {
+        const prop = phudTokenProp(token);
+        if (!prop) continue;
+        const key = prop.startsWith("#") ? prop.slice(1) : prop;
+        el.props[key] = value;
+      }
+    }
+    for (const c of el.controls) walk(c.element);
+  };
+  walk(root);
 }
 
 /**
@@ -1020,7 +1114,9 @@ function paintOneRenderer(
         {
           full: "textures/ui/hunger_full",
           half: "textures/ui/hunger_half",
-          empty: "textures/ui/hunger_empty",
+          // Bedrock ships hunger_background (no hunger_empty) — empty 404s as
+          // red/white missing-texture squares above the hotbar.
+          empty: "textures/ui/hunger_background",
         },
         assets,
         guiScale,

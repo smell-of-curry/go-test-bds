@@ -5,6 +5,7 @@ import {
   countCollectionInstances,
   expandCollections,
   formButtonsCollection,
+  normalizeFormButtonText,
   prepareCollectionTree,
   readCollectionItem,
 } from "./collections.js";
@@ -51,6 +52,32 @@ describe("formButtonsCollection", () => {
     assert.equal(readCollectionItem(items[0]!, "#form_button_text"), "a");
     assert.equal(readCollectionItem(items[0]!, "#form_button_texture"), "t__1");
     assert.equal(readCollectionItem(items[1]!, "form_button_texture"), "");
+  });
+});
+
+describe("normalizeFormButtonText", () => {
+  it("pads move encoding so pack %.36s strip keeps leading '.'", () => {
+    const pad = (s: string) => s.padEnd(30, "_");
+    const raw =
+      "b:1_" +
+      pad("normal") +
+      "\u00a0" +
+      pad(".growl") +
+      "\u00a0" +
+      pad("40/40");
+    const got = normalizeFormButtonText(raw);
+    assert.equal(got[35], "\u00a0");
+    assert.equal(got[36], ".");
+    assert.equal(got.length, raw.length + 1);
+    // Idempotent.
+    assert.equal(normalizeFormButtonText(got), got);
+  });
+
+  it("pads actor details to 58 before health G/Y/R field", () => {
+    const raw = "§0§a§1§r§l§fMunchlax§r\n Lv.5".padEnd(50, "_") + "G0.0⠀100%%";
+    const got = normalizeFormButtonText(raw);
+    assert.match(got.slice(58), /^G0\.0/);
+    assert.ok(!got.slice(0, 58).includes("G0.0"));
   });
 });
 

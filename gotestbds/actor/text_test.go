@@ -22,19 +22,18 @@ func TestTextAcceptsEveryShapeAServerSends(t *testing.T) {
 			want: "Choose a starter",
 		},
 		{
-			name: "translation key",
+			// Keep envelopes with translate so viewer lang can resolve
+			// (battle move names were stuck as showdown.moves.*.name).
+			name: "translation key keeps JSON",
 			json: `{"rawtext":[{"translate":"forms.starter.title"}]}`,
-			want: "forms.starter.title",
+			want: `{"rawtext":[{"translate":"forms.starter.title"}]}`,
 		},
 		{
-			name: "concatenated parts",
+			name: "concatenated translate parts keep JSON",
 			json: `{"rawtext":[{"text":"§l"},{"translate":"forms.starter.title"},{"text":" (1/3)"}]}`,
-			want: "§l" + "forms.starter.title" + " (1/3)",
+			want: `{"rawtext":[{"text":"§l"},{"translate":"forms.starter.title"},{"text":" (1/3)"}]}`,
 		},
 		{
-			// Flattening a translate part with args would lose the args, and
-			// only the original envelope lets the viewer's lang table fill
-			// "%s" ("Accuracy: %s%" stayed unfilled on every battle form).
 			name: "bare translate object with args keeps its JSON",
 			json: `{"translate":"forms.starter.title","with":["Bulbasaur"]}`,
 			want: `{"translate":"forms.starter.title","with":["Bulbasaur"]}`,
@@ -45,9 +44,9 @@ func TestTextAcceptsEveryShapeAServerSends(t *testing.T) {
 			want: `{"rawtext":[{"translate":"a.key","with":{"rawtext":[{"text":"100"}]}}]}`,
 		},
 		{
-			name: "argless translate still flattens to its key",
+			name: "argless translate with empty with keeps JSON",
 			json: `{"rawtext":[{"translate":"forms.starter.title","with":[]}]}`,
-			want: "forms.starter.title",
+			want: `{"rawtext":[{"translate":"forms.starter.title","with":[]}]}`,
 		},
 		{
 			name: "nested rawtext",
@@ -103,8 +102,8 @@ func TestFormTitleFromRawtext(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewForm: %v", err)
 	}
-	if form.Title() != "pc.title" {
-		t.Fatalf("title = %q, want %q", form.Title(), "pc.title")
+	if want := `{"rawtext":[{"translate":"pc.title"}]}`; form.Title() != want {
+		t.Fatalf("title = %q, want %q", form.Title(), want)
 	}
 
 	buttons, ok := form.MenuFormButtons()
@@ -114,7 +113,7 @@ func TestFormTitleFromRawtext(t *testing.T) {
 	if len(buttons) != 2 {
 		t.Fatalf("got %d buttons, want 2", len(buttons))
 	}
-	if buttons[0].Text() != "pc.button.deposit" {
+	if want := `{"rawtext":[{"translate":"pc.button.deposit"}]}`; buttons[0].Text() != want {
 		t.Fatalf("button 0 = %q", buttons[0].Text())
 	}
 	if buttons[1].Text() != "Withdraw" {

@@ -411,11 +411,26 @@ function layoutAnchored(
   );
 
   const selfBox: LayoutBox = { x: pos.x, y: pos.y, w: boxSize.w, h: boxSize.h };
-  clipRightOverflow(
-    selfBox,
-    parentBox,
-    readAnchor(el.props.anchor_from, "center"),
-  );
+  const anchorFrom = readAnchor(el.props.anchor_from, "center");
+  clampHorizontalInParent(selfBox, parentBox, anchorFrom);
+
+  // Sidebar dock: right-anchored + `offset: ["47%",0]` hangs past main so the
+  // transparent left pad of dock.png sits off-screen. Clip the box to the
+  // on-screen slice (plates/ring layout here) and right-align an oversized
+  // background so the visible strip shows the opaque art — width-only clip
+  // without bg-align stretched the left pad across the plate.
+  if (ANCHORS[anchorFrom].x >= 0.999) {
+    const parentRight = parentBox.x + parentBox.w;
+    const overflow = selfBox.x + selfBox.w - parentRight;
+    if (overflow > 1) {
+      const fullW = selfBox.w;
+      selfBox.w = Math.max(0, parentRight - selfBox.x);
+      if (selfBox.w > 0) {
+        el.props.$viewer_bg_align = "right";
+        el.props.$viewer_bg_scale_x = fullW / selfBox.w;
+      }
+    }
+  }
 
   // Re-layout children into final absolute parent box when we have controls.
   if (el.controls.length > 0) {
@@ -596,11 +611,11 @@ function layoutStack(
     w: stackSize.w,
     h: stackSize.h,
   };
-  clipRightOverflow(
-    selfBox,
-    parentBox,
-    readAnchor(el.props.anchor_from, "center"),
-  );
+  {
+    const anchorFrom = readAnchor(el.props.anchor_from, "center");
+    clipRightOverflow(selfBox, parentBox, anchorFrom);
+    clampHorizontalInParent(selfBox, parentBox, anchorFrom);
+  }
 
   // Final pass: place children along the stack.
   const outChildren: LayoutNode[] = [];
@@ -729,11 +744,11 @@ function layoutFactoryOverlay(
     w: boxSize.w,
     h: boxSize.h,
   };
-  clipRightOverflow(
-    selfBox,
-    parentBox,
-    readAnchor(el.props.anchor_from, "center"),
-  );
+  {
+    const anchorFrom = readAnchor(el.props.anchor_from, "center");
+    clipRightOverflow(selfBox, parentBox, anchorFrom);
+    clampHorizontalInParent(selfBox, parentBox, anchorFrom);
+  }
   const children = layoutControls(el.controls, selfBox, viewport, opts);
   return { element: el, box: selfBox, children, layer, visible };
 }
@@ -857,11 +872,11 @@ function layoutGrid(
     w: finalSize.w,
     h: finalSize.h,
   };
-  clipRightOverflow(
-    selfBox,
-    parentBox,
-    readAnchor(el.props.anchor_from, "center"),
-  );
+  {
+    const anchorFrom = readAnchor(el.props.anchor_from, "center");
+    clipRightOverflow(selfBox, parentBox, anchorFrom);
+    clampHorizontalInParent(selfBox, parentBox, anchorFrom);
+  }
 
   const children: LayoutNode[] = [];
   for (let i = 0; i < items.length; i++) {
@@ -1139,6 +1154,34 @@ function clipRightOverflow(
   const parentRight = parent.x + parent.w;
   if (box.x + box.w <= parentRight) return;
   box.w = Math.max(0, parentRight - box.x);
+}
+
+/**
+ * Shift a non-right-anchored box back inside its parent when more than half
+ * of it hangs off (battle actor plates use offset ±50% in edge columns).
+ * Small intentional overhangs (bag/run `-50%` of a 40px chip) stay put.
+ *
+ * @param box - Positioned box (mutated in place when clamped).
+ * @param parent - Parent layout box.
+ * @param anchorFrom - Element `anchor_from`.
+ */
+function clampHorizontalInParent(
+  box: LayoutBox,
+  parent: LayoutBox,
+  anchorFrom: Anchor,
+): void {
+  if (ANCHORS[anchorFrom].x >= 0.999) return;
+  if (box.w <= 0 || box.w > parent.w) return;
+  const parentRight = parent.x + parent.w;
+  if (box.x < parent.x && parent.x - box.x > box.w * 0.5) {
+    box.x = parent.x;
+  }
+  if (
+    box.x + box.w > parentRight &&
+    box.x + box.w - parentRight > box.w * 0.5
+  ) {
+    box.x = parentRight - box.w;
+  }
 }
 
 function resolveOffset(

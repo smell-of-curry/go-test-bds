@@ -192,6 +192,11 @@ function applyImage(
       const bh = (natural.h * eh) / uh!;
       face.style.backgroundSize = `${bw}px ${bh}px`;
       face.style.backgroundPosition = `${(-u! * ew) / uw!}px ${(-v! * eh) / uh!}px`;
+    } else if (node.element.props.$viewer_bg_align === "right") {
+      // Clipped overflow dock: stretch as if still full-width, pin right edge.
+      const scale = Number(node.element.props.$viewer_bg_scale_x) || 1;
+      face.style.backgroundSize = `${scale * 100}% 100%`;
+      face.style.backgroundPosition = "right center";
     } else {
       face.style.backgroundSize = "100% 100%";
       face.style.backgroundPosition = "0 0";
@@ -200,13 +205,33 @@ function applyImage(
 
   // Colorable whites (battle white_transparency): replace RGB with tint,
   // keep texture alpha. 404 background → nothing to filter → transparent.
-  if (tint) face.style.filter = svgTintFilter(tint);
+  // Skip identity white `[1,1,1]` — common_buttons sets that as "no tint";
+  // applying feFlood white turns moveSelection / plates into solid white
+  // slabs (run-42 mid-left battle chrome).
+  if (tint && !isIdentityWhiteTint(node.element.props.color)) {
+    face.style.filter = svgTintFilter(tint);
+  }
 
   const alpha =
     typeof node.element.props.alpha === "number" ? node.element.props.alpha : 1;
   if (alpha < 1) face.style.opacity = String(alpha);
 
   el.appendChild(face);
+}
+
+/**
+ * True when `color` is Bedrock's "untinted" white (`[1,1,1]` / `[1,1,1,1]`).
+ *
+ * @param raw - Element `color` prop.
+ * @returns whether tinting should be skipped.
+ */
+function isIdentityWhiteTint(raw: unknown): boolean {
+  if (!Array.isArray(raw) || raw.length < 3) return false;
+  const r = Number(raw[0]);
+  const g = Number(raw[1]);
+  const b = Number(raw[2]);
+  if (![r, g, b].every(Number.isFinite)) return false;
+  return r >= 0.999 && g >= 0.999 && b >= 0.999;
 }
 
 /**

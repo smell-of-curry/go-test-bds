@@ -102,6 +102,18 @@ type rawtextMessage struct {
 func flattenRawtext(text string) string {
 	idx := strings.Index(text, `{"rawtext"`)
 	if idx < 0 {
+		// Bare `{"translate":…}` (no rawtext wrapper) — keep for lang resolve.
+		trimmed := strings.TrimSpace(text)
+		if strings.HasPrefix(trimmed, `{"translate"`) {
+			var part rawtextPart
+			if json.Unmarshal([]byte(trimmed), &part) == nil && part.Translate != "" {
+				args := rawtextWithArgs(part.With)
+				if resolved, ok := translateKey(part.Translate, args); ok {
+					return resolved
+				}
+				return part.Translate
+			}
+		}
 		return text
 	}
 	dec := json.NewDecoder(strings.NewReader(text[idx:]))

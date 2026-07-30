@@ -307,10 +307,14 @@ export function applyBindings(
   for (const raw of element.bindings) {
     if (raw.ignored === true) continue;
 
-    // Parse condition for future use; treat all as always for now.
-    const _condition =
+    const condition =
       (raw.binding_condition as BindingCondition | undefined) ?? "always";
-    void _condition;
+    // PHUD data_control copies title → #preserved_text only on
+    // visibility_changed. Treating it as always overwrites every latch with
+    // the current title (usually &_sidebar:), so
+    // `(#preserved_text - '&_loadingScreen:')` stays non-empty and the
+    // full-screen dirt/black loading card paints over the world.
+    if (condition === "visibility_changed") continue;
 
     const type = (raw.binding_type as string | undefined) ?? "global";
 

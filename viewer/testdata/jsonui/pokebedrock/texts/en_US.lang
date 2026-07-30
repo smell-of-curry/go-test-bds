@@ -3,3 +3,16 @@
 phud.playerPing.label=Current Ping: 
 fixture.shared=pokebedrock
 fixture.with_tab=hello	# trailing tab comment
+## Battle move names (attack.json localize:true on constructed keys)
+showdown.moves.growl.name=Growl
+showdown.moves.growl.shortDesc=Lowers the foe(s) Attack by 1.
+showdown.moves.tackle.name=Tackle
+showdown.moves.watergun.name=Water Gun
+showdown.moves.pound.name=Pound
+showdown.moves.absorb.name=Absorb
+forms.battle.moveButton.label.accuracy=Accuracy: %s
+forms.battle.moveButton.label.accuracyCantMiss=Can't miss
+models.battleUtils.move.basePower=Power: %s
+models.battleUtils.move.target=Target: %s
+common.nextPage=Next
+common.previousPage=Previous

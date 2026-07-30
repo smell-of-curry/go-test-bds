@@ -2,10 +2,13 @@ package viewer
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/smell-of-curry/go-test-bds/gotestbds/actor"
+	"github.com/smell-of-curry/go-test-bds/gotestbds/assets"
 )
 
 // keepFormHandler cancels the receive context so LastForm keeps the form
@@ -102,6 +105,94 @@ func TestEncodeUIFormButtonsPreserveBattleMovePrefix(t *testing.T) {
 		t.Fatalf("buttonImages=%v", ui.Form.ButtonImages)
 	}
 	t.Logf("move button wire text (%d chars): %q", len(ui.Form.Buttons[0]), ui.Form.Buttons[0])
+}
+
+// Live move buttons carry translate keys in the hover/rawtext tail. With a
+// pack lang table installed, flattenRawtext must resolve them (Growl) while
+// keeping the b:N_ prefix the JSON UI pack parses for the on-button label.
+func TestEncodeUIFormButtonsResolveMoveTranslateWithLang(t *testing.T) {
+	dir := t.TempDir()
+	writeMoveLangPack(t, dir)
+	st, err := assets.BuildStack([]assets.StackEntry{{ID: "moves", Dir: dir}}, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { activeLang.Store(nil) })
+	installLangTable(st)
+
+	moveText := `{"rawtext":[{"text":"b:1_` + "normal" +
+		strings.Repeat("_", 24) + "\u00a0." + "growl" + strings.Repeat("_", 25) +
+		"\u00a040/40" + strings.Repeat("_", 25) + `"},` +
+		`{"text":"§l"},{"translate":"showdown.moves.growl.name"},` +
+		`{"text":"§r\n"},{"translate":"showdown.moves.growl.shortDesc"}]}`
+
+	var moveObj any
+	if err := json.Unmarshal([]byte(moveText), &moveObj); err != nil {
+		t.Fatal(err)
+	}
+	payload := map[string]any{
+		"type":    "form",
+		"title":   "§b§a§t§l§e§s§m",
+		"content": "Turn 1",
+		"buttons": []any{
+			map[string]any{
+				"text":  moveObj,
+				"image": map[string]string{"type": "path", "data": "t__20"},
+			},
+		},
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	f, err := actor.NewForm(raw, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := testActor(t, "FormBot")
+	receiveForm(t, a, f)
+	ui := newEncoder("FormBot", 4, 4).encodeUI(a)
+	if ui.Form == nil || len(ui.Form.Buttons) != 1 {
+		t.Fatalf("form=%v", ui.Form)
+	}
+	got := ui.Form.Buttons[0]
+	if !strings.Contains(got, "b:1_") {
+		t.Fatalf("lost b:1_ prefix: %q", got)
+	}
+	if !strings.Contains(got, "Growl") {
+		t.Fatalf("translate key not resolved via lang table: %q", got)
+	}
+	if strings.Contains(got, "showdown.moves.growl.name") {
+		t.Fatalf("raw lang key leaked into button text: %q", got)
+	}
+}
+
+func writeMoveLangPack(t *testing.T, dir string) {
+	t.Helper()
+	manifest := `{
+  "format_version": 2,
+  "header": {
+    "name": "Move Lang",
+    "description": "test",
+    "uuid": "44444444-4444-4444-4444-444444444444",
+    "version": [1, 0, 0],
+    "min_engine_version": [1, 20, 0]
+  },
+  "modules": [
+    {"type": "resources", "uuid": "44444444-4444-4444-4444-444444444445", "version": [1, 0, 0]}
+  ]
+}`
+	if err := os.WriteFile(filepath.Join(dir, "manifest.json"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "texts"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	lang := "showdown.moves.growl.name=Growl\nshowdown.moves.growl.shortDesc=Lowers Attack.\n"
+	if err := os.WriteFile(filepath.Join(dir, "texts", "en_US.lang"), []byte(lang), 0o644); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestEncodeUIFormButtonsStarterPickerShape(t *testing.T) {

@@ -34,6 +34,56 @@ export interface CollectionScope {
 }
 
 /**
+ * Align live BEH button encodings with pack binding expressions in
+ * `attack.json` (strip lengths assume fixed field starts).
+ *
+ * @param text - Raw / Go-flattened button label.
+ * @returns text with battle field padding corrected when needed.
+ */
+export function normalizeFormButtonText(text: string): string {
+  return normalizeBattleActorButton(normalizeBattleMoveButton(text));
+}
+
+/**
+ * Pack move-name binding strips `%.36s` before reading `.moveId`, but BEH
+ * joins `b:N_` + pad30(type) + one sep (=35 chars) then `.id`. Insert one
+ * sep so index 36 lands on the leading `.` → `showdown.moves.growl.name`.
+ *
+ * @param text - Button label.
+ * @returns padded move encoding, or unchanged.
+ */
+function normalizeBattleMoveButton(text: string): string {
+  // b:1_ + 30 type + sep + .moveid…
+  const m = /^(b:\d_)(.{30})([\u00a0 ])(\.)/.exec(text);
+  if (!m) return text;
+  // Already aligned: char at 35 is sep and char at 36 is '.'.
+  if (text[35] === m[3] && text[36] === ".") return text;
+  // Live wire: sep at 34, '.' at 35 — insert an extra sep.
+  if (text[34] === m[3] && text[35] === ".") {
+    return text.slice(0, 35) + m[3] + text.slice(35);
+  }
+  return text;
+}
+
+/**
+ * Pack actor plates use details `%.58s`, color at 58, clip at 60, HP after 62.
+ * BEH `padEnd(50, '_')` leaves health 8 chars early → glued "Lv.5G0.0  10".
+ *
+ * @param text - Button label.
+ * @returns actor button with details padded to 58, or unchanged.
+ */
+function normalizeBattleActorButton(text: string): string {
+  if (!text.startsWith("§0§")) return text;
+  const m = /([GYR]\d+\.\d+)/.exec(text);
+  if (!m || m.index == null) return text;
+  const healthAt = m.index;
+  if (healthAt === 58) return text;
+  const health = text.slice(healthAt);
+  const details = text.slice(0, healthAt).replace(/_+$/, "");
+  return details.padEnd(58, "_") + health;
+}
+
+/**
  * Build form_buttons collection items from ActionForm button labels + images.
  *
  * @param buttons - Button label strings.
@@ -47,7 +97,7 @@ export function formButtonsCollection(
   return buttons.map((text, i) => {
     const texture = images?.[i] ?? "";
     return {
-      "#form_button_text": text,
+      "#form_button_text": normalizeFormButtonText(text),
       "#form_button_texture": texture,
       // Bedrock uses FileSystem for http/custom pack paths; empty = packed.
       "#form_button_texture_file_system": texture ? "FileSystem" : "",

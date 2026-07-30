@@ -319,13 +319,35 @@ test("battle form renders the bottom battle bar and hover follows formHover", as
           title: `${BATTLE_FLAG}§s§m`,
           content: "Turn 1\n\nNo Turn Timer\n\nWeatherClear\n\nNo Terrain",
           buttons: [
-            moveLabel(1, "normal", "growl", "40/40", "§lGrowl§r\ndesc"),
-            moveLabel(2, "water", "watergun", "25/25", "§lWater Gun§r\ndesc"),
-            moveLabel(3, "normal", "pound", "35/35", "§lPound§r\ndesc"),
+            // Live Go flatten leaves translate keys when lang is missing;
+            // JSON UI builds showdown.moves.<id>.name + localize:true.
+            moveLabel(
+              1,
+              "normal",
+              "growl",
+              "40/40",
+              "§lshowdown.moves.growl.name",
+            ),
+            moveLabel(
+              2,
+              "water",
+              "watergun",
+              "25/25",
+              "§lshowdown.moves.watergun.name",
+            ),
+            moveLabel(
+              3,
+              "normal",
+              "pound",
+              "35/35",
+              "§lshowdown.moves.pound.name",
+            ),
             "battleButton:bagBag",
             "battleButton:pokemonSwitch Pokémon",
             "battleButton:runRun",
             "battleButton:move_selection",
+            "§0§0§1§r§l§fBulbasaur§r\n Lv.5".padEnd(50, "_") + "G0.0⠀100%%",
+            "§0§a§1§r§l§fMunchlax§r\n Lv.5".padEnd(50, "_") + "G0.0⠀100%%",
           ],
           buttonImages: [
             "t__20",
@@ -335,6 +357,8 @@ test("battle form renders the bottom battle bar and hover follows formHover", as
             "t",
             "t",
             "t:_default",
+            "textures/sprites/default/bulbasaur",
+            "textures/sprites/default/munchlax",
           ],
         },
       },
@@ -357,11 +381,22 @@ test("battle form renders the bottom battle bar and hover follows formHover", as
       ].map((el) => el.dataset.collectionIndex);
       const unique = [...new Set(idxs)];
       const body = battle.textContent ?? "";
+      const moveNames = [
+        ...battle.querySelectorAll<HTMLElement>('.jsonui[data-ui-name="name"]'),
+      ]
+        .filter((el) => {
+          if (el.style.display === "none") return false;
+          const r = el.getBoundingClientRect();
+          return r.width > 8 && r.height > 4;
+        })
+        .map((el) => (el.textContent ?? "").trim());
       return {
         uniqueIndexes: unique.sort(),
-        hasGrowl: /growl/i.test(body),
-        hasWater: /water\s*gun|watergun/i.test(body),
-        hasPound: /pound/i.test(body),
+        moveNames,
+        hasGrowl: moveNames.some((t) => t === "Growl"),
+        hasWater: moveNames.some((t) => /water\s*gun/i.test(t)),
+        hasPound: moveNames.some((t) => t === "Pound"),
+        rawLangKey: moveNames.some((t) => t.includes("showdown.moves.")),
         info: body.includes("Turn 1") && body.includes("WeatherClear"),
         longFormAbsent: !document.querySelector(
           '[data-jsonui-name="server_form.long_form"]',
@@ -369,6 +404,7 @@ test("battle form renders the bottom battle bar and hover follows formHover", as
       };
     });
 
+    expect(got.rawLangKey).toBe(false);
     expect(got.hasGrowl).toBe(true);
     expect(got.hasWater).toBe(true);
     expect(got.hasPound).toBe(true);
@@ -465,6 +501,57 @@ test("battle form renders the bottom battle bar and hover follows formHover", as
     expect(alphaHost.hostOpacity).toBe("1");
     expect(Number(alphaHost.faceOpacity)).toBe(0);
     expect(alphaHost.moveOnScreen).toBeGreaterThanOrEqual(3);
+
+    // Actor plates: padEnd(50)→58 normalize keeps Lv. separate from G0.0;
+    // plates must not hang mostly off-screen; no identity-white feFlood tint.
+    const plates = await page.evaluate(() => {
+      const battle = document.querySelector(
+        '[data-jsonui-name="battle.main"]',
+      ) as HTMLElement;
+      const details = [
+        ...battle.querySelectorAll<HTMLElement>(
+          '.jsonui[data-ui-name="details_text"]',
+        ),
+      ]
+        .filter((el) => {
+          if (el.style.display === "none") return false;
+          const r = el.getBoundingClientRect();
+          return r.width > 20 && r.height > 4;
+        })
+        .map((el) => {
+          const r = el.getBoundingClientRect();
+          return {
+            text: (el.textContent ?? "").replace(/\s+/g, " ").trim(),
+            left: r.left,
+            right: r.right,
+          };
+        });
+      const whiteTinted = [
+        ...battle.querySelectorAll<HTMLElement>(".jsonui-image-face"),
+      ].filter((f) => {
+        const r = f.getBoundingClientRect();
+        if (r.width < 30 || r.height < 12) return false;
+        if (r.top < 350) return false;
+        const filter = f.style.filter || "";
+        return filter.includes("feFlood") && filter.includes("255, 255, 255");
+      });
+      return {
+        details: details.map((d) => d.text),
+        glued: details.some((d) => /Lv\.\d+G/.test(d.text)),
+        detailCount: details.length,
+        offLeft: details.some((d) => d.right < 0),
+        offRight: details.some((d) => d.left > window.innerWidth),
+        whiteTinted: whiteTinted.length,
+        hasMunchlax: details.some((d) => /Munchlax/i.test(d.text)),
+        hasBulba: details.some((d) => /Bulbasaur/i.test(d.text)),
+      };
+    });
+    expect(plates.glued).toBe(false);
+    expect(plates.detailCount).toBeGreaterThanOrEqual(1);
+    expect(plates.hasMunchlax || plates.hasBulba).toBe(true);
+    expect(plates.offLeft).toBe(false);
+    expect(plates.offRight).toBe(false);
+    expect(plates.whiteTinted).toBe(0);
 
     // Default button faces (not hover/locked) must paint; a lone white
     // focus/White slab was the live-pack regression.

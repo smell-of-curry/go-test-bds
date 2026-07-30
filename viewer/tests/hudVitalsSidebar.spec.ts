@@ -252,6 +252,8 @@ test("empty slots hidden; air/armor/xp gated; no fat green XP", async ({
       // Dock may pad past the right edge (+47%); occupied plate + name must
       // stay inside the HUD host (right-anchor clamp keeps content on-screen).
       const plate = dataPlates[0]?.getBoundingClientRect();
+      const ringHost = rings[0]?.closest(".jsonui") as HTMLElement | null;
+      const ringBox = ringHost?.getBoundingClientRect();
       const nameEl = [
         ...document.querySelectorAll<HTMLElement>(
           '[data-jsonui-name="phud_sidebar.variable_parser"]',
@@ -272,6 +274,7 @@ test("empty slots hidden; air/armor/xp gated; no fat green XP", async ({
         plateRight: plate ? plate.x + plate.width : 0,
         plateLeft: plate?.x ?? 0,
         nameRight: nr ? nr.x + nr.width : 0,
+        ringRight: ringBox ? ringBox.x + ringBox.width : 0,
         nameText: nameEl?.textContent ?? "",
       };
     });
@@ -289,8 +292,41 @@ test("empty slots hidden; air/armor/xp gated; no fat green XP", async ({
     expect(info.nameText).toContain("Bulbasaur");
     expect(info.hostWidth).toBeGreaterThan(100);
     expect(info.plateLeft).toBeGreaterThan(0);
-    expect(info.plateRight).toBeLessThanOrEqual(info.hostRight + 1);
-    expect(info.nameRight).toBeLessThanOrEqual(info.hostRight + 1);
+    // Opaque data.png pad (~x29–227 of 245) must sit inside the host with a
+    // small margin — flush-cut at hostRight means dock offset math still wrong.
+    expect(info.plateRight).toBeLessThanOrEqual(info.hostRight - 4);
+    expect(info.nameRight).toBeLessThanOrEqual(info.hostRight - 4);
+    expect(info.ringRight ?? 0).toBeLessThanOrEqual(info.hostRight - 2);
+
+    const hunger = await page.evaluate(() => {
+      const host = document.querySelector(
+        '.jsonui[data-ui-name="hunger_renderer"]',
+      ) as HTMLElement | null;
+      if (!host || getComputedStyle(host).display === "none")
+        return { count: 0, urls: [] as string[] };
+      const urls = [...host.querySelectorAll<HTMLElement>(":scope > div")].map(
+        (d) => d.style.backgroundImage,
+      );
+      return { count: urls.length, urls };
+    });
+    expect(hunger.count).toBeGreaterThan(0);
+    expect(hunger.urls.every((u) => u.includes("hunger_"))).toBe(true);
+    expect(hunger.urls.some((u) => u.includes("hunger_empty"))).toBe(false);
+    expect(
+      hunger.urls.some(
+        (u) => u.includes("hunger_full") || u.includes("hunger_half"),
+      ),
+    ).toBe(true);
+
+    // Sidebar-only: loadingScreen dirt must stay hidden (was the ~70% black box).
+    const loadingHidden = await page.evaluate(() => {
+      const el = document.querySelector(
+        '[data-jsonui-name="phud_loadingScreen.main"]',
+      ) as HTMLElement | null;
+      if (!el) return true;
+      return getComputedStyle(el).display === "none";
+    });
+    expect(loadingHidden).toBe(true);
 
     // Live land glitch: AirSupply=0 must not paint a bubble row.
     await page.evaluate(() => {
@@ -391,6 +427,109 @@ test("empty slots hidden; air/armor/xp gated; no fat green XP", async ({
       }
     }
     expect(fatGreen).toBeLessThan(800);
+  } finally {
+    await harness.close();
+  }
+});
+
+test("loadingScreen PHUD paints TUTORIAL COMPLETE over sidebar", async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  const harness = await startHarness();
+  try {
+    await page.setViewportSize({ width: 1280, height: 720 });
+    await page.goto(harness.pageUrl, { waitUntil: "domcontentloaded" });
+    await page.waitForFunction(() => document.body.dataset.ready === "1", {
+      timeout: 60_000,
+    });
+
+    const EMPTY = ["null", "null", "null", "false", "empty", "null", "100"];
+    const pad = (s: string) => s.padEnd(120, "|");
+    const sidebar = [
+      [
+        "HP: 20/20§r§f Lv. 5",
+        "§fBulbasaur",
+        "bulbasaur",
+        "true",
+        "poke",
+        "default/bulbasaur",
+        "37",
+      ],
+      EMPTY,
+      EMPTY,
+      EMPTY,
+      EMPTY,
+      EMPTY,
+    ]
+      .flat()
+      .map(pad)
+      .join("|");
+
+    // BEH PlayerTutorial.celebrateCompletion setLoadingScreen payload.
+    const loadingScreen =
+      "§l§6TUTORIAL COMPLETE!\n\n§eWelcome to Season 5 of Pokébedrock!";
+
+    await page.evaluate(
+      ({ sidebar, loadingScreen, vitals }) => {
+        (
+          window as unknown as {
+            __jsonUi: {
+              setHud: (phud: Record<string, string>, v: typeof vitals) => void;
+            };
+          }
+        ).__jsonUi.setHud({ sidebar, loadingScreen }, vitals);
+      },
+      {
+        sidebar,
+        loadingScreen,
+        vitals: {
+          v: 1 as const,
+          type: "vitals" as const,
+          bot: "TestBot",
+          tick: 2,
+          health: 20,
+          maxHealth: 20,
+          food: 20,
+          air: 300,
+          maxAir: 300,
+          armor: 0,
+          xpLevel: 0,
+          xpProgress: 0,
+          selectedSlot: 0,
+          hotbar: Array.from({ length: 9 }, () => null),
+        },
+      },
+    );
+
+    await page.waitForFunction(
+      () =>
+        (
+          document.querySelector('[data-jsonui-name="phud_loadingScreen.main"]')
+            ?.textContent ?? ""
+        ).includes("TUTORIAL COMPLETE"),
+      undefined,
+      { timeout: 15_000 },
+    );
+
+    const card = await page.evaluate(() => {
+      const el = document.querySelector(
+        '[data-jsonui-name="phud_loadingScreen.main"]',
+      ) as HTMLElement | null;
+      if (!el) return { visible: false, text: "", w: 0, h: 0 };
+      const cs = getComputedStyle(el);
+      const r = el.getBoundingClientRect();
+      return {
+        visible: cs.display !== "none" && cs.visibility !== "hidden",
+        text: el.textContent ?? "",
+        w: r.width,
+        h: r.height,
+      };
+    });
+    expect(card.visible).toBe(true);
+    expect(card.text).toContain("TUTORIAL COMPLETE");
+    expect(card.w).toBeGreaterThan(400);
+    expect(card.h).toBeGreaterThan(200);
   } finally {
     await harness.close();
   }
