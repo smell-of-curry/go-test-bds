@@ -119,6 +119,66 @@ func TestPhudLaneEmitsEveryTokenWrite(t *testing.T) {
 	}
 }
 
+// Keyframe/attach must replay the latest PHUD map — EventSource reconnect
+// otherwise paints an empty HUD until the next live write (showcase-07 lost
+// TUTORIAL COMPLETE after the write ring had already been drained).
+func TestPhudReplayOnKeyframeAttach(t *testing.T) {
+	hub, err := New(Options{EncodeEveryTick: true, Address: "127.0.0.1:0", ArtifactDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer hub.Close()
+
+	s := hub.Register("HudBot")
+	sub := s.attach()
+	defer s.detach(sub)
+
+	a := testActor(t, "HudBot")
+	s.Tick(a)
+	if fr, ok := sub.next(); !ok || fr.event != "keyframe" {
+		t.Fatalf("want opening keyframe, got %+v ok=%v", fr, ok)
+	}
+
+	card := "&_loadingScreen:§l§6TUTORIAL COMPLETE!\n\n§eWelcome"
+	a.ApplyTitleAction(packet.TitleActionSetTitle, card, 0, 0, 0)
+	a.ApplyTitleAction(packet.TitleActionSetTitle, "&_sidebar:party", 0, 0, 0)
+	s.Tick(a)
+	for {
+		if _, ok := sub.next(); !ok {
+			break
+		}
+	}
+
+	sub2 := s.attach()
+	defer s.detach(sub2)
+	s.Tick(a)
+	if fr, ok := sub2.next(); !ok || fr.event != "keyframe" {
+		t.Fatalf("second attach keyframe = %+v ok=%v", fr, ok)
+	}
+
+	got := map[string]string{}
+	for {
+		fr, ok := sub2.next()
+		if !ok {
+			break
+		}
+		if fr.event != "phud" {
+			continue
+		}
+		var pf PhudFrame
+		if err := json.Unmarshal(fr.data, &pf); err != nil {
+			t.Fatal(err)
+		}
+		got[pf.Token] = pf.Value
+	}
+	if got["loadingScreen"] != "§l§6TUTORIAL COMPLETE!\n\n§eWelcome" {
+		t.Fatalf("replay loadingScreen = %q, want completion card", got["loadingScreen"])
+	}
+	if got["sidebar"] != "party" {
+		t.Fatalf("replay sidebar = %q", got["sidebar"])
+	}
+}
+
 // The rawtext-wrapped form (battle log rides "&_battleWait:" inside a rawtext
 // envelope) must flatten, parse, and lang-resolve like the other lanes.
 func TestPhudLaneFlattensRawtext(t *testing.T) {

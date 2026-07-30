@@ -228,8 +228,8 @@ test.describe("jsonui HUD fixtures", () => {
       // (capture stills were ~67% dock slab otherwise). h stays 192gui×scale.
       expect(geom.main).not.toBeNull();
       expect(geom.main!.h).toBeCloseTo(384, 0);
-      expect(geom.main!.w).toBeLessThanOrEqual(1024 * 0.4 + 2);
-      expect(geom.main!.w).toBeGreaterThan(300);
+      expect(geom.main!.w).toBeLessThanOrEqual(1024 * 0.35 + 2);
+      expect(geom.main!.w).toBeGreaterThan(250);
       // Ball icons ["100%y","100%"] of 32-tall row → ~64×64 CSS, not viewport-tall.
       for (const b of geom.balls) {
         expect(b.h).toBeLessThanOrEqual(72);

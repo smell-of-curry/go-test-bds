@@ -357,6 +357,24 @@ export class Store {
    */
   private applyPhud(frame: PhudFrame): void {
     this.state.tick = frame.tick;
+    // Completion card holds ~4s on the server then clears. Capture stills that
+    // reconnect or drain a late clear mid-wait would otherwise shoot empty —
+    // keep the last non-empty loadingScreen briefly so showcase-07 can paint.
+    if (
+      frame.token === "loadingScreen" &&
+      !frame.value &&
+      (this.state.phud.get("loadingScreen") ?? "")
+    ) {
+      const prev = this.state.phud.get("loadingScreen") ?? "";
+      window.setTimeout(() => {
+        if ((this.state.phud.get("loadingScreen") ?? "") === prev) {
+          this.state.phud.set("loadingScreen", "");
+          this.state.revision++;
+          this.emit();
+        }
+      }, 2500);
+      return;
+    }
     this.state.phud.set(frame.token, frame.value);
   }
 

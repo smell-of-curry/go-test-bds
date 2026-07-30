@@ -424,12 +424,19 @@ function layoutAnchored(
     el.name === "main" &&
     ANCHORS[anchorFrom].x >= 0.999
   ) {
-    const maxW = viewport.width * 0.4;
+    const maxW = viewport.width * 0.35;
     if (selfBox.w > maxW + 1) {
       selfBox.w = maxW;
       selfBox.x = parentBox.x + parentBox.w - selfBox.w;
-      clampHorizontalInParent(selfBox, parentBox, anchorFrom);
     }
+    // Dock `offset: ["47%",0]` + selected ring hang past main; leave a few
+    // gui-px so the plate/ring are not shaved by the viewport edge.
+    const inset = Math.min(10, viewport.width * 0.015);
+    const parentRight = parentBox.x + parentBox.w;
+    if (selfBox.x + selfBox.w > parentRight - inset) {
+      selfBox.x = parentRight - inset - selfBox.w;
+    }
+    clampHorizontalInParent(selfBox, parentBox, anchorFrom);
   }
 
   // Sidebar dock: right-anchored + `offset: ["47%",0]` hangs past main so the

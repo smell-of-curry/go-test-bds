@@ -55,6 +55,12 @@ type Stream struct {
 	lastVitalsAt    time.Time
 	lastVitalsData  []byte
 
+	// lastPhud is the latest value per PHUD token (bot goroutine writes;
+	// attach/keyframe replay reads under mu). EventSource reconnects wipe the
+	// client's map; without replay, `&_loadingScreen:TUTORIAL COMPLETE` is
+	// gone forever once the write ring has been drained.
+	lastPhud map[string]string
+
 	// lastEncodeAt throttles the world projection — bot goroutine only.
 	lastEncodeAt time.Time
 	// encodeInterval is worldEncodeInterval in production; tests zero it to
@@ -377,9 +383,12 @@ func (s *Stream) Tick(a *actor.Actor) {
 	if nsubs == 0 {
 		// Nobody watching: skip encode entirely. A later attach sets resync so
 		// the next Tick emits a fresh keyframe — the run must behave the same
-		// whether or not a viewer is attached. Still refresh vitals so attach
-		// can replay the latest survival stats without waiting for a change.
+		// whether or not a viewer is attached. Still refresh vitals + PHUD so
+		// attach can replay the latest survival/HUD state without waiting for
+		// a change (and so the title-write cursor does not stall until the
+		// ring overflows and drops &_loadingScreen).
 		s.cacheVitals(a)
+		s.emitHudEvents(a)
 		return
 	}
 
@@ -396,6 +405,9 @@ func (s *Stream) Tick(a *actor.Actor) {
 		if s.hub.log != nil {
 			s.hub.log.Error("viewer encode", "bot", s.name, "error", err)
 		}
+		// Still drain HUD — a meshing/project failure must not strand PHUD
+		// tokens (showcase-07 lost TUTORIAL COMPLETE while encode errored).
+		s.emitHudEvents(a)
 		return
 	}
 
@@ -430,6 +442,7 @@ func (s *Stream) Tick(a *actor.Actor) {
 		if keyframe {
 			keyframed = true
 			s.pushVitalsTo(sub)
+			s.pushPhudTo(sub)
 		}
 	}
 	if keyframed {
@@ -845,7 +858,8 @@ func (s *Stream) emitHudEvents(a *actor.Actor) {
 	// Raw PHUD lane: every title-channel write that smuggles "&_token:value"
 	// emits one phud frame. The write ring (not the latest-state snapshot)
 	// matters here — PokeBedrock's feeders write several tokens per tick, and
-	// the snapshot keeps only the last one.
+	// the snapshot keeps only the last one. Cache the latest value per token
+	// so keyframe/attach can replay after an EventSource reconnect.
 	writes, lastWrite := a.TitleWritesFromSeq(s.lastTitleWrite)
 	s.lastTitleWrite = lastWrite
 	for _, w := range writes {
@@ -853,13 +867,15 @@ func (s *Stream) emitHudEvents(a *actor.Actor) {
 		if !ok {
 			continue
 		}
+		value = resolveLangLines(value)
+		s.rememberPhud(token, value)
 		pf := PhudFrame{
 			V:     SchemaVersion,
 			Type:  "phud",
 			Bot:   s.name,
 			Tick:  tick,
 			Token: token,
-			Value: resolveLangLines(value),
+			Value: value,
 		}
 		data, _ := json.Marshal(pf)
 		s.emitRaw("phud", data)
@@ -943,6 +959,56 @@ func (s *Stream) pushVitalsTo(sub *subscriber) {
 		return
 	}
 	sub.pushEvent(encodedFrame{event: "vitals", data: data})
+}
+
+// rememberPhud stores the latest value for one PHUD token for keyframe replay.
+//
+// @param token PHUD token name (e.g. loadingScreen).
+// @param value Resolved token body (may be empty for a clear).
+func (s *Stream) rememberPhud(token, value string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.lastPhud == nil {
+		s.lastPhud = make(map[string]string)
+	}
+	s.lastPhud[token] = value
+}
+
+// pushPhudTo queues the latest PHUD token snapshot on one subscriber after a
+// keyframe. Reconnects otherwise paint an empty HUD until the next live write.
+//
+// @param sub Subscriber that just received a keyframe.
+func (s *Stream) pushPhudTo(sub *subscriber) {
+	s.mu.Lock()
+	if len(s.lastPhud) == 0 {
+		s.mu.Unlock()
+		return
+	}
+	snapshot := make(map[string]string, len(s.lastPhud))
+	for k, v := range s.lastPhud {
+		snapshot[k] = v
+	}
+	bot := s.name
+	s.mu.Unlock()
+	tick := s.lastTick.Load()
+	// Stable order so tests can assert without map iteration churn.
+	keys := make([]string, 0, len(snapshot))
+	for k := range snapshot {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, token := range keys {
+		pf := PhudFrame{
+			V:     SchemaVersion,
+			Type:  "phud",
+			Bot:   bot,
+			Tick:  tick,
+			Token: token,
+			Value: snapshot[token],
+		}
+		data, _ := json.Marshal(pf)
+		sub.pushEvent(encodedFrame{event: "phud", data: data})
+	}
 }
 
 // emitVitals builds the survival-HUD frame, stores it for keyframe replay, and
