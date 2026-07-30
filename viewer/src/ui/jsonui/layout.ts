@@ -413,6 +413,7 @@ function layoutAnchored(
   const selfBox: LayoutBox = { x: pos.x, y: pos.y, w: boxSize.w, h: boxSize.h };
   const anchorFrom = readAnchor(el.props.anchor_from, "center");
   clampHorizontalInParent(selfBox, parentBox, anchorFrom);
+  clampBattleActorPlateToViewport(selfBox, el, viewport);
 
   // Sidebar dock: right-anchored + `offset: ["47%",0]` hangs past main so the
   // transparent left pad of dock.png sits off-screen. Clip the box to the
@@ -615,6 +616,7 @@ function layoutStack(
     const anchorFrom = readAnchor(el.props.anchor_from, "center");
     clipRightOverflow(selfBox, parentBox, anchorFrom);
     clampHorizontalInParent(selfBox, parentBox, anchorFrom);
+    clampBattleActorPlateToViewport(selfBox, el, viewport);
   }
 
   // Final pass: place children along the stack.
@@ -748,6 +750,7 @@ function layoutFactoryOverlay(
     const anchorFrom = readAnchor(el.props.anchor_from, "center");
     clipRightOverflow(selfBox, parentBox, anchorFrom);
     clampHorizontalInParent(selfBox, parentBox, anchorFrom);
+    clampBattleActorPlateToViewport(selfBox, el, viewport);
   }
   const children = layoutControls(el.controls, selfBox, viewport, opts);
   return { element: el, box: selfBox, children, layer, visible };
@@ -1158,8 +1161,9 @@ function clipRightOverflow(
 
 /**
  * Shift a non-right-anchored box back inside its parent when more than half
- * of it hangs off (battle actor plates use offset ±50% in edge columns).
- * Small intentional overhangs (bag/run `-50%` of a 40px chip) stay put.
+ * of it hangs off. Small intentional overhangs (bag/run `-50%` of a 40px
+ * chip) stay put — actor plates are clamped separately via
+ * {@link clampBattleActorPlateToViewport}.
  *
  * @param box - Positioned box (mutated in place when clamped).
  * @param parent - Parent layout box.
@@ -1182,6 +1186,33 @@ function clampHorizontalInParent(
   ) {
     box.x = parentRight - box.w;
   }
+}
+
+/**
+ * Keep battle name-plates fully on-screen. Pack `opponent/ally_actor_details_button`
+ * uses offset ±50% inside the edge 25% columns; that hangs ~half the plate past
+ * the viewport in our layout (real client keeps both plates + HP arcs visible).
+ * Do NOT use this for bag/run chips — those overhangs are intentional.
+ *
+ * @param box - Positioned box (mutated when clamped).
+ * @param el - Element being laid out.
+ * @param viewport - Form viewport in gui pixels.
+ */
+function clampBattleActorPlateToViewport(
+  box: LayoutBox,
+  el: ResolvedElement,
+  viewport: Viewport,
+): void {
+  const name = el.name;
+  const isPlateStack =
+    name === "opponent_actor_details_button" ||
+    name === "ally_actor_details_button";
+  const size = el.props.size;
+  const isPlateButton = Array.isArray(size) && size[0] === 90 && size[1] === 42;
+  if (!isPlateStack && !isPlateButton) return;
+  if (box.w <= 0 || box.w > viewport.width) return;
+  if (box.x < 0) box.x = 0;
+  if (box.x + box.w > viewport.width) box.x = viewport.width - box.w;
 }
 
 function resolveOffset(

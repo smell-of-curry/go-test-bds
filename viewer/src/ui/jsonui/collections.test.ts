@@ -76,8 +76,12 @@ describe("normalizeFormButtonText", () => {
   it("pads actor details to 58 before health G/Y/R field", () => {
     const raw = "§0§a§1§r§l§fMunchlax§r\n Lv.5".padEnd(50, "_") + "G0.0⠀100%%";
     const got = normalizeFormButtonText(raw);
+    assert.equal(got.indexOf("G0.0"), 58);
     assert.match(got.slice(58), /^G0\.0/);
     assert.ok(!got.slice(0, 58).includes("G0.0"));
+    // Level-line match without relying on startsWith("§0§").
+    const noPrefix = "Munchlax\n Lv.5".padEnd(50, "_") + "G0.0⠀100%%";
+    assert.equal(normalizeFormButtonText(noPrefix).indexOf("G0.0"), 58);
   });
 });
 

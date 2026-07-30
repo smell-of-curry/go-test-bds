@@ -168,6 +168,70 @@ func TestEncodeUIFormButtonsResolveMoveTranslateWithLang(t *testing.T) {
 	}
 }
 
+// Live BEH actor plates (PlayerActor): padEnd(50) + G0.0⠀pct%%. Pack slices
+// details at %.58s — encode must realign so the SSE wire health starts at 58.
+//
+// JS padEnd counts UTF-16 code units (§ = 1); Go string len is bytes (§ = 2
+// in UTF-8). Build the fixture with explicit underscores so health sits at
+// byte index matching the JS-length-50 layout the live wire uses after decode.
+func TestEncodeUIFormButtonsActorPlatePadTo58(t *testing.T) {
+	// After JSON round-trip, § is one Go rune; use runes for pad length.
+	detailsRunes := []rune("§0§a§1§r§l§fMunchlax§r\n Lv.5")
+	for len(detailsRunes) < 50 {
+		detailsRunes = append(detailsRunes, '_')
+	}
+	button := string(detailsRunes) + "G0.0⠀100%%"
+	if len([]rune(string(detailsRunes))) != 50 {
+		t.Fatalf("fixture details runes=%d want 50", len(detailsRunes))
+	}
+
+	payload := map[string]any{
+		"type":    "form",
+		"title":   "§b§a§t§l§e§s§m",
+		"content": "Turn 1",
+		"buttons": []any{
+			map[string]any{
+				"text": button,
+				"image": map[string]string{
+					"type": "path",
+					"data": "textures/sprites/default/munchlax",
+				},
+			},
+		},
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := actor.NewForm(raw, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := testActor(t, "FormBot")
+	receiveForm(t, a, f)
+	ui := newEncoder("FormBot", 4, 4).encodeUI(a)
+	if ui.Form == nil || len(ui.Form.Buttons) != 1 {
+		t.Fatalf("form=%v", ui.Form)
+	}
+	got := ui.Form.Buttons[0]
+	gotRunes := []rune(got)
+	t.Logf("actor plate wire text (%d runes): %q", len(gotRunes), got)
+
+	healthAt := -1
+	for i := 0; i+3 < len(gotRunes); i++ {
+		if gotRunes[i] == 'G' && gotRunes[i+1] == '0' && gotRunes[i+2] == '.' && gotRunes[i+3] == '0' {
+			healthAt = i
+			break
+		}
+	}
+	if healthAt != 58 {
+		t.Fatalf("healthAt=%d want 58; wire=%q", healthAt, got)
+	}
+	if strings.Contains(string(gotRunes[:58]), "G0.0") {
+		t.Fatalf("details slice still contains health: %q", string(gotRunes[:58]))
+	}
+}
+
 func writeMoveLangPack(t *testing.T, dir string) {
 	t.Helper()
 	manifest := `{

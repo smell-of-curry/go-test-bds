@@ -503,7 +503,7 @@ test("battle form renders the bottom battle bar and hover follows formHover", as
     expect(alphaHost.moveOnScreen).toBeGreaterThanOrEqual(3);
 
     // Actor plates: padEnd(50)→58 normalize keeps Lv. separate from G0.0;
-    // plates must not hang mostly off-screen; no identity-white feFlood tint.
+    // plate STACKS (not bag/run chips) must sit fully inside the viewport.
     const plates = await page.evaluate(() => {
       const battle = document.querySelector(
         '[data-jsonui-name="battle.main"]',
@@ -526,6 +526,21 @@ test("battle form renders the bottom battle bar and hover follows formHover", as
             right: r.right,
           };
         });
+      // guiScale 2 → battle_actor_button [90,42] ≈ 180×84 CSS px.
+      const plateStacks = [
+        ...battle.querySelectorAll<HTMLElement>(
+          '.jsonui[data-ui-name="opponent_actor_details_button"], .jsonui[data-ui-name="ally_actor_details_button"]',
+        ),
+      ]
+        .filter((el) => {
+          if (el.style.display === "none") return false;
+          const r = el.getBoundingClientRect();
+          return r.width > 40 && r.height > 20;
+        })
+        .map((el) => {
+          const r = el.getBoundingClientRect();
+          return { left: r.left, right: r.right, width: r.width };
+        });
       const whiteTinted = [
         ...battle.querySelectorAll<HTMLElement>(".jsonui-image-face"),
       ].filter((f) => {
@@ -537,10 +552,14 @@ test("battle form renders the bottom battle bar and hover follows formHover", as
       });
       return {
         details: details.map((d) => d.text),
-        glued: details.some((d) => /Lv\.\d+G/.test(d.text)),
+        glued: details.some(
+          (d) => /Lv\.\d+G/.test(d.text) || /G0\.0/.test(d.text),
+        ),
         detailCount: details.length,
-        offLeft: details.some((d) => d.right < 0),
-        offRight: details.some((d) => d.left > window.innerWidth),
+        plateCount: plateStacks.length,
+        plateClipped: plateStacks.some(
+          (p) => p.left < -1 || p.right > window.innerWidth + 1,
+        ),
         whiteTinted: whiteTinted.length,
         hasMunchlax: details.some((d) => /Munchlax/i.test(d.text)),
         hasBulba: details.some((d) => /Bulbasaur/i.test(d.text)),
@@ -549,8 +568,8 @@ test("battle form renders the bottom battle bar and hover follows formHover", as
     expect(plates.glued).toBe(false);
     expect(plates.detailCount).toBeGreaterThanOrEqual(1);
     expect(plates.hasMunchlax || plates.hasBulba).toBe(true);
-    expect(plates.offLeft).toBe(false);
-    expect(plates.offRight).toBe(false);
+    expect(plates.plateCount).toBeGreaterThanOrEqual(1);
+    expect(plates.plateClipped).toBe(false);
     expect(plates.whiteTinted).toBe(0);
 
     // Default button faces (not hover/locked) must paint; a lone white

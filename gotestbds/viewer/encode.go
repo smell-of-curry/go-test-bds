@@ -981,14 +981,14 @@ func formButtons(f *actor.Form) []string {
 	if buttons, ok := f.MenuFormButtons(); ok {
 		out := make([]string, len(buttons))
 		for i, b := range buttons {
-			out[i] = resolveLangLines(flattenRawtext(b.Text()))
+			out[i] = normalizeFormButtonText(resolveLangLines(flattenRawtext(b.Text())))
 		}
 		return out
 	}
 	if yes, no, ok := f.ModalFormButtons(); ok {
 		return []string{
-			resolveLangLines(flattenRawtext(yes.Text())),
-			resolveLangLines(flattenRawtext(no.Text())),
+			normalizeFormButtonText(resolveLangLines(flattenRawtext(yes.Text()))),
+			normalizeFormButtonText(resolveLangLines(flattenRawtext(no.Text()))),
 		}
 	}
 	return nil
