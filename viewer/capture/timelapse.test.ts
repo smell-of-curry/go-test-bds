@@ -434,3 +434,50 @@ test("resolveKeepSuite: default / empty / custom", () => {
     true,
   );
 });
+
+test("computeSuiteCutIntervals: Tutorial alone is cut; Tutorial Showcase kept", () => {
+  // Regression for probe-r2: step Tutorial must not match /showcase/i.
+  const keep = /showcase/i;
+  assert.equal(keep.test("Tutorial"), false);
+  assert.equal(keep.test("Tutorial Showcase"), true);
+  assert.deepEqual(
+    computeSuiteCutIntervals(
+      [
+        suiteStart(0, "Smoke"),
+        suiteEnd(10_000, "Smoke"),
+        suiteStart(10_000, "UI Probe"),
+        suiteEnd(20_000, "UI Probe"),
+        suiteStart(20_000, "Tutorial"),
+        suiteEnd(80_000, "Tutorial"),
+        suiteStart(80_000, "Tutorial Showcase"),
+        suiteEnd(400_000, "Tutorial Showcase"),
+      ],
+      420_000,
+      keep,
+    ),
+    [{ startMs: 0, endMs: 80_000 }],
+  );
+});
+
+test("buildSegmentPlan: cutting pre-showcase removes the void open", () => {
+  const intervals = computeMarkedIntervals(
+    [
+      suiteStart(0, "Smoke"),
+      suiteEnd(5_000, "Smoke"),
+      suiteStart(5_000, "Tutorial Showcase"),
+      start(6_000),
+      end(20_000),
+      suiteEnd(40_000, "Tutorial Showcase"),
+    ],
+    45_000,
+    /showcase/i,
+  );
+  const plan = buildSegmentPlan(intervals, 45_000);
+  assert.ok(plan);
+  assert.ok(plan![0].startMs >= 5_000, "plan must not include Smoke void");
+  assert.deepEqual(plan![0], {
+    startMs: 5_000,
+    endMs: 6_000,
+    mode: "idle",
+  });
+});

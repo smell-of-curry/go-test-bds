@@ -5,6 +5,7 @@ import {
   rmSync,
   statSync,
   unlinkSync,
+  writeFileSync,
 } from "node:fs";
 import http from "node:http";
 import https from "node:https";
@@ -134,9 +135,10 @@ const SETTLE_GRACE_MS = 10_000;
  * long so Playwright's recorder muxes the final painted frames before
  * `page.close()` finalises the webm. Without this the crate-finale seconds
  * after the last still can be missing from the file even though the stills
- * themselves uploaded fine (run 45).
+ * themselves uploaded fine (run 45). Probe-r2 still ended on the crates leg
+ * at 2s — bump so the completion card has time to land in the muxer.
  */
-const TAIL_FLUSH_MS = 2_000;
+const TAIL_FLUSH_MS = 5_000;
 const GL_ARGS = [
   "--use-gl=angle",
   "--use-angle=swiftshader",
@@ -206,6 +208,8 @@ export async function runHarness(opts: HarnessOptions): Promise<void> {
   // ~0.1s late — well inside the ±1s an 8x walking segment tolerates.
   const videoAnchorMs = Date.now();
   const walkMarks: WalkMark[] = [];
+  /** Last suite name we emitted a suite:start for (suite-boundary synthesis). */
+  const suiteGate: { open?: string } = {};
 
   // A browser that dies mid-run explains every later failure at once — captures
   // that time out, a video that cannot be saved — and says nothing by itself.
@@ -267,6 +271,28 @@ export async function runHarness(opts: HarnessOptions): Promise<void> {
         );
         await video.delete().catch(() => undefined);
         await ctx.close().catch(() => undefined);
+        // Sidecar for post-mortems: suite cuts are mark-driven, and a missing
+        // suite:start is invisible without this (probe-r2 kept Smoke/UI Probe).
+        try {
+          const marksPath = opts.videoOut.replace(/\.webm$/i, ".marks.json");
+          writeFileSync(
+            marksPath,
+            JSON.stringify(
+              {
+                videoAnchorMs,
+                count: walkMarks.length,
+                marks: walkMarks,
+              },
+              null,
+              2,
+            ),
+          );
+          log.info(
+            `capture: wrote marks ${marksPath} count=${walkMarks.length}`,
+          );
+        } catch (err) {
+          log.warn(`capture: marks sidecar failed: ${String(err)}`);
+        }
         // Speed up the marked walking legs now that the file is final. Sync
         // ffmpeg is fine here: the run is over and nothing else is waiting.
         applyTimelapse({
@@ -345,6 +371,7 @@ export async function runHarness(opts: HarnessOptions): Promise<void> {
           mark,
           videoAnchorMs,
           walkMarks,
+          suiteGate,
           // `sse` is declared below but only ever called once frames arrive.
           endRun: () => sse.close(),
         }),
@@ -468,12 +495,30 @@ async function handleMark(
     mark: MarkState;
     videoAnchorMs: number;
     walkMarks: WalkMark[];
+    suiteGate: { open?: string };
     endRun: () => void;
   },
 ): Promise<void> {
   if (frame.runId !== undefined) ctx.mark.runId = frame.runId;
   if (frame.suite !== undefined) ctx.mark.suite = frame.suite;
   if (frame.test !== undefined) ctx.mark.test = frame.test;
+
+  const tMs = atMs - ctx.videoAnchorMs;
+
+  // Synthesise suite:start/end from ANY mark that carries a suite name —
+  // not only suiteStart/suiteEnd. Probe-r2 kept Smoke/UI Probe in the
+  // timelapse because suite lifecycle events were missing from walkMarks
+  // while testStart overlays still showed the suite; testStart/segment
+  // marks are enough to bound each suite for cutting.
+  if (frame.suite) {
+    noteSuiteBoundary(
+      ctx.walkMarks,
+      ctx.suiteGate,
+      frame.suite,
+      tMs,
+      frame.phase === "suiteEnd",
+    );
+  }
 
   // Walk / loading / idle legs, timed against the video for the timelapse
   // pass after the recording is written. `segment` marks are timeline
@@ -489,23 +534,10 @@ async function handleMark(
   ) {
     ctx.walkMarks.push({
       message: frame.message,
-      tMs: atMs - ctx.videoAnchorMs,
+      tMs,
+      ...(ctx.mark.suite ? { suite: ctx.mark.suite } : {}),
     });
     return;
-  }
-
-  // Suite lifecycle → suite:start/end so the timelapse can cut Smoke /
-  // Machines / step-Tutorial void and keep the showcase reel.
-  if (
-    (frame.phase === "suiteStart" || frame.phase === "suiteEnd") &&
-    frame.suite
-  ) {
-    ctx.walkMarks.push({
-      message: frame.phase === "suiteStart" ? "suite:start" : "suite:end",
-      tMs: atMs - ctx.videoAnchorMs,
-      suite: frame.suite,
-    });
-    // Fall through: suite marks also update the burnt-in caption state.
   }
 
   // Video is one continuous recording for the run; marks only update the
@@ -518,9 +550,55 @@ async function handleMark(
   // upload needs the bot still listening, and by the time the runner tears the
   // harness down the bot is already going away.
   if (frame.phase === "runEnd") {
+    // Close the open suite so the timelapse cut does not extend a non-keep
+    // suite to EOF (which would erase a trailing showcase finale).
+    if (ctx.suiteGate.open) {
+      ctx.walkMarks.push({
+        message: "suite:end",
+        tMs,
+        suite: ctx.suiteGate.open,
+      });
+      ctx.suiteGate.open = undefined;
+    }
     ctx.log.info("capture: runEnd; finishing the run video");
     ctx.endRun();
   }
+}
+
+/**
+ * Emit suite:start / suite:end into `walkMarks` when the active suite changes.
+ *
+ * @param walkMarks Timeline mark list to append to.
+ * @param gate Mutable open-suite holder.
+ * @param suite Suite name from the mark frame.
+ * @param tMs Video timeline offset.
+ * @param forceEnd When true (suiteEnd), close the suite even if the next
+ * mark has not arrived yet.
+ */
+function noteSuiteBoundary(
+  walkMarks: WalkMark[],
+  gate: { open?: string },
+  suite: string,
+  tMs: number,
+  forceEnd: boolean,
+): void {
+  if (forceEnd) {
+    if (gate.open === suite || gate.open) {
+      walkMarks.push({
+        message: "suite:end",
+        tMs,
+        suite: gate.open ?? suite,
+      });
+      gate.open = undefined;
+    }
+    return;
+  }
+  if (gate.open === suite) return;
+  if (gate.open) {
+    walkMarks.push({ message: "suite:end", tMs, suite: gate.open });
+  }
+  walkMarks.push({ message: "suite:start", tMs, suite });
+  gate.open = suite;
 }
 
 async function handleCapture(

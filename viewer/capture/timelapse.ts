@@ -680,6 +680,15 @@ export function applyTimelapse(opts: ApplyTimelapseOptions): TimelapseResult {
     return { applied: false, reason: "no duration" };
   }
 
+  const suiteMarkCount = segmentMarks.filter(
+    (m) => m.message === "suite:start" || m.message === "suite:end",
+  ).length;
+  log.info(
+    `timelapse: marks=${segmentMarks.length} suiteBounds=${suiteMarkCount} ` +
+      `keepSuite=${keepSuite ? keepSuite.source : "off"} ` +
+      `walkFactor=${factor} idleFactor=${idleFactor}`,
+  );
+
   let intervals = computeMarkedIntervals(segmentMarks, durationMs, keepSuite);
   // Speed-up is opt-in per factor; loading/suite cuts are unconditional.
   if (factor <= 1) intervals = intervals.filter((iv) => iv.kind !== "walk");
