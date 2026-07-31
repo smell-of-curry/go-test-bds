@@ -700,8 +700,10 @@ function bindTree(
   }
   // Empty party slots still bind ball texture `…/balls/empty` — hide that icon
   // so only occupied plates paint (matches real client empty = invisible).
-  // `paintNode` still walks visible children when the host is hidden so a
-  // missing ball does not swallow `pokemon_icon`.
+  // Always assign visible (same latch trap as phone.main): seeding
+  // prev.visible=false after an empty frame sticks forever and layout stubs
+  // the ball with children:[] so pokemon_icon never paints either.
+  // `paintNode` / layout still walk children when the host is hidden.
   if (el.name === "ball_icon") {
     const rawBall = typeof out.ball_type === "string" ? out.ball_type : "";
     const ball = normalizeSidebarBallType(rawBall);
@@ -712,7 +714,16 @@ function bindTree(
         out.texture = `textures/ui/sidebar/balls/${ball}`;
       }
     }
-    if (ball === "empty" || ball === "null" || ball === "") out.visible = false;
+    out.visible = !(ball === "empty" || ball === "null" || ball === "");
+  }
+  // Pack omits size on ball/ring hosts; never latch a fill size from a prior
+  // frame (would disable isSidebarIconHost → mid-plate ring, 0-size icons).
+  if (
+    el.namespace === "phud_sidebar" &&
+    (el.name === "pokemon_icon_wrapper" ||
+      el.name === "pokemon_selected_indicator")
+  ) {
+    delete out.size;
   }
   // Pack phone.main has no empty-token gate — only child $conditions hide
   // icons. When the live map has `&_phone:`, hide/show the 64×64 host with it

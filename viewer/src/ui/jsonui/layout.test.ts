@@ -769,7 +769,8 @@ describe("layoutTree self-axis %x/%y", () => {
           type: "panel",
           name: "pokemon_icon_wrapper",
           namespace: "phud_sidebar",
-          props: { size: ["default", "default"] },
+          // Latched fill size must not disable left/content host treatment.
+          props: { size: ["100%", "100%"] },
           bindings: [],
           controls: [
             child("ball_icon", {
@@ -802,6 +803,43 @@ describe("layoutTree self-axis %x/%y", () => {
       host.box.x <= tree.box.x + 1,
       `host.x=${host.box.x} row.x=${tree.box.x}`,
     );
+  });
+
+  it("hidden ball_icon still lays out pokemon_icon children", () => {
+    const ball: ResolvedElement = {
+      type: "image",
+      name: "ball_icon",
+      namespace: "phud_sidebar",
+      props: {
+        size: [32, 32],
+        visible: false,
+        anchor_from: "top_left",
+        anchor_to: "top_left",
+      },
+      bindings: [],
+      controls: [
+        child("pokemon_icon", {
+          type: "image",
+          name: "pokemon_icon",
+          namespace: "phud_sidebar",
+          props: {
+            size: [24, 24],
+            anchor_from: "top_left",
+            anchor_to: "top_left",
+          },
+          bindings: [],
+          controls: [],
+        }),
+      ],
+    };
+    const tree = layoutTree(
+      ball,
+      { width: 640, height: 360 },
+      { measureText: measureStub },
+    );
+    assert.equal(tree.visible, false);
+    assert.equal(tree.children.length, 1);
+    assert.ok(tree.children[0]!.box.w >= 24);
   });
 
   it("dock clips paint box but lays children against full width", () => {

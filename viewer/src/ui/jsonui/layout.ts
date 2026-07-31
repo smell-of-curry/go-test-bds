@@ -145,7 +145,18 @@ function layoutElement(
 
   // Invisible factory siblings (battle bag/move slots) — stub only. Full
   // layout of hidden trees made battle.main multi-second on the golden path.
+  // Exception: sidebar `ball_icon` wraps `pokemon_icon` — keep laying out the
+  // mon head when the empty-ball host is hidden (matches paintNode carve-out).
   if (!visible) {
+    if (el.name === "ball_icon" && el.controls.length > 0) {
+      return {
+        element: el,
+        box: { x: parentBox.x, y: parentBox.y, w: 0, h: 0 },
+        children: layoutControls(el.controls, parentBox, viewport, opts),
+        layer,
+        visible: false,
+      };
+    }
     return {
       element: el,
       box: { x: parentBox.x, y: parentBox.y, w: 0, h: 0 },
@@ -1369,37 +1380,23 @@ function positionWithAnchors(
 }
 
 /**
- * True when a size prop is omitted / default (scalar or `[default, default]`).
- *
- * @param sz - Element `size` prop.
- * @returns whether both axes are unspecified.
- */
-function sizeIsOmitted(sz: unknown): boolean {
-  if (sz === undefined || sz === null || sz === "default") return true;
-  if (!Array.isArray(sz) || sz.length < 2) return false;
-  const axisDefault = (v: unknown) =>
-    v === undefined || v === null || v === "default";
-  return axisDefault(sz[0]) && axisDefault(sz[1]);
-}
-
-/**
  * Pack hosts for the sidebar ball / active ring. They omit `size` and anchors;
  * treating that as wiki `100%`+`center` parks the square mid-plate. Real client
  * placement matches the plate's `-11%` pad (data.png opaque starts ~x29/245):
  * content-sized square on the row's left edge, half-overlapping the plate.
+ *
+ * Ignore any latched/authored size — pack omits it; a prior-frame fill size
+ * would otherwise disable this path and park the ring mid-plate.
  *
  * @param el - Element being laid out.
  * @returns true when this host should content-size + left-anchor.
  */
 function isSidebarIconHost(el: ResolvedElement): boolean {
   if (el.namespace !== "phud_sidebar") return false;
-  if (
-    el.name !== "pokemon_icon_wrapper" &&
-    el.name !== "pokemon_selected_indicator"
-  ) {
-    return false;
-  }
-  return sizeIsOmitted(el.props.size);
+  return (
+    el.name === "pokemon_icon_wrapper" ||
+    el.name === "pokemon_selected_indicator"
+  );
 }
 
 /**

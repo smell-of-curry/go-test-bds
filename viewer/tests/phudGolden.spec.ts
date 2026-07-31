@@ -236,29 +236,14 @@ test("golden: sidebar + top bar + ping", async ({ page }) => {
         ) + " \ue10e 1.00K",
       ),
     );
+    // Live UI Probe: empty slots paint first (ball=empty), then occupied
+    // stride arrives — must not latch ball_icon.visible=false.
     h.broadcast(
       phudFrame(
         "sidebar",
         packBehSidebar([
-          behOccupiedSlot({
-            stats: "HP: 20/20§r§f Lv. 11",
-            nickname: "Bulbasaur",
-            species: "bulbasaur",
-            active: true,
-            ballType: "poke",
-            icon: "default/bulbasaur",
-            clipPercent: "37",
-          }),
-          behOccupiedSlot({
-            stats: "HP: 11/23§r§f Lv. 5",
-            nickname: "Quaxly",
-            species: "quaxly",
-            active: false,
-            ballType: "poke",
-            icon: "default/quaxly",
-            // Partial XP bar (matches ece283b sidebar golden composition).
-            clipPercent: "48",
-          }),
+          [...BEH_EMPTY_SLOT],
+          [...BEH_EMPTY_SLOT],
           [...BEH_EMPTY_SLOT],
           [...BEH_EMPTY_SLOT],
           [...BEH_EMPTY_SLOT],
@@ -266,6 +251,25 @@ test("golden: sidebar + top bar + ping", async ({ page }) => {
         ]),
       ),
     );
+    // Exact probe mon fields (sidebar.ts): fainted lv5 Bulbasaur, ball poke,
+    // icon default/bulbasaur, XP clip 0 (full bar — not forced empty).
+    const probeSidebar = packBehSidebar([
+      behOccupiedSlot({
+        stats: "§7Fainted§r§f Lv. 5",
+        nickname: "Bulbasaur \ue108",
+        species: "bulbasaur",
+        active: true,
+        ballType: "poke",
+        icon: "default/bulbasaur",
+        clipPercent: "0",
+      }),
+      [...BEH_EMPTY_SLOT],
+      [...BEH_EMPTY_SLOT],
+      [...BEH_EMPTY_SLOT],
+      [...BEH_EMPTY_SLOT],
+      [...BEH_EMPTY_SLOT],
+    ]);
+    h.broadcast(phudFrame("sidebar", probeSidebar));
 
     await page.waitForFunction(
       () => {
@@ -290,16 +294,23 @@ test("golden: sidebar + top bar + ping", async ({ page }) => {
             "/sprites/default/bulbasaur",
           ),
         );
+        const ball = [
+          ...document.querySelectorAll<HTMLElement>(".jsonui-image-face"),
+        ].find((f) =>
+          (f.style.backgroundImage ?? "").includes("/sidebar/balls/poke"),
+        );
         const text = dock?.textContent ?? "";
         return (
           !!dock &&
           !!ping &&
           !!wrapper &&
           !!sprite &&
+          !!ball &&
           (sprite.getBoundingClientRect().width ?? 0) > 8 &&
+          (ball.getBoundingClientRect().width ?? 0) > 8 &&
           getComputedStyle(ping).display !== "none" &&
           text.includes("Bulbasaur") &&
-          text.includes("Quaxly") &&
+          text.includes("Fainted") &&
           !text.includes("???")
         );
       },
@@ -370,12 +381,14 @@ test("golden: sidebar + top bar + ping", async ({ page }) => {
 
     expect(geom.plate).not.toBeNull();
     expect(geom.fill0).not.toBeNull();
-    expect(geom.fill1).not.toBeNull();
     expect(geom.fill0!.x).toBeGreaterThanOrEqual(geom.plate!.x - 0.5);
     expect(geom.fill0!.x + geom.fill0!.w).toBeLessThanOrEqual(
       geom.plate!.x + geom.plate!.w + 0.5,
     );
-    expect(geom.fill1!.clip).toContain("48%");
+    // Probe clip field `0` → full XP bar (inset 0% / no clip).
+    expect(geom.fill0!.clip === "" || geom.fill0!.clip.includes("0%")).toBe(
+      true,
+    );
     expect(geom.ring).not.toBeNull();
     expect(geom.wrapper0).not.toBeNull();
     expect(geom.wrapper0!.x).toBeLessThanOrEqual(geom.plate!.x + 4);

@@ -7,6 +7,11 @@
  *
  * Clip percent is the HIDDEN fraction 0–100 (100 = fully clipped / empty bar).
  * Ball type is `BALL_DATA[caughtWith].type` (e.g. `poke` for `pokeb:pokeball`).
+ *
+ * UI Probe ground truth (fainted lv5 Bulbasaur from `generateRandomData` +
+ * default `caughtWith` pokeball, location inventory):
+ *   stats=`§7Fainted§r§f Lv. 5`, ball=`poke`, icon=`default/bulbasaur`
+ * Empty ball on that wire is a viewer bug — not real-client correct.
  */
 
 /** Empty party slot — same literals BEH emits. */
