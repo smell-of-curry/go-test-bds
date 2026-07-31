@@ -3,7 +3,8 @@
  * GET /packs, /pack/{id}/{path}, /asset/{path}.
  *
  * Fixture files live under `testdata/jsonui/<packId>/…` without the `ui/`
- * prefix that Bedrock pack paths use.
+ * prefix that Bedrock pack paths use. Texture bytes prefer the live pack
+ * extract, then the cached vanilla baseline (nineslice JSON + chrome PNGs).
  */
 import { existsSync, readFileSync, statSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
@@ -12,6 +13,16 @@ import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fixturesRoot = join(here, "..", "testdata", "jsonui");
+const liveExtract = join(fixturesRoot, "live-v2.18.5", "_extract");
+const baselineUi = join(
+  here,
+  "..",
+  "..",
+  ".cache",
+  "baseline",
+  "v1.26.30.5",
+  "resource_pack",
+);
 
 const CORS = {
   "access-control-allow-origin": "*",
@@ -28,6 +39,20 @@ export function isJsonUiPackPath(pathname: string): boolean {
     pathname.startsWith("/pack/") ||
     pathname.startsWith("/asset/")
   );
+}
+
+/**
+ * Resolve a pack-relative asset path to a file on disk.
+ *
+ * @param rel - Path like `textures/ui/control.png`.
+ * @returns absolute path, or null.
+ */
+function resolveAssetFile(rel: string): string | null {
+  const candidates = [join(liveExtract, rel), join(baselineUi, rel)];
+  for (const abs of candidates) {
+    if (existsSync(abs) && statSync(abs).isFile()) return abs;
+  }
+  return null;
 }
 
 /**
@@ -82,9 +107,24 @@ export function handleJsonUiPackRequest(
   }
 
   if (url.pathname.startsWith("/asset/")) {
-    // No textures in the fixture tree for most paths — empty icons are fine.
-    res.writeHead(404, CORS);
-    res.end("no asset");
+    const rel = decodeURIComponent(url.pathname.slice("/asset/".length));
+    const abs = resolveAssetFile(rel);
+    if (!abs) {
+      res.writeHead(404, CORS);
+      res.end("no asset");
+      return true;
+    }
+    const isJson = /\.json$/i.test(abs);
+    const isPng = /\.png$/i.test(abs);
+    res.writeHead(200, {
+      ...CORS,
+      "content-type": isJson
+        ? "application/json"
+        : isPng
+          ? "image/png"
+          : "application/octet-stream",
+    });
+    res.end(readFileSync(abs));
     return true;
   }
 

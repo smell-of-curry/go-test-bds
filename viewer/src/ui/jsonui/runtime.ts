@@ -4,11 +4,30 @@
 
 import { AssetClient } from "../../terrain/assetClient";
 import type { WorldState } from "../../store";
+import { type JsonUiAssets, type TextureInfo } from "./dom";
 import { loadUiFileSet, type UiLoadClient, type UiPackInfo } from "./load";
 import { buildResolver } from "./resolve";
 import { createHudRenderer, DEFAULT_GUI_SCALE, type HudRenderer } from "./hud";
 import { createFormRenderer, type FormRenderer } from "./forms";
 import type { UiResolver } from "./types";
+
+/** UI textures that must nineslice / UV-crop on first paint. */
+const PRELOAD_TEXTURES = [
+  "textures/ui/control",
+  "textures/ui/dialog_background_hollow_3",
+  "textures/ui/dialog_background_hollow_1",
+  "textures/ui/dialog_background_hollow_2",
+  "textures/ui/dialog_background_hollow_4",
+  "textures/ui/button_borderless_light",
+  "textures/ui/focus_border_white",
+  "textures/ui/close_button_default",
+  "textures/ui/phud/oak_start",
+  "textures/ui/phud/oak_loop",
+  "textures/ui/phud/ringing",
+  "textures/ui/phud/standby",
+  "textures/ui/phud/box_small",
+  "textures/ui/phud/box_wide",
+] as const;
 
 /** Options for {@link createJsonUiRuntime}. */
 export interface JsonUiRuntimeOptions {
@@ -87,13 +106,82 @@ export function createJsonUiRuntime(opts: JsonUiRuntimeOptions): JsonUiRuntime {
   let lastFormKey = "";
   let lastHover: number | null = null;
 
-  const assets = {
+  const textureInfoCache = new Map<string, TextureInfo>();
+  const assetHttp = new AssetClient(assetBase || "http://127.0.0.1");
+
+  const assets: JsonUiAssets = {
     textureUrl(path: string): string {
       const withExt = /\.[a-z]{3,4}$/i.test(path) ? path : `${path}.png`;
       if (!assetBase) return withExt;
       return `${assetBase}/asset/${withExt.replace(/^\/+/, "")}`;
     },
+    textureInfo(path: string): TextureInfo | undefined {
+      return textureInfoCache.get(path);
+    },
   };
+
+  /**
+   * Load PNG natural size + sibling `.json` nineslice into the sync cache.
+   *
+   * @param path - Pack texture path without extension.
+   */
+  async function preloadTextureInfo(path: string): Promise<void> {
+    if (textureInfoCache.has(path) || !assetBase) return;
+    try {
+      const [meta, bmp, pngSize] = await Promise.all([
+        assetHttp.fetchJson<{
+          nineslice_size?: unknown;
+          base_size?: unknown;
+        }>(`${path}.json`),
+        assetHttp.fetchImage(path),
+        readPngSize(path),
+      ]);
+      const base = Array.isArray(meta?.base_size) ? meta!.base_size : null;
+      const w =
+        bmp?.width || pngSize?.w || (base && Number(base[0])) || 0;
+      const h =
+        bmp?.height || pngSize?.h || (base && Number(base[1])) || 0;
+      if (w <= 0 && h <= 0 && meta?.nineslice_size === undefined) return;
+      textureInfoCache.set(path, {
+        w: w || Number(base?.[0]) || 0,
+        h: h || Number(base?.[1]) || 0,
+        nineslice: meta?.nineslice_size,
+      });
+      try {
+        bmp?.close();
+      } catch {
+        /* ignore */
+      }
+    } catch {
+      // Missing vanilla chrome in fixture packs is fine.
+    }
+  }
+
+  /**
+   * Read PNG IHDR width/height when createImageBitmap is unavailable.
+   *
+   * @param path - Pack texture path without extension.
+   * @returns natural size, or null.
+   */
+  async function readPngSize(
+    path: string,
+  ): Promise<{ w: number; h: number } | null> {
+    try {
+      const buf = await assetHttp.fetchBytes(
+        path.endsWith(".png") ? path : `${path}.png`,
+      );
+      if (!buf || buf.byteLength < 24) return null;
+      const view = new DataView(buf);
+      if (view.getUint32(0) !== 0x89504e47 || view.getUint32(4) !== 0x0d0a1a0a)
+        return null;
+      const w = view.getUint32(16);
+      const h = view.getUint32(20);
+      if (w <= 0 || h <= 0) return null;
+      return { w, h };
+    } catch {
+      return null;
+    }
+  }
 
   // HUD paints into a child layer so form host survives host.replaceChildren().
   const hudLayer = document.createElement("div");
@@ -109,9 +197,11 @@ export function createJsonUiRuntime(opts: JsonUiRuntimeOptions): JsonUiRuntime {
   const ready = (async () => {
     const { files, globals, lang } = await loadUiFileSet(client);
     resolver = buildResolver(files, globals);
+    // Nineslice / flipbook UV need sync size lookup on first paint.
+    await Promise.all(PRELOAD_TEXTURES.map((p) => preloadTextureInfo(p)));
     // Layout viewport tracks the real host size (full window). A fixed
-    // 1024×576 letterbox made gui space 512×288 so the sidebar's
-    // `222.22%y × 192` dock ate most of the still — live run-43 black slab.
+    // 1024x576 letterbox made gui space 512x288 so the sidebar's
+    // `222.22%y x 192` dock ate most of the still — live run-43 black slab.
     hud = createHudRenderer(resolver, hudLayer, {
       guiScale,
       assets,
