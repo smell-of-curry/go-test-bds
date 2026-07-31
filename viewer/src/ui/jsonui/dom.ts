@@ -77,6 +77,15 @@ export function renderTree(
   host: HTMLElement,
   opts: RenderOptions,
 ): HTMLElement {
+  // Paint-ready gate: sync epoch + reset requested count BEFORE faces emit so
+  // "pending==0 && requested==0" cannot look ready mid-rebuild.
+  const paintWin = window as unknown as {
+    __jsonUiPaintEpoch?: number;
+    __jsonUiTextureRequested?: number;
+  };
+  paintWin.__jsonUiPaintEpoch = (paintWin.__jsonUiPaintEpoch ?? 0) + 1;
+  paintWin.__jsonUiTextureRequested = 0;
+
   const root = document.createElement("div");
   root.className = "jsonui-root";
   root.style.position = "absolute";
@@ -94,6 +103,18 @@ export function renderTree(
   // Root box is absolute in viewport space; children paint parent-relative.
   paintNode(node, root, opts, { x: 0, y: 0 });
   return root;
+}
+
+/**
+ * Sync bump for golden/capture gates: a texture-backed face was created.
+ * Must run before any async decode/fetch for that face.
+ *
+ * Call from native renderer paths that set `backgroundImage` without
+ * {@link applyImage}.
+ */
+export function noteTextureFaceRequested(): void {
+  const w = window as unknown as { __jsonUiTextureRequested?: number };
+  w.__jsonUiTextureRequested = (w.__jsonUiTextureRequested ?? 0) + 1;
 }
 
 /** Reset the per-type warn set (tests). */
@@ -305,6 +326,9 @@ function applyImage(
   if (!looksLikeTexturePath(texture)) return;
 
   const url = opts.assets.textureUrl(texture);
+  // Sync before CSS url is assigned — paint-ready must see requested > 0
+  // even if the browser has not decoded the image yet.
+  noteTextureFaceRequested();
   // Face layer so tint filters never recolor nested controls.
   const face = document.createElement("div");
   face.className = "jsonui-image-face";
@@ -595,8 +619,7 @@ function applyLabel(
   el.style.overflowWrap = "anywhere";
   // Dialogue body (`main_label`) sits under a hollow title band; keep glyphs
   // visible when the measured box is a hair short (avoid first-line clip).
-  el.style.overflow =
-    node.element.name === "main_label" ? "visible" : "hidden";
+  el.style.overflow = node.element.name === "main_label" ? "visible" : "hidden";
   const align = node.element.props.text_alignment;
   if (align === "center" || align === "left" || align === "right") {
     el.style.textAlign = align;

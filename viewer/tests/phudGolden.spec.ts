@@ -26,6 +26,7 @@ import {
   type JsonlFrame,
 } from "./fixtureServer";
 import { assertGolden } from "./goldenCompare";
+import { ensureLiveExtract } from "./ensureLiveExtract";
 import { waitForJsonUiPaintReady } from "./jsonUiPaintReady";
 import { handleJsonUiPackRequest } from "./jsonuiPackServer";
 
@@ -55,6 +56,8 @@ interface Harness {
  * @returns live URLs and a broadcast handle.
  */
 async function startHarness(): Promise<Harness> {
+  // Dock / plate / banner chrome PNGs are served from the gitignored extract.
+  ensureLiveExtract();
   const all = loadJsonlFrames();
   const hello = all.find((f) => f.type === "hello");
   const keyframe = all.find((f) => f.type === "keyframe");

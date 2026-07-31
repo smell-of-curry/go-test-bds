@@ -8,6 +8,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { PNG } from "pngjs";
 import { createServer as createViteServer, type ViteDevServer } from "vite";
+import { ensureLiveExtract } from "./ensureLiveExtract";
 import { handleJsonUiPackRequest } from "./jsonuiPackServer";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -24,6 +25,8 @@ interface Harness {
  * @returns page URL + close.
  */
 async function startHarness(): Promise<Harness> {
+  // Phone flipbook / PHUD chrome textures live in the gitignored extract.
+  ensureLiveExtract();
   const packHttp: Server = createHttpServer((req, res) => {
     if (handleJsonUiPackRequest(req, res)) return;
     res.writeHead(404);
@@ -676,55 +679,58 @@ test.describe("jsonui HUD fixtures", () => {
       });
 
       const currency = "Go see Professor Oak at the lab".padEnd(80, "_");
-      await page.evaluate(({ currency }) => {
-        (
-          window as unknown as {
-            __jsonUi: {
-              setHud: (
-                phud: Record<string, string>,
-                vitals: {
-                  v: number;
-                  type: "vitals";
-                  bot: string;
-                  tick: number;
-                  health: number;
-                  maxHealth: number;
-                  food: number;
-                  air: number;
-                  maxAir: number;
-                  armor: number;
-                  xpLevel: number;
-                  xpProgress: number;
-                  selectedSlot: number;
-                  hotbar: null[];
-                },
-                title?: string | null,
-                seedSidebar?: boolean,
-              ) => void;
-            };
-          }
-        ).__jsonUi.setHud(
-          { currency },
-          {
-            v: 1,
-            type: "vitals",
-            bot: "TestBot",
-            tick: 2,
-            health: 20,
-            maxHealth: 20,
-            food: 18,
-            air: 300,
-            maxAir: 300,
-            armor: 0,
-            xpLevel: 0,
-            xpProgress: 0,
-            selectedSlot: 0,
-            hotbar: Array.from({ length: 9 }, () => null),
-          },
-          "Battle Marla",
-          false,
-        );
-      }, { currency });
+      await page.evaluate(
+        ({ currency }) => {
+          (
+            window as unknown as {
+              __jsonUi: {
+                setHud: (
+                  phud: Record<string, string>,
+                  vitals: {
+                    v: number;
+                    type: "vitals";
+                    bot: string;
+                    tick: number;
+                    health: number;
+                    maxHealth: number;
+                    food: number;
+                    air: number;
+                    maxAir: number;
+                    armor: number;
+                    xpLevel: number;
+                    xpProgress: number;
+                    selectedSlot: number;
+                    hotbar: null[];
+                  },
+                  title?: string | null,
+                  seedSidebar?: boolean,
+                ) => void;
+              };
+            }
+          ).__jsonUi.setHud(
+            { currency },
+            {
+              v: 1,
+              type: "vitals",
+              bot: "TestBot",
+              tick: 2,
+              health: 20,
+              maxHealth: 20,
+              food: 18,
+              air: 300,
+              maxAir: 300,
+              armor: 0,
+              xpLevel: 0,
+              xpProgress: 0,
+              selectedSlot: 0,
+              hotbar: Array.from({ length: 9 }, () => null),
+            },
+            "Battle Marla",
+            false,
+          );
+        },
+        { currency },
+      );
 
       await page.waitForFunction(
         () =>
@@ -751,8 +757,7 @@ test.describe("jsonui HUD fixtures", () => {
           )) as HTMLElement | null;
         const titleBg = (document.querySelector(
           '[data-jsonui-name="hud.title_background"]',
-        ) ??
-          titleLabel?.closest(".jsonui")) as HTMLElement | null;
+        ) ?? titleLabel?.closest(".jsonui")) as HTMLElement | null;
         const qr = quest?.getBoundingClientRect();
         const lr = questLabel?.getBoundingClientRect();
         const tr = titleBg?.getBoundingClientRect();
@@ -764,11 +769,14 @@ test.describe("jsonui HUD fixtures", () => {
             !!currencyEl && getComputedStyle(currencyEl).display !== "none",
           titleW: tr?.width ?? 0,
           titleLabelW: tl?.width ?? 0,
-          titleText: (titleLabel?.textContent ?? titleBg?.innerText ?? "").trim(),
+          titleText: (
+            titleLabel?.textContent ??
+            titleBg?.innerText ??
+            ""
+          ).trim(),
         };
       });
 
-      
       expect(layout.currencyMounted).toBe(false);
       expect(layout.questW).toBeGreaterThan(0);
       const questPad = layout.questW - layout.labelW;
@@ -867,7 +875,8 @@ function sampleHungerVitals(
       if (a < 40) continue;
       const luma = r * 0.2126 + g * 0.7152 + b * 0.0722;
       if (luma >= 25 && luma <= 90 && Math.abs(r - g) < 25) darkPlate++;
-      if (r > 45 && g > 28 && b < 50 && r >= g - 5 && g > b + 5) brownDrumstick++;
+      if (r > 45 && g > 28 && b < 50 && r >= g - 5 && g > b + 5)
+        brownDrumstick++;
     }
   }
   return { darkPlate, brownDrumstick };

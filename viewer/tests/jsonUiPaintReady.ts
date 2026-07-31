@@ -6,38 +6,89 @@
  * races font fallback swaps and unfinished CSS image decodes — goldens then
  * flake on text rows, HP-bar fills, and pokemon/ball icons that bind a frame
  * later than the dock chrome.
+ *
+ * Critical: do NOT treat "nothing pending + empty URL set" as ready. That
+ * window (bind finished text, texture faces not yet emitted / mid
+ * `replaceChildren`) produces text-only screenshots. Require a positive
+ * chrome signal: painted image faces with real `url(...)` backgrounds.
  */
 import type { Page } from "@playwright/test";
 
+/** Window counters written by the JSON UI runtime / paint path. */
+type JsonUiPaintWindow = Window & {
+  __jsonUiTexturesPending?: number;
+  __jsonUiPaintEpoch?: number;
+  __jsonUiTextureRequested?: number;
+};
+
 /**
  * Drain fonts + CSS image decode + pending texture-info fetches, wait until
- * the set of painted texture URLs stops growing, then return a screenshot
- * that matches the previous frame (pixel-stable).
+ * texture chrome has been requested AND painted, the URL set stops growing,
+ * then return a screenshot that matches the previous frame (pixel-stable).
  *
  * @param page - Playwright page with a mounted JSON UI overlay.
  * @returns PNG bytes of the stable frame.
+ * @throws if texture chrome never appears (avoids accepting text-only frames).
  */
 export async function waitForJsonUiPaintReady(page: Page): Promise<Buffer> {
-  // Runtime may still be fetching texture-json nineslice / PNG size after a
-  // PHUD/form bind; drain that before sampling CSS backgrounds.
+  // Positive gate: at least one texture face requested/painted, and no
+  // in-flight texture-info preload. Empty pending alone is NOT enough —
+  // pending is 0 before the first applyImage runs after setPhud/bind.
   await page.waitForFunction(
     () => {
-      const n = (window as unknown as { __jsonUiTexturesPending?: number })
-        .__jsonUiTexturesPending;
-      return n === undefined || n <= 0;
+      const w = window as unknown as JsonUiPaintWindow;
+      const pending = w.__jsonUiTexturesPending ?? 0;
+      const requested = w.__jsonUiTextureRequested ?? 0;
+      const root =
+        document.querySelector("#json-hud") ??
+        document.querySelector(".jsonui-hud-host") ??
+        document.body;
+      let faces = 0;
+      for (const node of root.querySelectorAll(".jsonui-image-face")) {
+        if (!(node instanceof HTMLElement)) continue;
+        const cs = getComputedStyle(node);
+        if (cs.display === "none" || cs.visibility === "hidden") continue;
+        const bg = node.style.backgroundImage || cs.backgroundImage;
+        const border = node.style.borderImageSource || cs.borderImageSource;
+        if (
+          (bg && bg !== "none" && bg.includes("url(")) ||
+          (border && border !== "none" && border.includes("url("))
+        ) {
+          faces++;
+        }
+      }
+      return pending <= 0 && (requested > 0 || faces > 0) && faces > 0;
     },
     undefined,
     { timeout: 15_000 },
   );
 
   // Bindings can add image faces a frame after dock/text appear. Hold until
-  // the URL set is unchanged across several rAFs, then decode those URLs.
+  // a NON-EMPTY URL set is unchanged across several rAFs, then decode.
   await page.evaluate(async () => {
     const root =
       document.querySelector("#json-hud") ??
       document.querySelector(".jsonui-hud-host") ??
       document.querySelector(".jsonui-root") ??
       document.body;
+
+    const countChromeFaces = (): number => {
+      let faces = 0;
+      for (const node of root.querySelectorAll(".jsonui-image-face")) {
+        if (!(node instanceof HTMLElement)) continue;
+        const cs = getComputedStyle(node);
+        if (cs.display === "none" || cs.visibility === "hidden") continue;
+        const bg = node.style.backgroundImage || cs.backgroundImage;
+        const border = node.style.borderImageSource || cs.borderImageSource;
+        if (
+          (bg && bg !== "none" && bg.includes("url(")) ||
+          (border && border !== "none" && border.includes("url("))
+        ) {
+          faces++;
+        }
+      }
+      return faces;
+    };
 
     const urlKey = (): string => {
       const urls = new Set<string>();
@@ -68,16 +119,37 @@ export async function waitForJsonUiPaintReady(page: Page): Promise<Buffer> {
 
     let last = "";
     let stable = 0;
-    for (let i = 0; i < 180; i++) {
+    for (let i = 0; i < 300; i++) {
       await new Promise<void>((r) => requestAnimationFrame(() => r()));
+      const pending =
+        (window as unknown as JsonUiPaintWindow).__jsonUiTexturesPending ?? 0;
       const key = urlKey();
-      if (key && key === last) stable++;
+      const faces = countChromeFaces();
+      // Empty URL set / zero faces / pending fetches → not ready (reset).
+      if (!key || faces < 1 || pending > 0) {
+        stable = 0;
+        last = key;
+        continue;
+      }
+      if (key === last) stable++;
       else {
         stable = 0;
         last = key;
       }
-      // ~12 frames of unchanged URL set ≈ bindings finished adding faces.
+      // ~12 frames of unchanged non-empty URL set ≈ bindings finished.
       if (stable >= 12) break;
+    }
+
+    if (!last || countChromeFaces() < 1) {
+      const pending =
+        (window as unknown as JsonUiPaintWindow).__jsonUiTexturesPending ?? 0;
+      const requested =
+        (window as unknown as JsonUiPaintWindow).__jsonUiTextureRequested ?? 0;
+      throw new Error(
+        `jsonUi paint ready: texture chrome missing after URL settle ` +
+          `(urls=${last ? last.split("\n").length : 0}, faces=${countChromeFaces()}, ` +
+          `pending=${pending}, requested=${requested})`,
+      );
     }
 
     await document.fonts.ready;
@@ -89,7 +161,7 @@ export async function waitForJsonUiPaintReady(page: Page): Promise<Buffer> {
       /* ignore */
     }
 
-    const urls = last ? last.split("\n").filter(Boolean) : [];
+    const urls = last.split("\n").filter(Boolean);
     await Promise.all(
       urls.map(
         (src) =>
@@ -165,12 +237,18 @@ export async function waitForJsonUiPaintReady(page: Page): Promise<Buffer> {
     });
 
     const png = await page.screenshot({ type: "png", animations: "disabled" });
+    // Refuse text-only frames: key must be non-empty (texture URLs present).
     if (prev && prev.equals(png) && key === prevKey && key.length > 0) {
       return png;
     }
     prev = png;
     prevKey = key;
   }
-  if (!prev) throw new Error("jsonUi paint settle produced no screenshot");
+  if (!prev || prevKey.length === 0) {
+    throw new Error(
+      `jsonUi paint settle: no stable textured frame ` +
+        `(lastUrlCount=${prevKey ? prevKey.split("\n").length : 0})`,
+    );
+  }
   return prev;
 }

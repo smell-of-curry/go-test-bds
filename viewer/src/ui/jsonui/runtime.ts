@@ -117,11 +117,17 @@ export function createJsonUiRuntime(opts: JsonUiRuntimeOptions): JsonUiRuntime {
   const textureInfoCache = new Map<string, TextureInfo>();
   const textureInfoInflight = new Map<string, Promise<void>>();
   const assetHttp = new AssetClient(assetBase || "http://127.0.0.1");
-  // Golden / capture harness polls this before screenshot.
+  // Golden / capture harness polls these before screenshot.
+  // pending = in-flight texture-info fetches; requested/epoch bump in paint.
   const pendingWin = window as unknown as {
     __jsonUiTexturesPending?: number;
+    __jsonUiPaintEpoch?: number;
+    __jsonUiTextureRequested?: number;
   };
   pendingWin.__jsonUiTexturesPending = pendingWin.__jsonUiTexturesPending ?? 0;
+  pendingWin.__jsonUiPaintEpoch = pendingWin.__jsonUiPaintEpoch ?? 0;
+  pendingWin.__jsonUiTextureRequested =
+    pendingWin.__jsonUiTextureRequested ?? 0;
 
   const assets: JsonUiAssets = {
     textureUrl(path: string): string {
