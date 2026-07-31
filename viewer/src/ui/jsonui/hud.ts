@@ -680,7 +680,7 @@ function bindTree(
   applyPropertyRefs(out);
   // Translate before layout so 100%c label hosts size to the localized string.
   if (typeof out.text === "string" && !out.text.startsWith("#")) {
-    out.text = localizeLabelText(
+    let text = localizeLabelText(
       out.text,
       out.localize ?? el.props.localize,
       lang,
@@ -691,11 +691,11 @@ function bindTree(
     if (
       el.name === "label_prefix" &&
       el.namespace === "player_ping" &&
-      out.text.endsWith(":") &&
-      !out.text.endsWith(": ")
+      text.endsWith(":")
     ) {
-      out.text = `${out.text} `;
+      text = `${text} `;
     }
+    out.text = text;
   }
   // Empty party slots still bind ball texture `…/balls/empty` — hide that icon
   // so only occupied plates paint (matches real client empty = invisible).
