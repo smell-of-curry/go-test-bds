@@ -408,6 +408,17 @@ function layoutAnchored(
     remainingH: fill.remainingH,
   });
 
+  // BATTLE_LAYOUT_PATCH_V1: battle bag/run/party tabs — pack sizes host to 100% of wide
+  // `menu_extra`, then $size 25% chrome → ~230px chip at -45% (blue blob).
+  if (
+    el.name === "bag_button" ||
+    el.name === "run_button" ||
+    el.name === "party_pokemon_button"
+  ) {
+    const maxW = Math.min(160, Math.max(64, viewport.width * 0.2));
+    if (boxSize.w > maxW) boxSize = { ...boxSize, w: maxW };
+  }
+
   const offset = resolveOffset(el.props.offset, boxSize, parentBox, viewport);
   const pos = positionWithAnchors(
     parentBox,
@@ -482,6 +493,22 @@ function layoutAnchored(
     childNodes = layoutControls(el.controls, selfBox, viewport, opts);
   }
 
+  // Plate buttons: portraits hang past the 90×42 host — clamp AABB after kids.
+  if (
+    el.name === "opponent_actor_details_button_check_id" ||
+    el.name === "ally_actor_details_button_check_id" ||
+    (Array.isArray(el.props.size) &&
+      el.props.size[0] === 90 &&
+      el.props.size[1] === 42 &&
+      (el.name.includes("actor") || el.name.includes("battle_actor")))
+  ) {
+    clampLayoutTreeToViewport(
+      { element: el, box: selfBox, children: childNodes, layer, visible },
+      viewport,
+      4,
+    );
+  }
+
   return {
     element: el,
     box: selfBox,
@@ -536,11 +563,20 @@ function layoutStack(
   const childEls = visibleControls(el.controls);
   const childParsed = childEls.map((c) => {
     const sz = readSizePair(c.element.props.size);
-    return {
-      child: c,
-      w: parseSize(sz[0]),
-      h: parseSize(sz[1]),
-    };
+    let w = parseSize(sz[0]);
+    const h = parseSize(sz[1]);
+    // Horizontal stacks: bare `100%` beside fixed siblings = fill remainder
+    // (battle plate description next to 40px icon). Parent-width overflows
+    // the 90px plate and stretches HP fills.
+    if (
+      orientation === "horizontal" &&
+      childEls.length > 1 &&
+      typeof sz[0] === "string" &&
+      sz[0].trim() === "100%"
+    ) {
+      w = parseSize("fill");
+    }
+    return { child: c, w, h };
   });
 
   // Measure intrinsic (non-fill main-axis) children.
@@ -664,6 +700,11 @@ function layoutStack(
   }
 
   // Final pass: place children along the stack.
+  //
+  // Resolve `%` against the *stack* box, then translate into the flow slot.
+  // Re-resolving `%` against a slot that is already the percentage slice
+  // double-applies: actor columns (`25%`→~6%) and HP bars (`21%` of 40 →
+  // `21%` of 8.4 → green hairline across the battle bar).
   const outChildren: LayoutNode[] = [];
   // Include invisible controls at their natural anchored position with no flow cost.
   const visibleIds = new Set(childEls.map((c) => c.id));
@@ -684,44 +725,50 @@ function layoutStack(
     const m = measured.find((x) => x.child.id === c.id);
     if (!m) continue;
 
-    const slot: LayoutBox = {
-      x: selfBox.x,
-      y: selfBox.y,
-      w: selfBox.w,
-      h: selfBox.h,
-    };
     const childFill = {
       remainingW: selfBox.w,
       remainingH: selfBox.h,
     };
-
     if (orientation === "vertical") {
-      const h = m.mainFill ? perFill : m.node.box.h;
-      slot.y = selfBox.y + cursor;
-      slot.h = h;
-      childFill.remainingH = h;
-      childFill.remainingW = selfBox.w;
-      cursor += h;
+      childFill.remainingH = m.mainFill ? perFill : selfBox.h;
     } else {
-      const w = m.mainFill ? perFill : m.node.box.w;
-      slot.x = selfBox.x + cursor;
-      slot.w = w;
-      childFill.remainingW = w;
-      childFill.remainingH = selfBox.h;
-      cursor += w;
+      childFill.remainingW = m.mainFill ? perFill : selfBox.w;
     }
 
-    // Stack children: top_left→top_left within their slot (Bedrock stack flow).
+    // Size against the full stack; force top_left so flow owns placement.
     const stacked = layoutElementInSlot(
       c.element,
-      slot,
+      selfBox,
       viewport,
       opts,
       childFill,
       /* forceTopLeft */ true,
     );
+
+    if (orientation === "vertical") {
+      const h = m.mainFill ? perFill : stacked.box.h;
+      if (m.mainFill) stacked.box.h = h;
+      shiftLayoutTree(stacked, 0, selfBox.y + cursor - stacked.box.y);
+      cursor += h;
+    } else {
+      const w = m.mainFill ? perFill : stacked.box.w;
+      if (m.mainFill) stacked.box.w = w;
+      shiftLayoutTree(stacked, selfBox.x + cursor - stacked.box.x, 0);
+      cursor += w;
+    }
+
+    // Viewport clamps during child layout use pre-shift coords. Re-clamp
+    // battle plates after flow translation so right-column ally plates stay
+    // inside the viewport.
+    clampBattlePlatesInTree(stacked, viewport);
+
     outChildren.push(stacked);
   }
+
+  clampBattlePlatesInTree(
+    { element: el, box: selfBox, children: outChildren, layer, visible },
+    viewport,
+  );
 
   return {
     element: el,
@@ -1319,21 +1366,100 @@ function clampHorizontalInParent(
  * @param el - Element being laid out.
  * @param viewport - Form viewport in gui pixels.
  */
+function isBattleActorPlateName(name: string): boolean {
+  return (
+    name === "opponent_actor_details_button" ||
+    name === "ally_actor_details_button" ||
+    name === "opponent_actor_details_button_check_id" ||
+    name === "ally_actor_details_button_check_id" ||
+    name === "opponent_actors" ||
+    name === "ally_actors"
+  );
+}
+
 function clampBattleActorPlateToViewport(
   box: LayoutBox,
   el: ResolvedElement,
   viewport: Viewport,
 ): void {
   const name = el.name;
-  const isPlateStack =
-    name === "opponent_actor_details_button" ||
-    name === "ally_actor_details_button";
   const size = el.props.size;
   const isPlateButton = Array.isArray(size) && size[0] === 90 && size[1] === 42;
-  if (!isPlateStack && !isPlateButton) return;
+  if (!isBattleActorPlateName(name) && !isPlateButton) return;
   if (box.w <= 0 || box.w > viewport.width) return;
-  if (box.x < 0) box.x = 0;
-  if (box.x + box.w > viewport.width) box.x = viewport.width - box.w;
+  const inset = 4;
+  if (box.x < inset) box.x = inset;
+  if (box.x + box.w > viewport.width - inset) {
+    box.x = Math.max(inset, viewport.width - inset - box.w);
+  }
+}
+
+/**
+ * Walk a laid-out subtree and clamp battle name-plate AABBs to the viewport.
+ *
+ * @param node - Subtree root.
+ * @param viewport - Form viewport in gui pixels.
+ */
+function clampBattlePlatesInTree(node: LayoutNode, viewport: Viewport): void {
+  if (isBattleActorPlateName(node.element.name)) {
+    clampLayoutTreeToViewport(node, viewport, 4);
+  }
+  const size = node.element.props.size;
+  if (
+    Array.isArray(size) &&
+    size[0] === 90 &&
+    size[1] === 42 &&
+    (node.element.name.includes("actor") ||
+      node.element.name.includes("battle_actor"))
+  ) {
+    clampLayoutTreeToViewport(node, viewport, 4);
+  }
+  for (const c of node.children) clampBattlePlatesInTree(c, viewport);
+}
+
+/**
+ * Shift a laid-out subtree by `(dx, dy)` gui px (mutates in place).
+ *
+ * @param node - Layout subtree root.
+ * @param dx - X delta.
+ * @param dy - Y delta.
+ */
+function shiftLayoutTree(node: LayoutNode, dx: number, dy: number): void {
+  if (dx === 0 && dy === 0) return;
+  node.box.x += dx;
+  node.box.y += dy;
+  for (const c of node.children) shiftLayoutTree(c, dx, dy);
+}
+
+/**
+ * Translate a laid-out subtree so its visible AABB stays inside the viewport
+ * with a small inset (battle plates + hanging portraits).
+ *
+ * @param node - Subtree root (box may be a skinny host; children can overhang).
+ * @param viewport - Form viewport in gui pixels.
+ * @param inset - Minimum margin from each edge.
+ */
+function clampLayoutTreeToViewport(
+  node: LayoutNode,
+  viewport: Viewport,
+  inset: number,
+): void {
+  let minX = Infinity;
+  let maxX = -Infinity;
+  (function walk(n: LayoutNode): void {
+    if (!n.visible || n.box.w <= 0 || n.box.h <= 0) return;
+    minX = Math.min(minX, n.box.x);
+    maxX = Math.max(maxX, n.box.x + n.box.w);
+    for (const c of n.children) walk(c);
+  })(node);
+  if (!Number.isFinite(minX) || !Number.isFinite(maxX)) return;
+  let dx = 0;
+  if (minX < inset) dx = inset - minX;
+  if (maxX + dx > viewport.width - inset) {
+    dx = viewport.width - inset - maxX;
+  }
+  if (minX + dx < inset) dx = inset - minX;
+  shiftLayoutTree(node, dx, 0);
 }
 
 function resolveOffset(

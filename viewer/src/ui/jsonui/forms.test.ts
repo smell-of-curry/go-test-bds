@@ -18,6 +18,8 @@ import {
   routeForm,
   type FormSnapshot,
 } from "./forms.js";
+import { evalExpr, parseExpr } from "./expr.js";
+import type { LayoutNode } from "./layout.js";
 import { parseLooseJson, parseUiRawFile } from "./load.js";
 import { layoutTree } from "./layout.js";
 import { buildResolver } from "./resolve.js";
@@ -344,5 +346,166 @@ describe("battle fixture end-to-end", () => {
     assert.equal(ys.length, 2, `rows=${ys}`);
     assert.ok(xs[1]! - xs[0]! > 80, `col gap ${xs[1]! - xs[0]!}`);
     assert.ok(ys[1]! - ys[0]! > 20, `row gap ${ys[1]! - ys[0]!}`);
+  });
+});
+
+describe("BATTLE_PLATE_HP_BAG_ICONS", () => {
+  function arenaBattleSnapshot(): FormSnapshot {
+    const move = (slot: number, type: string, id: string, pp: string): string =>
+      `b:${slot}_${pad30(type)} ${pad30(`.${id}`)} ${pad30(pp)}${id}`;
+    return {
+      type: "action",
+      title: "§b§a§t§l§e§s§m§0§1",
+      content: "Turn 1\n\nNo Turn Timer\n\nWeatherClear\n\nNo Terrain",
+      buttons: [
+        move(1, "normal", "growl", "40/40"),
+        move(2, "grass", "vinewhip", "25/25"),
+        move(3, "normal", "tackle", "35/35"),
+        "battleButton:bagBag",
+        "battleButton:pokemonParty",
+        "battleButton:runFlee",
+        "battleButton:move_selectionBadge",
+        "§0§0§1§r§l§fBulbasaur§r\n Lv.5".padEnd(50, "_") + "G0.0⠀100%%",
+        "§0§a§1§r§l§fMunchlax§r\n Lv.5".padEnd(50, "_") + "G0.0⠀100%%",
+      ],
+      buttonImages: [
+        "t__20",
+        "t__20",
+        "t__20",
+        "t",
+        "t",
+        "t",
+        "t:_default",
+        "textures/sprites/default/bulbasaur",
+        "textures/sprites/default/munchlax",
+      ],
+    };
+  }
+
+  function layoutBattle() {
+    const attackDoc = parseLooseJson(
+      readFileSync(join(fixtures, "pokebedrock/pokemon/attack.json"), "utf8"),
+      "attack.json",
+    );
+    const resolver = buildResolver([
+      src("pokebedrock", "ui/pokemon/attack.json", attackDoc),
+    ]);
+    const prepared = prepareFormTree(resolver, arenaBattleSnapshot());
+    assert.ok(prepared);
+    const layout = layoutTree(
+      prepared!.tree,
+      { width: 640, height: 360 },
+      {
+        measureText: (text, fontScale) => ({
+          w: Math.max(1, text.length * 6 * fontScale),
+          h: 9 * fontScale,
+        }),
+      },
+    );
+    return { prepared: prepared!, layout };
+  }
+
+  function walkLayout(n: LayoutNode, visit: (n: LayoutNode) => void): void {
+    visit(n);
+    for (const c of n.children) walkLayout(c, visit);
+  }
+
+  it("keeps ally/foe plate AABB + portraits inside the viewport", () => {
+    const { layout } = layoutBattle();
+    const inset = 4;
+    const vw = 640;
+    const plates: Array<{ name: string; minX: number; maxX: number }> = [];
+    walkLayout(layout, (n) => {
+      if (
+        n.element.name !== "opponent_actor_details_button" &&
+        n.element.name !== "ally_actor_details_button"
+      ) {
+        return;
+      }
+      if (!n.visible || n.box.h < 20) return;
+      let minX = Infinity;
+      let maxX = -Infinity;
+      walkLayout(n, (c) => {
+        if (!c.visible || c.box.w <= 0 || c.box.h <= 0) return;
+        minX = Math.min(minX, c.box.x);
+        maxX = Math.max(maxX, c.box.x + c.box.w);
+      });
+      plates.push({ name: n.element.name, minX, maxX });
+    });
+    assert.ok(plates.length >= 2, `plates=${JSON.stringify(plates)}`);
+    for (const p of plates) {
+      assert.ok(p.minX >= inset - 0.5, `${p.name} minX=${p.minX}`);
+      assert.ok(p.maxX <= vw - inset + 0.5, `${p.name} maxX=${p.maxX}`);
+    }
+  });
+
+  it("sizes HP bars per plate (not hairline / not full viewport)", () => {
+    const { layout } = layoutBattle();
+    const hps: Array<{ w: number; h: number }> = [];
+    walkLayout(layout, (n) => {
+      if (n.element.name !== "variable_progress_bar") return;
+      if (!n.visible || n.box.w <= 0) return;
+      hps.push({ w: n.box.w, h: n.box.h });
+    });
+    assert.ok(hps.length >= 2, `hps=${JSON.stringify(hps)}`);
+    for (const hp of hps) {
+      assert.ok(hp.h >= 4, `hp hairline h=${hp.h}`);
+      assert.ok(hp.w <= 120, `hp too wide w=${hp.w}`);
+      assert.ok(hp.w >= 40, `hp too narrow w=${hp.w}`);
+    }
+  });
+
+  it("caps bag_button host width so the blue tab is not a full-bar blob", () => {
+    const { layout } = layoutBattle();
+    const bags: number[] = [];
+    walkLayout(layout, (n) => {
+      if (n.element.name !== "bag_button" || !n.visible || n.box.w <= 0) return;
+      bags.push(n.box.w);
+    });
+    assert.ok(bags.length >= 1, "bag_button");
+    assert.ok(
+      bags.every((w) => w <= 160),
+      `bag widths=${bags}`,
+    );
+  });
+
+  it("resolves normal + grass type icon paths; pack mirrors icon_offset by column", () => {
+    const TYPE_EXPR =
+      "(('textures/ui/gui/attacks/' + (%.8s * (#form_button_text - (%.4s * #form_button_text)))) - '_')";
+    const expr = parseExpr(TYPE_EXPR);
+    const { prepared } = layoutBattle();
+    const bySlot = new Map<string, { tex: string; off: unknown }>();
+    walk(prepared.tree, (el) => {
+      if (el.name !== "icon" || el.props.visible === false) return;
+      const text =
+        typeof el.props.form_button_text === "string"
+          ? el.props.form_button_text
+          : "";
+      const m = /^(b:[1-4]_)/.exec(text);
+      if (!m) return;
+      if (typeof el.props.texture !== "string") return;
+      if (!bySlot.has(m[1]!)) {
+        bySlot.set(m[1]!, { tex: el.props.texture, off: el.props.offset });
+      }
+    });
+    assert.equal(bySlot.get("b:1_")?.tex, "textures/ui/gui/attacks/normal");
+    assert.equal(bySlot.get("b:2_")?.tex, "textures/ui/gui/attacks/grass");
+    assert.equal(bySlot.get("b:3_")?.tex, "textures/ui/gui/attacks/normal");
+    // Pack attack.json mirrors $icon_offset: slots 1–2 use -15%, slots 3–4
+    // use +15%. Factory clones carry every offset; gray "placeholder" on
+    // Growl/Tackle is the real normal.png (not a 404).
+
+    for (const [type, path] of [
+      ["normal", "textures/ui/gui/attacks/normal"],
+      ["grass", "textures/ui/gui/attacks/grass"],
+    ] as const) {
+      const label = `b:1_${type.padEnd(30, "_")} ${".x".padEnd(30, "_")} ${"1/1".padEnd(30, "_")}x`;
+      const got = evalExpr(expr, {
+        binding: (n) =>
+          n === "form_button_text" ? normalizeFormButtonText(label) : undefined,
+        variable: () => undefined,
+      });
+      assert.equal(got, path);
+    }
   });
 });
