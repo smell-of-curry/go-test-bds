@@ -58,8 +58,11 @@ function sidebarPayload(): string {
 function makeState(
   phudExtra: Record<string, string> = {},
   vitals: VitalsFrame | null = null,
+  title: string | null = null,
+  seedSidebar = true,
 ): WorldState {
-  const phud = new Map<string, string>([["sidebar", sidebarPayload()]]);
+  const phud = new Map<string, string>();
+  if (seedSidebar) phud.set("sidebar", sidebarPayload());
   for (const [k, v] of Object.entries(phudExtra)) phud.set(k, v);
   return {
     schemaOk: true,
@@ -71,7 +74,7 @@ function makeState(
     actor: null,
     columns: new Map(),
     entities: new Map(),
-    ui: null,
+    ui: title ? { title } : null,
     registries: null,
     mark: null,
     pendingCapture: null,
@@ -96,11 +99,13 @@ function makeState(
 }
 
 void runtime.ready.then(() => {
-  runtime.onFrame(makeState());
+  runtime.onFrame(makeState({}, null, null, true));
   document.body.dataset.ready = "1";
   document.body.dataset.frameMs = String(runtime.lastFrameMs);
   let lastVitals: VitalsFrame | null = null;
   let lastPhud: Record<string, string> = {};
+  let lastTitle: string | null = null;
+  let lastSeedSidebar = true;
   const api = {
     runtime,
     /**
@@ -108,9 +113,20 @@ void runtime.ready.then(() => {
      *
      * @param phudExtra - Token → value; use `""` to clear a token.
      */
+
+    /**
+     * Re-render with a plain HUD title (tip chrome).
+     *
+     * @param title - Title text; null clears ui.title.
+     */
+    setTitle(title: string | null): void {
+      lastTitle = title;
+      runtime.onFrame(makeState(lastPhud, lastVitals, lastTitle, lastSeedSidebar));
+      document.body.dataset.frameMs = String(runtime.lastFrameMs);
+    },
     setPhud(phudExtra: Record<string, string>): void {
       lastPhud = phudExtra;
-      runtime.onFrame(makeState(lastPhud, lastVitals));
+      runtime.onFrame(makeState(lastPhud, lastVitals, lastTitle, lastSeedSidebar));
       document.body.dataset.frameMs = String(runtime.lastFrameMs);
     },
     /**
@@ -120,7 +136,7 @@ void runtime.ready.then(() => {
      */
     setVitals(vitals: VitalsFrame): void {
       lastVitals = vitals;
-      runtime.onFrame(makeState(lastPhud, lastVitals));
+      runtime.onFrame(makeState(lastPhud, lastVitals, lastTitle, lastSeedSidebar));
       document.body.dataset.frameMs = String(runtime.lastFrameMs);
     },
     /**
@@ -129,10 +145,17 @@ void runtime.ready.then(() => {
      * @param phudExtra - Token map.
      * @param vitals - Vitals frame.
      */
-    setHud(phudExtra: Record<string, string>, vitals: VitalsFrame): void {
+    setHud(
+      phudExtra: Record<string, string>,
+      vitals: VitalsFrame,
+      title?: string | null,
+      seedSidebar = true,
+    ): void {
       lastPhud = phudExtra;
       lastVitals = vitals;
-      runtime.onFrame(makeState(lastPhud, lastVitals));
+      if (title !== undefined) lastTitle = title;
+      lastSeedSidebar = seedSidebar;
+      runtime.onFrame(makeState(lastPhud, lastVitals, lastTitle, lastSeedSidebar));
       document.body.dataset.frameMs = String(runtime.lastFrameMs);
     },
   };

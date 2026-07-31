@@ -86,6 +86,13 @@ export function hudTitleString(
  * Track the chronologically latest PHUD write as a raw title string.
  * The phud map alone loses write order across tokens.
  */
+const PHUD_TITLE_LANE_TOKENS = new Set([
+  "sidebar",
+  "phone",
+  "loadingScreen",
+  "evolutionWait",
+]);
+
 export class PhudTitleTracker {
   private last = "";
   private prev = new Map<string, string>();
@@ -97,6 +104,7 @@ export class PhudTitleTracker {
    */
   update(phud: Map<string, string>): string {
     for (const [token, value] of phud) {
+      if (!PHUD_TITLE_LANE_TOKENS.has(token)) continue;
       const prev = this.prev.get(token);
       if (prev === value) continue;
       this.prev.set(token, value);
@@ -106,7 +114,10 @@ export class PhudTitleTracker {
     }
     // Drop tokens removed from the map.
     for (const token of [...this.prev.keys()]) {
-      if (!phud.has(token)) this.prev.delete(token);
+      if (!phud.has(token)) {
+        this.prev.delete(token);
+        if (this.last.startsWith(`&_${token}:`)) this.last = "";
+      }
     }
     return this.last;
   }
@@ -294,16 +305,39 @@ export function createHudRenderer(
   const lang = opts.lang;
   const measureText =
     opts.measureText ??
-    ((text: string, fontScale: number) => {
-      const plain = stripSection(text);
-      const lines = plain.length ? plain.split("\n") : [""];
-      let maxLen = 1;
-      for (const line of lines) maxLen = Math.max(maxLen, line.length);
-      return {
-        w: Math.max(1, maxLen * 6 * fontScale),
-        h: Math.max(1, lines.length) * 9 * fontScale,
-      };
-    });
+    (typeof document !== "undefined"
+      ? (text: string, fontScale: number) => {
+          const plain = stripSection(text);
+          const lines = plain.length ? plain.split("\n") : [""];
+          const canvas = document.createElement("canvas");
+          const ctx = canvas.getContext("2d");
+          const fontPx = 8 * fontScale;
+          let maxW = 1;
+          if (ctx) {
+            ctx.font = `${fontPx}px "Minecraft", ui-sans-serif, system-ui, "Segoe UI", sans-serif`;
+            for (const line of lines) {
+              maxW = Math.max(maxW, ctx.measureText(line || " ").width);
+            }
+          } else {
+            let maxLen = 1;
+            for (const line of lines) maxLen = Math.max(maxLen, line.length);
+            maxW = maxLen * 6 * fontScale;
+          }
+          return {
+            w: Math.max(1, maxW),
+            h: Math.max(1, lines.length) * 9 * fontScale,
+          };
+        }
+      : (text: string, fontScale: number) => {
+          const plain = stripSection(text);
+          const lines = plain.length ? plain.split("\n") : [""];
+          let maxLen = 1;
+          for (const line of lines) maxLen = Math.max(maxLen, line.length);
+          return {
+            w: Math.max(1, maxLen * 6 * fontScale),
+            h: Math.max(1, lines.length) * 9 * fontScale,
+          };
+        });
 
   const propStore = new Map<string, PropertyBag>();
   const titleTracker = new PhudTitleTracker();
@@ -964,7 +998,7 @@ function applyPhudElementTokens(
  * @param root - Bound HUD tree.
  */
 function applyEmptyChromeQuirks(root: ResolvedElement): void {
-  const walk = (el: ResolvedElement): void => {
+  const walk = (el: ResolvedElement, parent: ResolvedElement | null): void => {
     if (el.namespace === "phud_currency" && el.name === "currency") {
       let labelText = "";
       for (const c of el.controls) {
@@ -972,11 +1006,18 @@ function applyEmptyChromeQuirks(root: ResolvedElement): void {
         const t = c.element.props.text;
         if (typeof t === "string") labelText = t;
       }
-      if (!labelText.trim()) el.props.visible = false;
+      if (!labelText.trim()) {
+        el.props.visible = false;
+        if (parent) {
+          for (const c of parent.controls) {
+            if (c.element.name === "separator") c.element.props.visible = false;
+          }
+        }
+      }
     }
-    for (const c of el.controls) walk(c.element);
+    for (const c of el.controls) walk(c.element, el);
   };
-  walk(root);
+  walk(root, null);
 }
 
 /**
@@ -1031,6 +1072,22 @@ function applyPropertyRefs(out: PropertyBag): void {
  * @param out - Props to mutate.
  * @param vitals - Vitals (hide when absent).
  */
+
+/**
+ * Pack RTL vitals rows anchor bottom_left at the row's right edge; shift left by row width.
+ *
+ * @param el - Pack element (authored offset, not latched out.offset).
+ * @returns adjusted offset or undefined.
+ */
+function rtlRowOffsetFromAuthored(el: ResolvedElement): [number, number] | undefined {
+  const authored = el.props.offset;
+  if (!Array.isArray(authored) || authored.length < 2) return undefined;
+  const ox = typeof authored[0] === "number" ? authored[0] : Number(authored[0]);
+  const oy = typeof authored[1] === "number" ? authored[1] : Number(authored[1]);
+  if (!Number.isFinite(ox) || !Number.isFinite(oy)) return undefined;
+  return [ox - ICON * HEART_COUNT, oy];
+}
+
 function applyRendererSizing(
   el: ResolvedElement,
   out: PropertyBag,
@@ -1046,11 +1103,17 @@ function applyRendererSizing(
 
   switch (renderer) {
     case "heart_renderer":
-    case "hunger_renderer":
     case "horse_heart_renderer":
       out.size = [ICON * HEART_COUNT, ICON];
       if (!vitals) out.visible = false;
       break;
+    case "hunger_renderer": {
+      out.size = [ICON * HEART_COUNT, ICON];
+      const hungerOff = rtlRowOffsetFromAuthored(el);
+      if (hungerOff) out.offset = hungerOff;
+      if (!vitals) out.visible = false;
+      break;
+    }
     case "armor_renderer":
       out.size = [ICON * HEART_COUNT, ICON];
       // `undefined <= 0` is false — missing armor must hide (empty icons look
@@ -1059,6 +1122,8 @@ function applyRendererSizing(
       break;
     case "bubbles_renderer": {
       out.size = [ICON * HEART_COUNT, ICON];
+      const bubbleOff = rtlRowOffsetFromAuthored(el);
+      if (bubbleOff) out.offset = bubbleOff;
       // Pack (pokebedrock hud_screen) binds bubbles to `#is_not_riding`, which
       // stays true on land — native Bedrock still only paints when air < max.
       if (!vitals || !airBubblesVisible(vitals)) out.visible = false;
@@ -1120,12 +1185,39 @@ export function applyTitleQuirk(root: ResolvedElement, title: string): void {
   // PHUD tokens: pack's `%.1s = '&_'` never matches (1 vs 2 chars) → chrome leaks.
   // Empty title: pb hud_title_text is sized 100%×100% so tip backgrounds become
   // giant translucent black rectangles mid-screen.
-  if (!title || PHUD_TITLE_RE.test(title)) hideTitleSubtree(root);
+  if (!title || PHUD_TITLE_RE.test(title)) {
+    hideTitleSubtree(root);
+    return;
+  }
+  unhideTitleSubtree(root);
 }
 
 /**
  * @param el - Tree node.
  */
+
+/**
+ * @param el - Tree node.
+ */
+function unhideTitleSubtree(el: ResolvedElement): void {
+  const n = el.name;
+  if (
+    n === "hud_title_text" ||
+    n === "title_frame" ||
+    n === "title_background" ||
+    n === "title" ||
+    n === "subtitle_frame" ||
+    n === "subtitle" ||
+    n === "subtitle_background" ||
+    n.endsWith("title_background") ||
+    n.endsWith("subtitle_background")
+  ) {
+    el.props.visible = true;
+    if (el.props.alpha === 0) el.props.alpha = 1;
+  }
+  for (const c of el.controls) unhideTitleSubtree(c.element);
+}
+
 function hideTitleSubtree(el: ResolvedElement): void {
   const n = el.name;
   if (
@@ -1270,6 +1362,7 @@ function paintOneRenderer(
         assets,
         guiScale,
         true,
+        "textures/ui/hunger_background",
       );
       break;
     case "armor_renderer": {
@@ -1350,6 +1443,7 @@ function paintIconRow(
   assets: JsonUiAssets,
   guiScale: number,
   rtl: boolean,
+  plate?: string,
 ): void {
   host.replaceChildren();
   host.style.display = "flex";
@@ -1358,20 +1452,38 @@ function paintIconRow(
   host.style.imageRendering = "pixelated";
 
   const px = ICON * guiScale;
-  const add = (tex: string, n: number): void => {
+  const addCell = (overlay: string | null, n: number): void => {
     for (let i = 0; i < n; i++) {
       const d = document.createElement("div");
       d.style.width = `${px}px`;
       d.style.height = `${px}px`;
-      d.style.backgroundImage = `url("${assets.textureUrl(tex)}")`;
-      d.style.backgroundSize = "100% 100%";
       d.style.flex = "0 0 auto";
+      d.style.position = "relative";
+      if (plate) {
+        const bg = document.createElement("div");
+        bg.style.position = "absolute";
+        bg.style.inset = "0";
+        bg.style.backgroundImage = `url("${assets.textureUrl(plate)}")`;
+        bg.style.backgroundSize = "100% 100%";
+        d.appendChild(bg);
+      }
+      if (overlay) {
+        const fg = document.createElement("div");
+        fg.style.position = "absolute";
+        fg.style.inset = "0";
+        fg.style.backgroundImage = `url("${assets.textureUrl(overlay)}")`;
+        fg.style.backgroundSize = "100% 100%";
+        d.appendChild(fg);
+      } else if (!plate) {
+        d.style.backgroundImage = `url("${assets.textureUrl(textures.empty)}")`;
+        d.style.backgroundSize = "100% 100%";
+      }
       host.appendChild(d);
     }
   };
-  add(textures.full, icons.full);
-  add(textures.half, icons.half);
-  add(textures.empty, icons.empty);
+  addCell(textures.full, icons.full);
+  addCell(textures.half, icons.half);
+  addCell(null, icons.empty);
 }
 
 /**

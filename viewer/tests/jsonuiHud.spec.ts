@@ -590,6 +590,196 @@ test.describe("jsonui HUD fixtures", () => {
       });
       expect(bar.max).toBeGreaterThan(40);
       expect(bar.nonDark).toBeGreaterThan(80);
+
+      await page.waitForFunction(
+        () =>
+          document.querySelector(
+            '.jsonui[data-ui-name="hunger_renderer"] > div',
+          ) !== null,
+        undefined,
+        { timeout: 10_000 },
+      );
+
+      const vitalsGeom = await page.evaluate(() => {
+        const heart = document.querySelector(
+          '.jsonui[data-ui-name="heart_renderer"]',
+        ) as HTMLElement | null;
+        const hunger = document.querySelector(
+          '.jsonui[data-ui-name="hunger_renderer"]',
+        ) as HTMLElement | null;
+        const hotbar = document.querySelector(
+          '.jsonui[data-ui-name="hotbar_renderer"]',
+        ) as HTMLElement | null;
+        const hr = heart?.getBoundingClientRect();
+        const hg = hunger?.getBoundingClientRect();
+        const hb = hotbar?.getBoundingClientRect();
+        return {
+          heartLeft: hr?.left ?? 0,
+          hungerRight: hg?.right ?? 0,
+          hotbarLeft: hb?.left ?? 0,
+          hotbarRight: hb?.right ?? 0,
+          hungerBox: hg
+            ? { x: hg.left, y: hg.top, w: hg.width, h: hg.height }
+            : null,
+        };
+      });
+      expect(vitalsGeom.hungerBox).not.toBeNull();
+      expect(
+        Math.abs(vitalsGeom.heartLeft - vitalsGeom.hotbarLeft),
+      ).toBeLessThan(12);
+      expect(
+        Math.abs(vitalsGeom.hungerRight - vitalsGeom.hotbarRight),
+      ).toBeLessThan(12);
+
+      const vitalsPng = PNG.sync.read(
+        Buffer.from(
+          await page.screenshot({ type: "png", animations: "disabled" }),
+        ),
+      );
+      const hb = vitalsGeom.hungerBox!;
+      const hungerPx = sampleHungerVitals(vitalsPng, {
+        x0: Math.floor(hb.x),
+        x1: Math.ceil(hb.x + hb.w),
+        y0: Math.floor(hb.y),
+        y1: Math.ceil(hb.y + hb.h),
+      });
+      expect(hungerPx.darkPlate).toBeGreaterThan(0);
+
+      const hungerLayers = await page.evaluate(() => {
+        const host = document.querySelector(
+          '.jsonui[data-ui-name="hunger_renderer"]',
+        ) as HTMLElement | null;
+        if (!host) return { drumstick: 0 };
+        const imgs = [
+          ...host.querySelectorAll<HTMLElement>(":scope > div > div"),
+        ].map((el) => el.style.backgroundImage);
+        const drumstick = imgs.filter(
+          (u) => u.includes("hunger_full") || u.includes("hunger_half"),
+        ).length;
+        return { drumstick };
+      });
+      expect(hungerLayers.drumstick).toBeGreaterThan(0);
+    } finally {
+      await harness.close();
+    }
+  });
+
+  test("quest banner + title tip size to text (no black tail)", async ({
+    page,
+  }) => {
+    const harness = await startHarness();
+    try {
+      await page.setViewportSize({ width: 1024, height: 576 });
+      await page.goto(harness.pageUrl, { waitUntil: "domcontentloaded" });
+      await page.waitForFunction(() => document.body.dataset.ready === "1", {
+        timeout: 60_000,
+      });
+
+      const currency = "Go see Professor Oak at the lab".padEnd(80, "_");
+      await page.evaluate(({ currency }) => {
+        (
+          window as unknown as {
+            __jsonUi: {
+              setHud: (
+                phud: Record<string, string>,
+                vitals: {
+                  v: number;
+                  type: "vitals";
+                  bot: string;
+                  tick: number;
+                  health: number;
+                  maxHealth: number;
+                  food: number;
+                  air: number;
+                  maxAir: number;
+                  armor: number;
+                  xpLevel: number;
+                  xpProgress: number;
+                  selectedSlot: number;
+                  hotbar: null[];
+                },
+                title?: string | null,
+                seedSidebar?: boolean,
+              ) => void;
+            };
+          }
+        ).__jsonUi.setHud(
+          { currency },
+          {
+            v: 1,
+            type: "vitals",
+            bot: "TestBot",
+            tick: 2,
+            health: 20,
+            maxHealth: 20,
+            food: 18,
+            air: 300,
+            maxAir: 300,
+            armor: 0,
+            xpLevel: 0,
+            xpProgress: 0,
+            selectedSlot: 0,
+            hotbar: Array.from({ length: 9 }, () => null),
+          },
+          "Battle Marla",
+          false,
+        );
+      }, { currency });
+
+      await page.waitForFunction(
+        () =>
+          !!document.querySelector('[data-jsonui-name="phud_currency.quest"]'),
+        undefined,
+        { timeout: 15_000 },
+      );
+
+      const layout = await page.evaluate(() => {
+        const quest = document.querySelector(
+          '[data-jsonui-name="phud_currency.quest"]',
+        ) as HTMLElement | null;
+        const questLabel = quest?.querySelector(
+          ".jsonui-label",
+        ) as HTMLElement | null;
+        const currencyEl = document.querySelector(
+          '[data-jsonui-name="phud_currency.currency"]',
+        ) as HTMLElement | null;
+        const titleLabel = (document.querySelector(
+          '[data-jsonui-name="hud.title"]',
+        ) ??
+          document.querySelector(
+            '[data-jsonui-name="hud.title_background"] .jsonui-label',
+          )) as HTMLElement | null;
+        const titleBg = (document.querySelector(
+          '[data-jsonui-name="hud.title_background"]',
+        ) ??
+          titleLabel?.closest(".jsonui")) as HTMLElement | null;
+        const qr = quest?.getBoundingClientRect();
+        const lr = questLabel?.getBoundingClientRect();
+        const tr = titleBg?.getBoundingClientRect();
+        const tl = titleLabel?.getBoundingClientRect();
+        return {
+          questW: qr?.width ?? 0,
+          labelW: lr?.width ?? 0,
+          currencyMounted:
+            !!currencyEl && getComputedStyle(currencyEl).display !== "none",
+          titleW: tr?.width ?? 0,
+          titleLabelW: tl?.width ?? 0,
+          titleText: (titleLabel?.textContent ?? titleBg?.innerText ?? "").trim(),
+        };
+      });
+
+      
+      expect(layout.currencyMounted).toBe(false);
+      expect(layout.questW).toBeGreaterThan(0);
+      const questPad = layout.questW - layout.labelW;
+      expect(questPad).toBeGreaterThanOrEqual(8);
+      expect(questPad).toBeLessThanOrEqual(28);
+      expect(layout.titleText).toContain("Battle Marla");
+      if (layout.titleW > 0 && layout.titleLabelW > 0) {
+        const titlePad = layout.titleW - layout.titleLabelW;
+        expect(titlePad).toBeGreaterThanOrEqual(8);
+        expect(titlePad).toBeLessThanOrEqual(28);
+      }
     } finally {
       await harness.close();
     }
@@ -652,4 +842,33 @@ function sampleLumaBand(
     }
   }
   return { max, nonDark };
+}
+
+/**
+ * Sample hunger row pixels for plate + drumstick layers.
+ *
+ * @param img - Decoded PNG.
+ * @param band - Inclusive pixel band.
+ * @returns dark plate and brown drumstick hit counts.
+ */
+function sampleHungerVitals(
+  img: PNG,
+  band: { x0: number; x1: number; y0: number; y1: number },
+): { darkPlate: number; brownDrumstick: number } {
+  let darkPlate = 0;
+  let brownDrumstick = 0;
+  for (let y = band.y0; y <= band.y1; y++) {
+    for (let x = band.x0; x <= band.x1; x++) {
+      const i = (y * img.width + x) << 2;
+      const r = img.data[i]!;
+      const g = img.data[i + 1]!;
+      const b = img.data[i + 2]!;
+      const a = img.data[i + 3]!;
+      if (a < 40) continue;
+      const luma = r * 0.2126 + g * 0.7152 + b * 0.0722;
+      if (luma >= 25 && luma <= 90 && Math.abs(r - g) < 25) darkPlate++;
+      if (r > 45 && g > 28 && b < 50 && r >= g - 5 && g > b + 5) brownDrumstick++;
+    }
+  }
+  return { darkPlate, brownDrumstick };
 }
