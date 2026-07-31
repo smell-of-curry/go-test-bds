@@ -78,6 +78,27 @@ test("parseSidebar tolerates a truncated payload", () => {
   expect(slots.every((s) => s.empty)).toBe(true);
 });
 
+test("parseSidebar maps legacy pokeball wire name to poke texture id", () => {
+  const payload = packSidebar([
+    [
+      "§7Fainted§r§f Lv. 5",
+      "§fBulbasaur",
+      "bulbasaur",
+      "true",
+      "pokeball",
+      "default/bulbasaur",
+      "100",
+    ],
+    EMPTY_SLOT,
+    EMPTY_SLOT,
+    EMPTY_SLOT,
+    EMPTY_SLOT,
+    EMPTY_SLOT,
+  ]);
+  expect(parseSidebar(payload)[0]?.ball).toBe("poke");
+  expect(parseSidebar(payload)[0]?.xpClipPercent).toBe(100);
+});
+
 test("parseCurrency splits the 80-char banner from the coin value", () => {
   const banner = "Buy Ranks, Crates, and more at §spokebedrock.com/shop§r";
   const value = banner.substring(0, 80).padEnd(80, "_") + " \ue10e 1.00K";

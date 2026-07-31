@@ -133,7 +133,13 @@ export function createJsonUiRuntime(opts: JsonUiRuntimeOptions): JsonUiRuntime {
     textureUrl(path: string): string {
       const withExt = /\.[a-z]{3,4}$/i.test(path) ? path : `${path}.png`;
       if (!assetBase) return withExt;
-      return `${assetBase}/asset/${withExt.replace(/^\/+/, "")}`;
+      // Encode each segment (hub `GET /asset/{path...}` + NormalizePath).
+      const rel = withExt
+        .replace(/^\/+/, "")
+        .split("/")
+        .map((seg) => encodeURIComponent(seg))
+        .join("/");
+      return `${assetBase}/asset/${rel}`;
     },
     textureInfo(path: string): TextureInfo | undefined {
       return textureInfoCache.get(path);

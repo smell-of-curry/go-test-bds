@@ -84,7 +84,7 @@ export function parseSidebar(value: string): SidebarSlot[] {
       name: nullToEmpty(field(base + 1)),
       species,
       selected: field(base + 3) === "true",
-      ball: field(base + 4) || "empty",
+      ball: normalizeSidebarBallType(field(base + 4) || "empty"),
       sprite: sprite === "null" || sprite === "" ? null : sprite,
       xpClipPercent: Number.isFinite(clip)
         ? Math.min(100, Math.max(0, clip))
@@ -92,6 +92,21 @@ export function parseSidebar(value: string): SidebarSlot[] {
     });
   }
   return slots;
+}
+
+/**
+ * Map mistaken / legacy ball wire names onto RES
+ * `textures/ui/sidebar/balls/<type>` filenames.
+ *
+ * BEH emits `BALL_DATA[caughtWith].type` (`poke` for `pokeb:pokeball`). A bare
+ * `pokeball` 404s — there is no `pokeball.png` in the pack.
+ *
+ * @param ball - Raw ball-type field (or `empty`).
+ * @returns texture basename under `textures/ui/sidebar/balls/`.
+ */
+export function normalizeSidebarBallType(ball: string): string {
+  if (ball === "pokeball") return "poke";
+  return ball;
 }
 
 /**

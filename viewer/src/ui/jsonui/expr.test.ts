@@ -186,4 +186,46 @@ describe("sidebar field extraction (real $string_parser)", () => {
       "&_",
     );
   });
+
+  it("fainted BEH slot: field 6 is clip 100, field 4 is poke", () => {
+    // Exact order from pokebedrock-beh sidebar.ts for a fainted Lv.5 Bulbasaur.
+    const fields = [
+      "§7Fainted§r§f Lv. 5",
+      "§fBulbasaur",
+      "bulbasaur",
+      "true",
+      "poke",
+      "default/bulbasaur",
+      "100",
+    ].map(pad120);
+    const packed = fields.join("|");
+    const clip = ev(
+      STRING_PARSER,
+      scope({
+        bindings: { string: packed },
+        vars: { var_size: 121, var_index: 6 },
+      }),
+    );
+    assert.equal(clip, "100");
+    assert.equal(
+      ev(
+        "((#field * 1) * $percent_to_ratio)",
+        scope({
+          bindings: { field: String(clip) },
+          vars: { percent_to_ratio: 0.01 },
+        }),
+      ),
+      1,
+    );
+    assert.equal(
+      ev(
+        STRING_PARSER,
+        scope({
+          bindings: { string: packed },
+          vars: { var_size: 121, var_index: 4 },
+        }),
+      ),
+      "poke",
+    );
+  });
 });

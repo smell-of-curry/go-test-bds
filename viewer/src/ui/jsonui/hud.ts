@@ -19,6 +19,7 @@ import type {
 } from "./types";
 import type { VitalsFrame } from "../../protocol";
 import type { WorldState } from "../../store";
+import { normalizeSidebarBallType } from "../phud/parse";
 
 /** PHUD control-token title (`&_sidebar:…`). */
 export const PHUD_TITLE_RE = /^&_[A-Za-z]+:/;
@@ -702,7 +703,15 @@ function bindTree(
   // `paintNode` still walks visible children when the host is hidden so a
   // missing ball does not swallow `pokemon_icon`.
   if (el.name === "ball_icon") {
-    const ball = out.ball_type;
+    const rawBall = typeof out.ball_type === "string" ? out.ball_type : "";
+    const ball = normalizeSidebarBallType(rawBall);
+    if (ball !== rawBall) {
+      out.ball_type = ball;
+      const tex = typeof out.texture === "string" ? out.texture : "";
+      if (tex.endsWith("/pokeball") || tex.endsWith("/pokeball.png")) {
+        out.texture = `textures/ui/sidebar/balls/${ball}`;
+      }
+    }
     if (ball === "empty" || ball === "null" || ball === "") out.visible = false;
   }
   // Pack phone.main has no empty-token gate — only child $conditions hide

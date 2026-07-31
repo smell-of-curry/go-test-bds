@@ -5,6 +5,7 @@
 import { createJsonUiRuntime } from "../../src/ui/jsonui/runtime";
 import type { VitalsFrame } from "../../src/protocol";
 import type { WorldState } from "../../src/store";
+import { BEH_EMPTY_SLOT, behOccupiedSlot, packBehSidebar } from "./behSidebar";
 
 const params = new URLSearchParams(location.search);
 const packsOrigin = params.get("packs") ?? location.origin;
@@ -17,37 +18,27 @@ const runtime = createJsonUiRuntime({
 });
 
 /**
- * Pad one sidebar field to 120 chars with `|`.
- *
- * @param s - Field value.
- * @returns padded field.
- */
-function pad120(s: string): string {
-  return s.padEnd(120, "|").slice(0, 120);
-}
-
-/**
  * Build a 6-slot sidebar payload (slot0 filled, rest empty).
  *
  * @returns packed sidebar body (no `&_sidebar:` prefix).
  */
 function sidebarPayload(): string {
-  const empty = ["null", "null", "null", "false", "empty", "null", "100"];
-  const slot0 = [
-    "HP: 20/20 Lv.5",
-    "TestBot",
-    "pikachu",
-    "true",
-    "pokeball",
-    "default/pikachu",
-    "40",
-  ];
-  const fields: string[] = [];
-  for (let s = 0; s < 6; s++) {
-    const row = s === 0 ? slot0 : empty;
-    for (const f of row) fields.push(pad120(f));
-  }
-  return fields.join("|");
+  return packBehSidebar([
+    behOccupiedSlot({
+      stats: "HP: 20/20§r§f Lv. 5",
+      nickname: "TestBot",
+      species: "pikachu",
+      active: true,
+      ballType: "poke",
+      icon: "default/pikachu",
+      clipPercent: "40",
+    }),
+    [...BEH_EMPTY_SLOT],
+    [...BEH_EMPTY_SLOT],
+    [...BEH_EMPTY_SLOT],
+    [...BEH_EMPTY_SLOT],
+    [...BEH_EMPTY_SLOT],
+  ]);
 }
 
 /**
@@ -121,12 +112,16 @@ void runtime.ready.then(() => {
      */
     setTitle(title: string | null): void {
       lastTitle = title;
-      runtime.onFrame(makeState(lastPhud, lastVitals, lastTitle, lastSeedSidebar));
+      runtime.onFrame(
+        makeState(lastPhud, lastVitals, lastTitle, lastSeedSidebar),
+      );
       document.body.dataset.frameMs = String(runtime.lastFrameMs);
     },
     setPhud(phudExtra: Record<string, string>): void {
       lastPhud = phudExtra;
-      runtime.onFrame(makeState(lastPhud, lastVitals, lastTitle, lastSeedSidebar));
+      runtime.onFrame(
+        makeState(lastPhud, lastVitals, lastTitle, lastSeedSidebar),
+      );
       document.body.dataset.frameMs = String(runtime.lastFrameMs);
     },
     /**
@@ -136,7 +131,9 @@ void runtime.ready.then(() => {
      */
     setVitals(vitals: VitalsFrame): void {
       lastVitals = vitals;
-      runtime.onFrame(makeState(lastPhud, lastVitals, lastTitle, lastSeedSidebar));
+      runtime.onFrame(
+        makeState(lastPhud, lastVitals, lastTitle, lastSeedSidebar),
+      );
       document.body.dataset.frameMs = String(runtime.lastFrameMs);
     },
     /**
@@ -155,7 +152,9 @@ void runtime.ready.then(() => {
       lastVitals = vitals;
       if (title !== undefined) lastTitle = title;
       lastSeedSidebar = seedSidebar;
-      runtime.onFrame(makeState(lastPhud, lastVitals, lastTitle, lastSeedSidebar));
+      runtime.onFrame(
+        makeState(lastPhud, lastVitals, lastTitle, lastSeedSidebar),
+      );
       document.body.dataset.frameMs = String(runtime.lastFrameMs);
     },
   };

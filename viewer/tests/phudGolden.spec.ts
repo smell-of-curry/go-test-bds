@@ -5,9 +5,10 @@
  * these lock the DOM overlay's layout).
  *
  * Packs come from testdata/jsonui; chrome resolves from the live extract +
- * vanilla baseline. Sidebar sprite/ball PNGs are forced 404 so icon paint
- * cannot race the screenshot (empty ring = deterministic). Capture still
- * waits for fonts + URL-set plateau + CSS decode (jsonUiPaintReady).
+ * vanilla baseline. Sidebar *sprite* PNGs are forced 404 so species faces
+ * stay deterministic; ball textures ARE served (live RES `…/balls/poke.png`)
+ * and the golden asserts the icon paints. Capture still waits for fonts +
+ * URL-set plateau + CSS decode (jsonUiPaintReady).
  * Same env knobs as golden.spec (GOLDEN_UPDATE=1 / GOLDEN_SOFT=1).
  */
 import { expect, test, type Page } from "@playwright/test";
@@ -30,6 +31,11 @@ import { ensureBaseline } from "./ensureBaseline";
 import { ensureLiveExtract } from "./ensureLiveExtract";
 import { waitForJsonUiPaintReady } from "./jsonUiPaintReady";
 import { handleJsonUiPackRequest } from "./jsonuiPackServer";
+import {
+  BEH_EMPTY_SLOT,
+  behOccupiedSlot,
+  packBehSidebar,
+} from "./fixtures/behSidebar";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const viewerRoot = join(here, "..");
@@ -84,17 +90,14 @@ async function startHarness(): Promise<Harness> {
         return;
       }
       // Live extract has 3k+ sprites; binding them a frame late flakes goldens.
-      // 404 keeps pokemon/ball faces empty while dock/plate/bar chrome still load.
+      // 404 keeps species faces empty; ball textures stay servable (asserted).
       if (url.pathname.startsWith("/asset/")) {
         const rel = decodeURIComponent(
           url.pathname.slice("/asset/".length),
         ).replace(/\\/g, "/");
-        if (
-          rel.startsWith("textures/sprites/") ||
-          rel.includes("/sidebar/balls/")
-        ) {
+        if (rel.startsWith("textures/sprites/")) {
           res.writeHead(404, { "access-control-allow-origin": "*" });
-          res.end("golden: omit sprite/ball");
+          res.end("golden: omit sprites");
           return;
         }
       }
@@ -175,19 +178,6 @@ function phudFrame(token: string, value: string): JsonlFrame {
   } as JsonlFrame;
 }
 
-const EMPTY_SLOT = ["null", "null", "null", "false", "empty", "null", "100"];
-
-/**
- * @param slots - Per-slot 7-field arrays.
- * @returns the packed sidebar payload.
- */
-function packSidebar(slots: string[][]): string {
-  return slots
-    .flat()
-    .map((v) => v.padEnd(120, "|"))
-    .join("|");
-}
-
 /**
  * @param slot - Move slot 1–4.
  * @param type - Lowercase type name.
@@ -262,30 +252,39 @@ test("golden: sidebar + top bar + ping", async ({ page }) => {
     h.broadcast(
       phudFrame(
         "sidebar",
-        packSidebar([
-          [
-            "HP: 20/20§r§f Lv. 11",
-            "§fBulbasaur",
-            "bulbasaur",
-            "true",
-            "poke",
-            "default/bulbasaur",
-            "37",
-          ],
-          [
-            "Fainted§r§f Lv. 5",
-            "§fQuaxly",
-            "quaxly",
-            "false",
-            "poke",
-            "default/quaxly",
-            // clip percent 100 → #clip_ratio 1 → fully hidden (empty) bar
-            "100",
-          ],
-          ["???", "§f???", "egg", "false", "poke", "default/egg", "100"],
-          EMPTY_SLOT,
-          EMPTY_SLOT,
-          EMPTY_SLOT,
+        packBehSidebar([
+          behOccupiedSlot({
+            stats: "HP: 20/20§r§f Lv. 11",
+            nickname: "Bulbasaur",
+            species: "bulbasaur",
+            active: true,
+            ballType: "poke",
+            icon: "default/bulbasaur",
+            clipPercent: "37",
+          }),
+          behOccupiedSlot({
+            // BEH sidebar.ts: health<=0 → `§7Fainted` + `§r§f Lv. N`
+            stats: "§7Fainted§r§f Lv. 5",
+            nickname: "Quaxly",
+            species: "quaxly",
+            active: false,
+            ballType: "poke",
+            icon: "default/quaxly",
+            // clip 100 → #clip_ratio 1 → fully hidden (empty) bar
+            clipPercent: "100",
+          }),
+          behOccupiedSlot({
+            stats: "???",
+            nickname: "???",
+            species: "egg",
+            active: false,
+            ballType: "poke",
+            icon: "default/egg",
+            clipPercent: "100",
+          }),
+          [...BEH_EMPTY_SLOT],
+          [...BEH_EMPTY_SLOT],
+          [...BEH_EMPTY_SLOT],
         ]),
       ),
     );
@@ -384,6 +383,25 @@ test("golden: sidebar + top bar + ping", async ({ page }) => {
     expect(geom.wrapper0!.x).toBeLessThanOrEqual(geom.plate!.x + 4);
     expect(geom.ring!.x).toBeLessThanOrEqual(geom.plate!.x + 4);
     expect(geom.ping).toMatch(/Current Ping:\s/);
+
+    const ballFace = await page.evaluate(() => {
+      const faces = [
+        ...document.querySelectorAll<HTMLElement>(".jsonui-image-face"),
+      ];
+      const ball = faces.find((f) =>
+        (f.style.backgroundImage ?? "").includes("/sidebar/balls/poke"),
+      );
+      if (!ball) return { bg: "", w: 0, h: 0 };
+      const r = ball.getBoundingClientRect();
+      return {
+        bg: ball.style.backgroundImage ?? "",
+        w: r.width,
+        h: r.height,
+      };
+    });
+    expect(ballFace.bg).toMatch(/sidebar\/balls\/poke\.png/);
+    expect(ballFace.w).toBeGreaterThan(8);
+    expect(ballFace.h).toBeGreaterThan(8);
 
     await shoot(page, "sidebar");
   } finally {
