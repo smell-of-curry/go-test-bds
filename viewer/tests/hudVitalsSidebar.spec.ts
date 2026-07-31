@@ -304,14 +304,18 @@ test("empty slots hidden; air/armor/xp gated; no fat green XP", async ({
       ) as HTMLElement | null;
       if (!host || getComputedStyle(host).display === "none")
         return { count: 0, urls: [] as string[] };
-      const urls = [...host.querySelectorAll<HTMLElement>(":scope > div")].map(
-        (d) => d.style.backgroundImage,
-      );
-      return { count: urls.length, urls };
+      // Cells nest a hunger_background underlay + full/half overlay divs.
+      const cells = [...host.querySelectorAll<HTMLElement>(":scope > div")];
+      const urls = cells
+        .flatMap((d) => [d, ...d.querySelectorAll<HTMLElement>("div")])
+        .map((d) => d.style.backgroundImage)
+        .filter((u) => u.length > 0);
+      return { count: cells.length, urls };
     });
     expect(hunger.count).toBeGreaterThan(0);
     expect(hunger.urls.every((u) => u.includes("hunger_"))).toBe(true);
     expect(hunger.urls.some((u) => u.includes("hunger_empty"))).toBe(false);
+    expect(hunger.urls.some((u) => u.includes("hunger_background"))).toBe(true);
     expect(
       hunger.urls.some(
         (u) => u.includes("hunger_full") || u.includes("hunger_half"),
