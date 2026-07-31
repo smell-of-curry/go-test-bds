@@ -64,8 +64,8 @@ describe("paintLayerZIndex", () => {
     assert.equal(paintLayerZIndex("main_label", 0), 0);
   });
 
-  it("clamps hollow control layer -1 to 0; leaves other negatives", () => {
-    assert.equal(paintLayerZIndex("control", -1), 0);
+  it("keeps pack negative layers (hollow control behind sibling chrome)", () => {
+    assert.equal(paintLayerZIndex("control", -1), -1);
     assert.equal(paintLayerZIndex("main_label", -1), -1);
   });
 });

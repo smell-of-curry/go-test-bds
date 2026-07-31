@@ -278,6 +278,13 @@ function paintNode(
   const kids = [...node.children].sort(
     (a, b) => paintSiblingRank(a) - paintSiblingRank(b),
   );
+  // Pack layer < 0 means behind siblings (hollow `control` at -1). CSS
+  // z-index < 0 under a composited parent (border-image / opacity) otherwise
+  // drops the child out of the painted layer — isolate so negatives stay
+  // inside this parent, under the image face / title chrome at layer ≥ 0.
+  if (kids.some((c) => c.visible && c.layer < 0)) {
+    el.style.isolation = "isolate";
+  }
   for (const child of kids) {
     paintNode(child, el, opts, { x: box.x, y: box.y });
   }
@@ -293,9 +300,9 @@ function paintNode(
 export function paintLayerZIndex(name: string, layer: number): number {
   if (name === "button_content") return Math.max(layer, 2);
   if (name === "button_image") return Math.min(layer, 1);
-  // Hollow dialog `control` uses pack layer -1; CSS z-index < 0 under a
-  // composited parent often drops that fill. Clamp only that control.
-  if (name === "control" && layer < 0) return 0;
+  // Keep pack negatives (e.g. hollow control layer -1). Parents with
+  // negative-layer children set `isolation: isolate` so the fill stays
+  // behind sibling chrome instead of vanishing under the composited parent.
   return layer;
 }
 

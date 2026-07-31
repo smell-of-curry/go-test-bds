@@ -181,6 +181,11 @@ test("ActionForm hollow fill dims center; form stacks above body nametag", async
       const controlFace = control?.querySelector(
         ":scope > .jsonui-image-face",
       ) as HTMLElement | null;
+      const title =
+        ([...form.querySelectorAll(".jsonui-label")].find((el) =>
+          (el.textContent ?? "").includes("Welcome"),
+        ) as HTMLElement | undefined) ??
+        (form.querySelector(".jsonui-label") as HTMLElement | null);
       const scrim = document.querySelector(
         '[data-jsonui-name="jsonui.form_scrim"]',
       ) as HTMLElement | null;
@@ -192,11 +197,22 @@ test("ActionForm hollow fill dims center; form stacks above body nametag", async
       ) as HTMLElement | null;
       const nametag = document.getElementById("probe-nametag");
       const formBox = form.getBoundingClientRect();
+      const titleBox = title?.getBoundingClientRect();
       // Sample deep in the hollow (below title / buttons).
       const inside = {
         x: formBox.left + formBox.width * 0.5,
         y: formBox.top + formBox.height * 0.78,
       };
+      // Light title-band backing (live pack) — sample near the title glyph.
+      const titleBand = titleBox
+        ? {
+            x: titleBox.left + titleBox.width * 0.5,
+            y: titleBox.top + Math.min(6, titleBox.height * 0.35),
+          }
+        : {
+            x: formBox.left + formBox.width * 0.5,
+            y: formBox.top + 18,
+          };
       const outside = {
         x: 40,
         y: 40,
@@ -215,6 +231,10 @@ test("ActionForm hollow fill dims center; form stacks above body nametag", async
           (controlFace.style.backgroundImage.includes("control") ||
             getComputedStyle(controlFace).backgroundImage.includes("control") ||
             controlFace.style.borderImageSource.includes("control")),
+        controlZ: control ? Number(getComputedStyle(control).zIndex || "0") : 0,
+        hollowIsolation: hollow
+          ? getComputedStyle(hollow).isolation
+          : "auto",
         controlBox: control
           ? {
               w: control.getBoundingClientRect().width,
@@ -234,6 +254,7 @@ test("ActionForm hollow fill dims center; form stacks above body nametag", async
         sample: {
           inside,
           outside,
+          titleBand,
           formBox: {
             x: formBox.x,
             y: formBox.y,
@@ -253,6 +274,9 @@ test("ActionForm hollow fill dims center; form stacks above body nametag", async
     expect(info.controlOpacity).toBeGreaterThan(0.5);
     expect(info.controlOpacity).toBeLessThanOrEqual(1);
     expect(info.controlHasBg || info.controlOpacity === 0.8).toBe(true);
+    // Pack layer -1 kept; parent isolate keeps fill under title/frame chrome.
+    expect(info.controlZ).toBeLessThan(0);
+    expect(info.hollowIsolation).toBe("isolate");
     expect(info.formOpen).toBe(true);
     expect(info.tagOverlapsForm).toBe(true);
     // Body nametag at z=10 must sit under raised HUD root (not nested host z).
@@ -269,10 +293,13 @@ test("ActionForm hollow fill dims center; form stacks above body nametag", async
     };
     const insideL = lum(info.sample.inside.x, info.sample.inside.y);
     const outsideL = lum(info.sample.outside.x, info.sample.outside.y);
+    const titleL = lum(info.sample.titleBand.x, info.sample.titleBand.y);
     // Outside is scrim over lime; inside is scrim + control@0.8 — never brighter.
     expect(insideL).toBeLessThanOrEqual(outsideL + 15);
     // And not near full-bright lime (~180+ per channel).
     expect(insideL).toBeLessThan(400);
+    // Title band stays light chrome; control fill must not darken it.
+    expect(titleL).toBeGreaterThan(insideL + 40);
     // Yellow nametag (#ff0) must not paint over the dialog interior.
     const tagPx = (() => {
       const x = Math.round(info.sample.tagCenter.x);
