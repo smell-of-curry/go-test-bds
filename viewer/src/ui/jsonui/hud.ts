@@ -346,12 +346,23 @@ export function createHudRenderer(
       }
       lastPaintKey = paintKey;
 
-      const cssW =
-        opts.viewportCss?.width ??
-        (host.clientWidth > 0 ? host.clientWidth : 1280);
-      const cssH =
-        opts.viewportCss?.height ??
-        (host.clientHeight > 0 ? host.clientHeight : 720);
+      // Layout against the visible window when the host CSS box is larger
+      // (fixture `#host` is 1280×720 while Playwright often sets 1024×576).
+      // Floor-pinned hotbar at host-bottom then sits past `screenshot()` —
+      // luma sample of barBox reads max=0. Live capture host = 100vw×100vh
+      // so min(host, window) is a no-op there.
+      const hostW = host.clientWidth > 0 ? host.clientWidth : 1280;
+      const hostH = host.clientHeight > 0 ? host.clientHeight : 720;
+      const winW =
+        typeof window !== "undefined" && window.innerWidth > 0
+          ? window.innerWidth
+          : hostW;
+      const winH =
+        typeof window !== "undefined" && window.innerHeight > 0
+          ? window.innerHeight
+          : hostH;
+      const cssW = opts.viewportCss?.width ?? Math.min(hostW, winW);
+      const cssH = opts.viewportCss?.height ?? Math.min(hostH, winH);
       const viewport: Viewport = {
         width: cssW / guiScale,
         height: cssH / guiScale,
