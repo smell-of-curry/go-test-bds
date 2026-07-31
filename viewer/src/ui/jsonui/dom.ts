@@ -287,57 +287,60 @@ function applyImage(
 
   const tint = asColor(node.element.props.color);
   const info = lookupTextureInfo(texture, opts);
-  // Element nineslice wins; else texture-json nineslice (control.png is 2x2
-  // with nineslice_size:1 — stretching without it = giant white blob).
-  const nine =
-    node.element.props.nineslice_size !== undefined &&
-    node.element.props.nineslice_size !== null
-      ? node.element.props.nineslice_size
-      : info?.nineslice;
-  if (nine !== undefined && nine !== null) {
-    applyNineslice(face, url, nine, opts.guiScale);
-  } else {
+  // Sidebar dock: prefer native 61×405 aspect over texture-json nineslice /
+  // stretch — nineslice was filling the wide clipped box into a fat black slab.
+  if (node.element.props.$viewer_dock_natural === true) {
     face.style.backgroundImage = `url("${cssUrl(url)}")`;
-    const uvSize = asIntPair(node.element.props.uv_size);
-    const hasUvSize = !!(uvSize && uvSize[0]! > 0 && uvSize[1]! > 0);
-    const uv = resolveImageUv(node.element.props.uv, hasUvSize);
-    if (
-      uv &&
-      uvSize &&
-      info &&
-      info.w > 0 &&
-      info.h > 0 &&
-      uvSize[0]! > 0 &&
-      uvSize[1]! > 0
-    ) {
-      const css = uvBackgroundCss({ w: info.w, h: info.h }, uv, uvSize, {
-        w: Math.max(0, node.box.w * opts.guiScale),
-        h: Math.max(0, node.box.h * opts.guiScale),
-      });
-      face.style.backgroundSize = css.size;
-      face.style.backgroundPosition = css.position;
-    } else if (node.element.props.$viewer_dock_natural === true) {
-      // dock.png is 61×405 — preserve aspect, pin to the right of the wide
-      // layout box (plates still size against the full control).
-      const eh = Math.max(0, node.box.h * opts.guiScale);
-      const tw = eh * (61 / 405);
-      face.style.backgroundSize = `${tw}px ${eh}px`;
-      face.style.backgroundPosition = "right center";
-      face.style.backgroundRepeat = "no-repeat";
-    } else if (
-      node.element.props.$viewer_bg_align === "left" ||
-      node.element.props.$viewer_bg_align === "right"
-    ) {
-      // Clipped overflow image: paint as if still full-width. Prefer left —
-      // right-align showed only the opaque end of textures with a left pad.
-      const scale = Number(node.element.props.$viewer_bg_scale_x) || 1;
-      const align =
-        node.element.props.$viewer_bg_align === "right" ? "right" : "left";
-      face.style.backgroundSize = `${scale * 100}% 100%`;
-      face.style.backgroundPosition = `${align} center`;
+    const eh = Math.max(0, node.box.h * opts.guiScale);
+    const tw = eh * (61 / 405);
+    face.style.backgroundSize = `${tw}px ${eh}px`;
+    face.style.backgroundPosition = "right center";
+    face.style.backgroundRepeat = "no-repeat";
+  } else {
+    // Element nineslice wins; else texture-json nineslice (control.png is 2x2
+    // with nineslice_size:1 — stretching without it = giant white blob).
+    const nine =
+      node.element.props.nineslice_size !== undefined &&
+      node.element.props.nineslice_size !== null
+        ? node.element.props.nineslice_size
+        : info?.nineslice;
+    if (nine !== undefined && nine !== null) {
+      applyNineslice(face, url, nine, opts.guiScale);
     } else {
-      face.style.backgroundSize = "100% 100%";
-      face.style.backgroundPosition = "0 0";
+      face.style.backgroundImage = `url("${cssUrl(url)}")`;
+      const uvSize = asIntPair(node.element.props.uv_size);
+      const hasUvSize = !!(uvSize && uvSize[0]! > 0 && uvSize[1]! > 0);
+      const uv = resolveImageUv(node.element.props.uv, hasUvSize);
+      if (
+        uv &&
+        uvSize &&
+        info &&
+        info.w > 0 &&
+        info.h > 0 &&
+        uvSize[0]! > 0 &&
+        uvSize[1]! > 0
+      ) {
+        const css = uvBackgroundCss({ w: info.w, h: info.h }, uv, uvSize, {
+          w: Math.max(0, node.box.w * opts.guiScale),
+          h: Math.max(0, node.box.h * opts.guiScale),
+        });
+        face.style.backgroundSize = css.size;
+        face.style.backgroundPosition = css.position;
+      } else if (
+        node.element.props.$viewer_bg_align === "left" ||
+        node.element.props.$viewer_bg_align === "right"
+      ) {
+        // Clipped overflow image: paint as if still full-width. Prefer left —
+        // right-align showed only the opaque end of textures with a left pad.
+        const scale = Number(node.element.props.$viewer_bg_scale_x) || 1;
+        const align =
+          node.element.props.$viewer_bg_align === "right" ? "right" : "left";
+        face.style.backgroundSize = `${scale * 100}% 100%`;
+        face.style.backgroundPosition = `${align} center`;
+      } else {
+        face.style.backgroundSize = "100% 100%";
+        face.style.backgroundPosition = "0 0";
+      }
     }
   }
 
