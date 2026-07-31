@@ -159,7 +159,13 @@ function clampMergeIntervals(
       startMs: Math.max(0, iv.startMs),
       endMs: Math.min(durationMs, iv.endMs),
     }))
-    .filter((iv) => iv.endMs - iv.startMs >= minMs);
+    .filter((iv) => iv.endMs - iv.startMs >= minMs)
+    // Sort before merge: suite cuts push non-keep spans first, then the
+    // `[0, firstKeepStart)` prefix. After clamping a truncated recording,
+    // that prefix is `[0, duration]` while Smoke is `[smokeStart, duration]`.
+    // Merging unsorted left startMs at smokeStart and shipped a Smoke idle
+    // head (run-pr-704-1785539248421: 4.3s Smoke kept, entireCut never fired).
+    .sort((a, b) => a.startMs - b.startMs || a.endMs - b.endMs);
 
   const merged: Interval[] = [];
   for (const iv of clamped) {

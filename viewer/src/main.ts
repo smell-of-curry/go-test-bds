@@ -347,6 +347,9 @@ function frame(): void {
 
     const state = store.getState();
     if (state.schemaOk) {
+      // Keyframe/dimension wipes dispose old meshes across frames so a dense
+      // subway clear cannot freeze the rAF loop (recordVideo dies if paint stops).
+      if (scene.hasPendingWorldClear) scene.drainPendingWorldClear();
       if (scene.pendingRemeshCount > 0) {
         scene.tickRemesh(state);
       }

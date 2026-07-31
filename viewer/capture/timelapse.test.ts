@@ -505,6 +505,35 @@ test("resolveTimelapsePlan: truncated recording with keep-suite past EOF does no
   assert.equal(resolved.plan, null);
 });
 
+test("resolveTimelapsePlan: real truncated pair — Smoke starts after 0, showcase past EOF", () => {
+  // Exact shape from run-pr-704-1785539248421: recording 7.04s, Smoke opens
+  // at 4325ms (not 0), showcase at 150410ms. Unsorted merge used to keep
+  // [0,4325) as idle Smoke and never entireCut.
+  const durationMs = 7040;
+  const intervals = computeMarkedIntervals(
+    [
+      suiteStart(4325, "Smoke"),
+      suiteEnd(19_026, "Smoke"),
+      suiteStart(19_125, "UI Probe"),
+      suiteEnd(50_975, "UI Probe"),
+      suiteStart(51_515, "Machines"),
+      suiteEnd(95_804, "Machines"),
+      suiteStart(95_855, "Tutorial"),
+      suiteEnd(150_304, "Tutorial"),
+      suiteStart(150_410, "Tutorial Showcase"),
+      suiteEnd(543_355, "Tutorial Showcase"),
+    ],
+    durationMs,
+    /showcase/i,
+  );
+  assert.deepEqual(intervals, [
+    { startMs: 0, endMs: durationMs, kind: "loading" },
+  ]);
+  const resolved = resolveTimelapsePlan(intervals, durationMs, 24);
+  assert.equal(resolved.entireCut, true);
+  assert.equal(resolved.plan, null);
+});
+
 test("resolveTimelapsePlan: truncated recording still keeps in-frame showcase", () => {
   const durationMs = 204_000;
   const intervals = computeMarkedIntervals(

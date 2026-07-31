@@ -1,4 +1,7 @@
+import { execFileSync } from "node:child_process";
 import {
+  appendFileSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -13,7 +16,12 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import type { BrowserContext, Page } from "playwright";
 
-import { applyTimelapse, resolveKeepSuite, type WalkMark } from "./timelapse";
+import {
+  applyTimelapse,
+  resolveFfmpeg,
+  resolveKeepSuite,
+  type WalkMark,
+} from "./timelapse";
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
 
@@ -172,7 +180,13 @@ const GL_ARGS = [
  * @throws if the browser or stills page cannot start.
  */
 export async function runHarness(opts: HarnessOptions): Promise<void> {
-  const log = makeLogger(opts.logLevel);
+  // Persist beside run.webm so live CI runs are not blind when viewerLog is lost.
+  const logPath = opts.videoOut
+    ? join(dirname(opts.videoOut), "harness.log")
+    : undefined;
+  if (logPath) mkdirSync(dirname(logPath), { recursive: true });
+  const log = makeLogger(opts.logLevel, logPath);
+  if (logPath) log.info(`capture: harness log → ${logPath}`);
 
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { chromium } = require("playwright") as typeof import("playwright");
@@ -196,6 +210,9 @@ export async function runHarness(opts: HarnessOptions): Promise<void> {
   const mark: MarkState = {};
   const videoDir = mkdtempSync(join(tmpdir(), "gotestbds-capture-"));
   const videoStartedAt = Date.now();
+  /** Finalised per-page recordings when the page is recreated after a crash. */
+  const videoSegments: string[] = [];
+  const segmentDir = join(videoDir, "segments");
 
   let stillsCtx: BrowserContext = await browser.newContext({
     viewport: { width: opts.width, height: opts.height },
@@ -204,7 +221,10 @@ export async function runHarness(opts: HarnessOptions): Promise<void> {
       size: { width: opts.width, height: opts.height },
     },
   });
-  let stillsPage: Page = await stillsCtx.newPage();
+  // Mutable holder so crash recovery can swap the live page without rewiring
+  // every closure that captures `stillsPage` by value.
+  const pageRef: { page: Page } = { page: await stillsCtx.newPage() };
+  let stillsPage = pageRef.page;
 
   // Video t=0 anchor for walk marks. Playwright starts the screencast when the
   // context's first page opens (about:blank paints immediately) and paces the
@@ -222,17 +242,95 @@ export async function runHarness(opts: HarnessOptions): Promise<void> {
   // A browser that dies mid-run explains every later failure at once — captures
   // that time out, a video that cannot be saved — and says nothing by itself.
   let browserDown = "";
+  let pageRecovering: Promise<void> | null = null;
+  let videoUploaded = false;
   browser.on("disconnected", () => {
     browserDown = "browser disconnected";
     log.error("capture: browser disconnected");
   });
-  stillsPage.on("crash", () => {
-    browserDown = "page crashed";
-    log.error("capture: page crashed (out of memory under software GL?)");
-  });
-  stillsPage.on("pageerror", (err) => {
-    log.warn(`capture: page error: ${err.message}`);
-  });
+
+  const wirePageListeners = (page: Page): void => {
+    page.on("crash", () => {
+      browserDown = "page crashed";
+      log.error(
+        "capture: page crashed (SwiftShader OOM on dense keyframe?) — scheduling recovery",
+      );
+      if (!pageRecovering && !videoUploaded) {
+        pageRecovering = recoverPage("crash").finally(() => {
+          pageRecovering = null;
+        });
+      }
+    });
+    page.on("pageerror", (err) => {
+      log.warn(`capture: pageerror: ${err.message}`);
+    });
+    page.on("console", (msg) => {
+      const t = msg.type();
+      if (t === "error" || t === "warning") {
+        log.warn(`capture: console.${t}: ${msg.text()}`);
+      }
+    });
+  };
+  wirePageListeners(pageRef.page);
+
+  /**
+   * Save the dead page's video segment and open a fresh page in the same
+   * context. Playwright recordVideo is per-page — a crashed page's recording
+   * is dead; later footage needs a new page, concatenated at encode time.
+   *
+   * @param reason - Why recovery was triggered (for the harness log).
+   */
+  async function recoverPage(reason: string): Promise<void> {
+    log.error(`capture: page recovery start reason=${reason}`);
+    try {
+      const dead = pageRef.page;
+      const video = dead.video();
+      await dead.close().catch(() => undefined);
+      if (video) {
+        mkdirSync(segmentDir, { recursive: true });
+        const segPath = join(
+          segmentDir,
+          `seg_${String(videoSegments.length).padStart(3, "0")}.webm`,
+        );
+        try {
+          await video.saveAs(segPath);
+          await video.delete().catch(() => undefined);
+          if (existsSync(segPath) && statSync(segPath).size > 0) {
+            videoSegments.push(segPath);
+            log.info(
+              `capture: saved crashed-page segment ${segPath} bytes=${statSync(segPath).size}`,
+            );
+          }
+        } catch (err) {
+          log.warn(`capture: crashed-page segment save failed: ${String(err)}`);
+        }
+      }
+      const fresh = await stillsCtx.newPage();
+      pageRef.page = fresh;
+      stillsPage = fresh;
+      wirePageListeners(fresh);
+      await fresh.goto(appUrl, { waitUntil: "domcontentloaded" });
+      await fresh.waitForFunction(
+        () => {
+          const v = (
+            window as unknown as {
+              __viewer?: { schemaOk: boolean; tick: number };
+            }
+          ).__viewer;
+          return !!v && v.schemaOk && v.tick > 0;
+        },
+        undefined,
+        { timeout: 30_000 },
+      );
+      browserDown = "";
+      log.info(
+        "capture: page recovery complete; recording continues on new page",
+      );
+    } catch (err) {
+      browserDown = `page recovery failed after ${reason}`;
+      log.error(`capture: page recovery failed: ${String(err)}`);
+    }
+  }
 
   // Subscribe before the page so marks/captures cannot race past us while the
   // stills page is still loading. Queue until stillsReady. Each item carries
@@ -241,20 +339,20 @@ export async function runHarness(opts: HarnessOptions): Promise<void> {
   let stillsReady = false;
   const pending: Array<{ type: string; data: string; at: number }> = [];
   let chain: Promise<void> = Promise.resolve();
-  let videoUploaded = false;
 
   const uploadRunVideo = async (label: string): Promise<void> => {
     if (videoUploaded) return;
     videoUploaded = true;
+    if (pageRecovering) await pageRecovering.catch(() => undefined);
     const ctx = stillsCtx;
-    const page = stillsPage;
+    const page = pageRef.page;
     try {
       const video = page.video();
       // Close the page, keep the context: saveAs waits for the recording to be
       // finalised and needs a live connection to do it. Closing the context
       // first tears that down and saveAs fails with "browser has been closed".
       await page.close().catch(() => undefined);
-      if (!video) {
+      if (!video && videoSegments.length === 0) {
         await ctx.close().catch(() => undefined);
         log.warn("capture: no video handle after run");
         return;
@@ -272,12 +370,48 @@ export async function runHarness(opts: HarnessOptions): Promise<void> {
       // (exactly 512 KiB, in the run that found this).
       if (opts.videoOut) {
         mkdirSync(dirname(opts.videoOut), { recursive: true });
-        await video.saveAs(opts.videoOut);
-        const bytes = statSync(opts.videoOut).size;
+        if (video) {
+          const finalSeg =
+            videoSegments.length > 0
+              ? join(
+                  segmentDir,
+                  `seg_${String(videoSegments.length).padStart(3, "0")}.webm`,
+                )
+              : opts.videoOut;
+          if (videoSegments.length > 0)
+            mkdirSync(segmentDir, { recursive: true });
+          await video.saveAs(finalSeg);
+          await video.delete().catch(() => undefined);
+          if (videoSegments.length > 0) {
+            if (existsSync(finalSeg) && statSync(finalSeg).size > 0)
+              videoSegments.push(finalSeg);
+            const ok = concatVideoSegments(videoSegments, opts.videoOut, log);
+            if (!ok) {
+              // Fall back to the longest segment rather than shipping nothing.
+              const best = videoSegments.reduce((a, b) =>
+                statSync(a).size >= statSync(b).size ? a : b,
+              );
+              writeFileSync(opts.videoOut, readFileSync(best));
+              log.warn(
+                `capture: segment concat failed; shipped largest segment bytes=${statSync(opts.videoOut).size}`,
+              );
+            }
+          }
+        } else if (videoSegments.length > 0) {
+          const ok = concatVideoSegments(videoSegments, opts.videoOut, log);
+          if (!ok) {
+            writeFileSync(opts.videoOut, readFileSync(videoSegments[0]!));
+          }
+        }
+        const bytes = existsSync(opts.videoOut)
+          ? statSync(opts.videoOut).size
+          : 0;
         log.info(
-          `capture: wrote video ${opts.videoOut} bytes=${bytes} ms=${durationMs}`,
+          `capture: wrote video ${opts.videoOut} bytes=${bytes} ms=${durationMs}` +
+            (videoSegments.length > 1
+              ? ` segments=${videoSegments.length}`
+              : ""),
         );
-        await video.delete().catch(() => undefined);
         await ctx.close().catch(() => undefined);
         // Sidecar for post-mortems: suite cuts are mark-driven, and a missing
         // suite:start is invisible without this (probe-r2 kept Smoke/UI Probe).
@@ -318,6 +452,10 @@ export async function runHarness(opts: HarnessOptions): Promise<void> {
       // the runner always passes --video-out, and the POST target (the bot's
       // own HTTP server) is already racing its exit at this point.
       await ctx.close().catch(() => undefined);
+      if (!video) {
+        log.warn("capture: no video handle for POST upload");
+        return;
+      }
 
       const path = await video.path();
       const body = readFileSync(path);
@@ -370,12 +508,14 @@ export async function runHarness(opts: HarnessOptions): Promise<void> {
       return;
     }
 
+    if (pageRecovering) await pageRecovering.catch(() => undefined);
+
     if (type === "mark" || frame.type === "mark") {
       await safe(log, () =>
         handleMark(frame as MarkFrame, atMs, {
           opts,
           log,
-          stillsPage,
+          stillsPage: pageRef.page,
           mark,
           videoAnchorMs,
           walkMarks,
@@ -392,7 +532,7 @@ export async function runHarness(opts: HarnessOptions): Promise<void> {
         handleCapture(frame as CaptureFrame, {
           opts,
           log,
-          stillsPage,
+          stillsPage: pageRef.page,
           mark,
         }),
       );
@@ -481,7 +621,8 @@ export async function runHarness(opts: HarnessOptions): Promise<void> {
     let lastPaintGen = -1;
     let lastPaintChangeAt = Date.now();
     const paintWatchdog = setInterval(() => {
-      void stillsPage
+      const page = pageRef.page;
+      void page
         .evaluate(() => {
           const v = (
             window as unknown as {
@@ -500,15 +641,18 @@ export async function runHarness(opts: HarnessOptions): Promise<void> {
           if (Date.now() - lastPaintChangeAt < PAINT_STALL_MS) return;
           lastPaintChangeAt = Date.now();
           log.warn(
-            `capture: paint stall ${PAINT_STALL_MS}ms (paintGeneration=${gen}); kicking stream+paint`,
+            `capture: paint watchdog FIRED stall=${PAINT_STALL_MS}ms paintGeneration=${gen}; ` +
+              `action=kick stream.resync+paint nudge`,
           );
-          return stillsPage.evaluate(() => {
+          return page.evaluate(() => {
             (
               window as unknown as { __viewer?: { kick?: () => void } }
             ).__viewer?.kick?.();
           });
         })
-        .catch(() => undefined);
+        .catch((err) => {
+          log.warn(`capture: paint watchdog evaluate failed: ${String(err)}`);
+        });
     }, PAINT_WATCHDOG_POLL_MS);
     if (typeof paintWatchdog.unref === "function") paintWatchdog.unref();
 
@@ -961,13 +1105,25 @@ type Logger = {
   error: (m: string) => void;
 };
 
-function makeLogger(level: LogLevel): Logger {
+/**
+ * @param level - Minimum level written to stdout/stderr.
+ * @param filePath - Optional harness.log path (always appends every level ≥ debug).
+ * @returns logger that mirrors to the artefact retain dir when `filePath` is set.
+ */
+function makeLogger(level: LogLevel, filePath?: string): Logger {
   const min = LEVEL_RANK[level] ?? LEVEL_RANK.info;
   const emit = (lvl: LogLevel, m: string) => {
+    const stamped = `${new Date().toISOString()} [${lvl}] ${m}\n`;
+    if (filePath) {
+      try {
+        appendFileSync(filePath, stamped);
+      } catch {
+        /* ignore disk errors — stdout still carries the line */
+      }
+    }
     if (LEVEL_RANK[lvl] < min) return;
-    const line = `${m}\n`;
-    if (lvl === "error" || lvl === "warn") process.stderr.write(line);
-    else process.stdout.write(line);
+    if (lvl === "error" || lvl === "warn") process.stderr.write(`${m}\n`);
+    else process.stdout.write(`${m}\n`);
   };
   return {
     debug: (m) => emit("debug", m),
@@ -975,6 +1131,77 @@ function makeLogger(level: LogLevel): Logger {
     warn: (m) => emit("warn", m),
     error: (m) => emit("error", m),
   };
+}
+
+/**
+ * Lossless-concat per-page recordVideo segments after a crash recovery.
+ *
+ * @param segments - Absolute paths to webm segments in order.
+ * @param outPath - Final run.webm path.
+ * @param log - Harness logger.
+ * @returns true when concat succeeded.
+ */
+function concatVideoSegments(
+  segments: string[],
+  outPath: string,
+  log: Logger,
+): boolean {
+  if (segments.length === 0) return false;
+  if (segments.length === 1) {
+    writeFileSync(outPath, readFileSync(segments[0]!));
+    return true;
+  }
+  const ff = resolveFfmpeg(log);
+  if (!ff) {
+    log.warn("capture: no ffmpeg for segment concat");
+    return false;
+  }
+  const listPath = `${outPath}.seglist.txt`;
+  const tmpPath = `${outPath}.segconcat.webm`;
+  try {
+    writeFileSync(
+      listPath,
+      segments.map((p) => `file '${p.replaceAll("'", "'\\''")}'`).join("\n"),
+    );
+    execFileSync(
+      ff,
+      [
+        "-nostdin",
+        "-y",
+        "-loglevel",
+        "error",
+        "-f",
+        "concat",
+        "-safe",
+        "0",
+        "-i",
+        listPath,
+        "-c",
+        "copy",
+        tmpPath,
+      ],
+      { stdio: ["ignore", "ignore", "pipe"] },
+    );
+    writeFileSync(outPath, readFileSync(tmpPath));
+    log.info(
+      `capture: concatenated ${segments.length} video segments → ${outPath}`,
+    );
+    return true;
+  } catch (err) {
+    log.warn(`capture: segment concat failed: ${String(err).split("\n")[0]}`);
+    return false;
+  } finally {
+    try {
+      unlinkSync(listPath);
+    } catch {
+      /* ignore */
+    }
+    try {
+      unlinkSync(tmpPath);
+    } catch {
+      /* ignore */
+    }
+  }
 }
 
 async function safe(log: Logger, fn: () => Promise<void>): Promise<void> {

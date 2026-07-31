@@ -44,6 +44,13 @@ export const REMESH_BUDGET_MS = 4;
 /** Soft cap on sections remeshed in a single frame, even if budget remains. */
 export const REMESH_MAX_SECTIONS_PER_FRAME = 8;
 
+/**
+ * Max section/entity disposals per sync on a dimension wipe. A subway/city
+ * keyframe can hold 700+ sections; disposing them all on the SSE turn wedges
+ * SwiftShader and kills Playwright recordVideo while stills keep working.
+ */
+export const CLEAR_MAX_PER_SYNC = 32;
+
 /** How long a block-change outline stays visible (ms). */
 export const HIGHLIGHT_FADE_MS = 1000;
 
@@ -416,6 +423,8 @@ export class ViewerScene {
   private entityRegistry: EntityModelRegistry | null = null;
   private readonly pendingSections: string[] = [];
   private pendingSet = new Set<string>();
+  /** True while a keyframe/dimension wipe still has old meshes to dispose. */
+  private worldClearPending = false;
   private storeRef: WorldState | null = null;
   /** When false, world geometry stays on scene but is not drawn (loading). */
   private worldVisible = true;
@@ -519,8 +528,12 @@ export class ViewerScene {
     this.storeRef = state;
 
     if (state.fullReset) {
-      this.clearWorld();
+      // Budget disposal across frames — see CLEAR_MAX_PER_SYNC.
+      this.worldClearPending = true;
+      this.pendingSections.length = 0;
+      this.pendingSet.clear();
     }
+    if (this.worldClearPending) this.drainWorldClear();
 
     for (const key of state.dirtyColumns) {
       const [xs, zs] = key.split(",");
@@ -570,7 +583,22 @@ export class ViewerScene {
     this.actorGroup.visible = this.worldVisible && this.actorWantedVisible;
 
     this.recomputeCounts();
-    return this.pendingSections.length === 0;
+    return this.pendingSections.length === 0 && !this.worldClearPending;
+  }
+
+  /**
+   * Continue a budgeted world wipe from the paint loop (SSE subscribe only
+   * fires once per keyframe; disposal of 700+ subway sections needs many frames).
+   */
+  drainPendingWorldClear(): void {
+    if (!this.worldClearPending) return;
+    this.drainWorldClear();
+    this.recomputeCounts();
+  }
+
+  /** True while old meshes from a keyframe/dimension wipe are still disposing. */
+  get hasPendingWorldClear(): boolean {
+    return this.worldClearPending;
   }
 
   /**
@@ -582,6 +610,7 @@ export class ViewerScene {
    */
   flush(state: WorldState, budgetMs: number = Number.POSITIVE_INFINITY): void {
     this.storeRef = state;
+    if (this.worldClearPending) this.drainWorldClear();
     const start = performance.now();
     while (this.pendingSections.length > 0) {
       if (Number.isFinite(budgetMs) && performance.now() - start >= budgetMs) {
@@ -1242,15 +1271,34 @@ export class ViewerScene {
       });
   }
 
-  private clearWorld(): void {
-    for (const key of [...this.sections.keys()]) this.removeSection(key);
-    for (const key of [...this.columnBounds.keys()])
+  /**
+   * Dispose meshes that no longer exist in {@link storeRef}, capped per call.
+   * Completes across paint frames so a dense keyframe cannot kill SwiftShader.
+   */
+  private drainWorldClear(): void {
+    let n = 0;
+    const cols = this.storeRef?.columns;
+    for (const key of [...this.sections.keys()]) {
+      const [xs, zs, ys] = key.split(",");
+      const col = cols?.get(`${xs},${zs}`);
+      if (col?.sections.has(Number(ys))) continue;
+      this.removeSection(key);
+      if (++n >= CLEAR_MAX_PER_SYNC) return;
+    }
+    for (const key of [...this.columnBounds.keys()]) {
+      if (cols?.has(key)) continue;
       this.removeColumnBounds(key);
-    for (const rid of [...this.entities.keys()]) this.removeEntity(rid);
+      if (++n >= CLEAR_MAX_PER_SYNC) return;
+    }
+    const ents = this.storeRef?.entities;
+    for (const rid of [...this.entities.keys()]) {
+      if (ents?.has(rid)) continue;
+      this.removeEntity(rid);
+      if (++n >= CLEAR_MAX_PER_SYNC) return;
+    }
     for (const h of this.highlights) this.disposeHighlight(h);
     this.highlights.length = 0;
-    this.pendingSections.length = 0;
-    this.pendingSet.clear();
+    this.worldClearPending = false;
   }
 
   private disposeHighlight(h: HighlightNode): void {
