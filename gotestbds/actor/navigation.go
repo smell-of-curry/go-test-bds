@@ -44,9 +44,16 @@ const (
 	navProgressEps = 0.5
 
 	// emptyPathWaitTicks: when FindPath returns empty because the start
-	// column is still requested/partial, keep retrying this long before
-	// failing (10s at 20 Hz — same ballpark as the suite's waitForWorldAt).
-	emptyPathWaitTicks = 200
+	// column or its Moore neighbourhood is still requested/partial, keep
+	// retrying this long before failing (15s at 20 Hz).
+	emptyPathWaitTicks = 300
+
+	// pathNeighborhoodChunks: columns in a (2r+1)² around the start must be
+	// ColumnComplete before an empty FindPath is treated as a real failure.
+	// Incomplete neighbours read as bedrock in pathSource, so a lone complete
+	// start column is a one-cell pocket — every navigate fails with 0 progress
+	// (live a5ab5fa showcase).
+	pathNeighborhoodChunks = 1
 )
 
 // pathSource is the world as the pathfinder is allowed to see it.
@@ -113,6 +120,46 @@ func blockModelCallable(bl w.Block) (ok bool) {
 func columnComplete(wr *world.World, pos cube.Pos) bool {
 	c, ok := wr.Chunk(w.ChunkPos{int32(pos[0] >> 4), int32(pos[2] >> 4)})
 	return ok && !pos.OutOfBounds(c.Range()) && c.State == world.ColumnComplete
+}
+
+// neighborhoodComplete reports whether every column within chunkRadius of the
+// column containing pos is ColumnComplete (pathSource-walkable).
+//
+// @param wr Bot world.
+// @param pos Centre block position.
+// @param chunkRadius Chebyshev radius in columns.
+// @returns true when the whole neighbourhood is complete.
+func neighborhoodComplete(wr *world.World, pos cube.Pos, chunkRadius int) bool {
+	cx, cz := int32(pos[0]>>4), int32(pos[2]>>4)
+	for dx := -chunkRadius; dx <= chunkRadius; dx++ {
+		for dz := -chunkRadius; dz <= chunkRadius; dz++ {
+			p := cube.Pos{int(cx+int32(dx))<<4 + 8, pos.Y(), int(cz+int32(dz))<<4 + 8}
+			if !columnComplete(wr, p) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// countIncompleteNear counts columns in the pathNeighborhoodChunks ring that
+// are missing/partial (diagnostic for empty-path bedrock pockets).
+//
+// @param wr Bot world.
+// @param pos Centre block position.
+// @returns number of incomplete columns in the neighbourhood.
+func countIncompleteNear(wr *world.World, pos cube.Pos) int {
+	n := 0
+	cx, cz := int32(pos[0]>>4), int32(pos[2]>>4)
+	for dx := -pathNeighborhoodChunks; dx <= pathNeighborhoodChunks; dx++ {
+		for dz := -pathNeighborhoodChunks; dz <= pathNeighborhoodChunks; dz++ {
+			p := cube.Pos{int(cx+int32(dx))<<4 + 8, pos.Y(), int(cz+int32(dz))<<4 + 8}
+			if !columnComplete(wr, p) {
+				n++
+			}
+		}
+	}
+	return n
 }
 
 // columnStateName returns a short label for diagnostics.
@@ -318,6 +365,7 @@ func (a *Actor) recordNavSnapshot(target, goal, start cube.Pos, p *pathfind.Path
 	a.navLastStartState = columnStateName(a.world, start)
 	a.navLastGoalState = columnStateName(a.world, target)
 	a.navLastUnknownNear = countUnknownNear(a.world, start)
+	a.navLastIncompleteNear = countIncompleteNear(a.world, start)
 }
 
 // formatNavFailure builds the diagnostic suffix for the instruction error.
@@ -330,13 +378,13 @@ func (a *Actor) formatNavFailure(reason string) string {
 		clamped = fmt.Sprintf(" clamped=%v", a.navLastGoal)
 	}
 	return fmt.Sprintf(
-		"%s start=%v(%s) goal=%v(%s)%s pathNodes=%d reached=%v unknownNear=%d budgetVisited=%d fruitless=%d",
+		"%s start=%v(%s) goal=%v(%s)%s pathNodes=%d reached=%v unknownNear=%d incompleteNear=%d budgetVisited=%d fruitless=%d",
 		reason,
 		a.navLastStart, a.navLastStartState,
 		a.navLastTarget, a.navLastGoalState,
 		clamped,
 		a.navLastPathCount, a.navLastReached,
-		a.navLastUnknownNear, a.navLastMaxVisited,
+		a.navLastUnknownNear, a.navLastIncompleteNear, a.navLastMaxVisited,
 		a.fruitlessRepaths,
 	)
 }
@@ -413,13 +461,16 @@ func (a *Actor) tickNavigating() {
 
 	if a.path.Count() == 0 {
 		start := cube.PosFromVec3(a.Position())
-		// Incomplete start column: empty path is expected (pathSource=bedrock).
-		// Retry until the column completes or the wait budget expires — do not
-		// fire "unable to reach destination" on the first tick.
-		if !columnComplete(a.world, start) {
+		// Incomplete start OR neighbours: pathSource turns those columns into
+		// bedrock, so FindPath is stuck in a pocket. Wait for the ring to land.
+		if !columnComplete(a.world, start) || !neighborhoodComplete(a.world, start, pathNeighborhoodChunks) {
 			a.emptyPathWaits++
+			reason := "empty_path_neighborhood_incomplete"
+			if !columnComplete(a.world, start) {
+				reason = "empty_path_start_incomplete"
+			}
 			if a.emptyPathWaits > emptyPathWaitTicks {
-				a.failNavigation("empty_path_start_incomplete")
+				a.failNavigation(reason)
 				return
 			}
 			if a.repathCooldown == 0 {

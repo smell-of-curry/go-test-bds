@@ -42,16 +42,17 @@ type movementData struct {
 	emptyPathWaits int
 
 	// Last Navigate / fail-fast diagnostic for the instruction error line.
-	navFailDetail      string
-	navLastTarget      cube.Pos
-	navLastGoal        cube.Pos
-	navLastStart       cube.Pos
-	navLastPathCount   int
-	navLastReached     bool
-	navLastMaxVisited  int
-	navLastStartState  string
-	navLastGoalState   string
-	navLastUnknownNear int
+	navFailDetail         string
+	navLastTarget         cube.Pos
+	navLastGoal           cube.Pos
+	navLastStart          cube.Pos
+	navLastPathCount      int
+	navLastReached        bool
+	navLastMaxVisited     int
+	navLastStartState     string
+	navLastGoalState      string
+	navLastUnknownNear    int
+	navLastIncompleteNear int
 
 	mc *physics.Computer
 }

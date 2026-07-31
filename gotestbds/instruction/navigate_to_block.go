@@ -41,8 +41,11 @@ func (n *NavigateToBlock) Run(ctx context.Context, b *bot.Bot) error {
 		return ctx.Err()
 	case ok := <-navigateCh:
 		if !ok {
+			// Must await Execute: fire-and-forget raced the tick loop and
+			// always read detail="" → bare "unable to reach destination"
+			// with no diagnostic (live a5ab5fa showcase).
 			var detail string
-			b.Execute(func(a *actor.Actor) {
+			<-b.Execute(func(a *actor.Actor) {
 				detail = a.NavFailureDetail()
 				a.StopNavigating()
 			})

@@ -99,6 +99,42 @@ func containsAll(s string, parts ...string) bool {
 	return true
 }
 
+// TestNavigateIncompleteNeighborWaits: start column complete but the 3×3
+// neighbourhood still requested must not empty_path-fail on tick 1 — those
+// neighbours read as bedrock and trap FindPath in a one-cell pocket (live
+// a5ab5fa: every walk leg 0 progress while only the bot's column had landed).
+func TestNavigateIncompleteNeighborWaits(t *testing.T) {
+	const floorY = 64
+	a := Config{Conn: navStubConn{pos: mgl32.Vec3{8.5, float32(floorY + 1), 8.5}}}.New()
+	dfworld.DefaultBlockRegistry.Finalize()
+
+	// 3×3 columns: centre complete with floor; others requested/empty.
+	for cx := int32(-1); cx <= 1; cx++ {
+		for cz := int32(-1); cz <= 1; cz++ {
+			col := world.NewColumn(chunk.New(dfworld.DefaultBlockRegistry, dfworld.Overworld.Range()), nil)
+			if cx != 0 || cz != 0 {
+				col.ExpectSubChunks(4)
+			}
+			a.World().AddChunk(dfworld.ChunkPos{cx, cz}, col)
+		}
+	}
+	for x := 0; x < 16; x++ {
+		for z := 0; z < 16; z++ {
+			a.World().SetBlock(cube.Pos{x, floorY, z}, block.Stone{})
+		}
+	}
+
+	h := &navStopCounter{}
+	a.Handle(h)
+	a.Navigate(cube.Pos{24, floorY + 1, 8}) // into neighbour column
+	for i := 0; i < 5; i++ {
+		a.Tick()
+		if h.stopped != 0 {
+			t.Fatalf("stopped on tick %d detail=%q (neighbourhood still incomplete)", i, a.NavFailureDetail())
+		}
+	}
+}
+
 // TestPathSourceSanitizesNilShulkerProgress mirrors the live 102016f panic:
 // a palette-decoded ShulkerBox has progress==nil, Model() nil-derefs, and
 // FindPath used to SIGSEGV the bot. pathSource must swap it for UnknownBlock
@@ -223,8 +259,8 @@ func (c navStubConn) GameData() minecraft.GameData {
 // ensureChunks loads empty columns covering [minX,maxX]×[minZ,maxZ].
 func ensureChunks(w *world.World, minX, maxX, minZ, maxZ int) {
 	dfworld.DefaultBlockRegistry.Finalize()
-	for cx := int32(minX >> 4); cx <= int32(maxX >> 4); cx++ {
-		for cz := int32(minZ >> 4); cz <= int32(maxZ >> 4); cz++ {
+	for cx := int32(minX >> 4); cx <= int32(maxX>>4); cx++ {
+		for cz := int32(minZ >> 4); cz <= int32(maxZ>>4); cz++ {
 			if _, ok := w.Chunk(dfworld.ChunkPos{cx, cz}); ok {
 				continue
 			}
