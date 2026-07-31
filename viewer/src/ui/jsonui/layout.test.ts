@@ -703,6 +703,111 @@ describe("layoutTree self-axis %x/%y", () => {
     const tree = layoutTree(root, VP, { measureText: measureStub });
     assert.deepEqual(boxOf(tree.children[0]!), { x: 0, y: 0, w: 32, h: 32 });
   });
+
+  it("sidebar icon hosts content-size to the left of the row", () => {
+    const row: ResolvedElement = {
+      type: "panel",
+      name: "pokemon_sidebar_pokemon",
+      namespace: "phud_sidebar",
+      props: {
+        size: [160, 32],
+        anchor_from: "top_left",
+        anchor_to: "top_left",
+      },
+      bindings: [],
+      controls: [
+        child("pokemon_icon_wrapper", {
+          type: "panel",
+          name: "pokemon_icon_wrapper",
+          namespace: "phud_sidebar",
+          props: { size: ["default", "default"] },
+          bindings: [],
+          controls: [
+            child("ball_icon", {
+              type: "image",
+              name: "ball_icon",
+              namespace: "phud_sidebar",
+              props: {
+                size: ["100%y", "100%"],
+                anchor_from: "top_left",
+                anchor_to: "top_left",
+              },
+              bindings: [],
+              controls: [],
+            }),
+          ],
+        }),
+      ],
+    };
+    const tree = layoutTree(
+      row,
+      { width: 640, height: 360 },
+      { measureText: measureStub },
+    );
+    const host = tree.children[0]!;
+    assert.ok(
+      host.box.w <= 33 && host.box.h <= 33,
+      `host=${JSON.stringify(host.box)}`,
+    );
+    assert.ok(
+      host.box.x <= tree.box.x + 1,
+      `host.x=${host.box.x} row.x=${tree.box.x}`,
+    );
+  });
+
+  it("dock clips paint box but lays children against full width", () => {
+    const main: ResolvedElement = {
+      type: "panel",
+      name: "main",
+      namespace: "phud_sidebar",
+      props: {
+        size: [160, 192],
+        anchor_from: "top_right",
+        anchor_to: "top_right",
+      },
+      bindings: [],
+      controls: [
+        child("dock", {
+          type: "image",
+          name: "dock",
+          namespace: "phud_sidebar",
+          props: {
+            size: ["100%", "100%"],
+            offset: ["47%", "0%"],
+            anchor_from: "right_middle",
+            anchor_to: "right_middle",
+          },
+          bindings: [],
+          controls: [
+            child("marker", {
+              type: "panel",
+              name: "marker",
+              namespace: "phud_sidebar",
+              props: {
+                size: [20, 20],
+                anchor_from: "left_middle",
+                anchor_to: "left_middle",
+              },
+              bindings: [],
+              controls: [],
+            }),
+          ],
+        }),
+      ],
+    };
+    const tree = layoutTree(
+      main,
+      { width: 200, height: 200 },
+      { measureText: measureStub },
+    );
+    const dock = tree.children[0]!;
+    const marker = dock.children[0]!;
+    assert.ok(dock.box.w < 160, `clipped dock w=${dock.box.w}`);
+    assert.ok(
+      marker.box.x <= dock.box.x + 1,
+      `marker.x=${marker.box.x} dock.x=${dock.box.x}`,
+    );
+  });
 });
 
 describe("layoutTree battle grid_button factory", () => {

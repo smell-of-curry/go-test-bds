@@ -568,13 +568,30 @@ function applyClip(
   props: LayoutNode["element"]["props"],
 ): void {
   const ratioRaw = props.clip_ratio;
+  const hasDirection =
+    typeof props.clip_direction === "string" && props.clip_direction.length > 0;
+  // `Number("")` is 0 — treat empty/invalid #clip_ratio as fully hidden when
+  // the pack authored a clip_direction (fainted / empty-slot bars).
+  if (
+    ratioRaw === "" ||
+    ratioRaw === null ||
+    ratioRaw === undefined ||
+    (typeof ratioRaw === "string" && ratioRaw.trim() === "")
+  ) {
+    if (hasDirection) el.style.clipPath = "inset(100%)";
+    return;
+  }
   const ratio =
     typeof ratioRaw === "number"
       ? ratioRaw
       : typeof ratioRaw === "string"
         ? Number(ratioRaw)
         : NaN;
-  if (!Number.isFinite(ratio) || ratio <= 0) return;
+  if (!Number.isFinite(ratio)) {
+    if (hasDirection) el.style.clipPath = "inset(100%)";
+    return;
+  }
+  if (ratio <= 0) return;
   const hidden = Math.min(1, Math.max(0, ratio));
   const visible = 1 - hidden;
   if (visible <= 0) {
@@ -583,10 +600,9 @@ function applyClip(
   }
   if (visible >= 1) return;
 
-  const dir =
-    typeof props.clip_direction === "string"
-      ? props.clip_direction.toLowerCase()
-      : "left";
+  const dir = hasDirection
+    ? String(props.clip_direction).toLowerCase()
+    : "left";
   // inset(top right bottom left) — hide the trailing side along clip_direction.
   switch (dir) {
     case "right":

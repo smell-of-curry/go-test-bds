@@ -3,7 +3,13 @@
  * Phone flipbook / PHUD chrome textures are served from that tree.
  */
 import { execSync } from "node:child_process";
-import { existsSync, mkdirSync, rmSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -16,13 +22,33 @@ const extractRoot = join(destRoot, "_extract");
 const sentinel = join(extractRoot, "textures/ui/phud/oak_loop.png");
 
 /**
+ * Zip ships `phud.playerPing.label=Current Ping:` without the trailing space
+ * RES authors for the label + §-colored value pair. Ensure the space exists.
+ *
+ * @param root - `_extract` directory.
+ */
+function patchPlayerPingLabelSpace(root: string): void {
+  const langPath = join(root, "texts", "en_US.lang");
+  if (!existsSync(langPath)) return;
+  const text = readFileSync(langPath, "utf8");
+  const next = text.replace(
+    /^phud\.playerPing\.label=Current Ping:\s*$/m,
+    "phud.playerPing.label=Current Ping: ",
+  );
+  if (next !== text) writeFileSync(langPath, next);
+}
+
+/**
  * Extract the live pack zip when the gitignored `_extract` tree is missing.
  *
  * @returns absolute path to `_extract`.
  * @throws if the zip is missing or extract fails to produce the sentinel.
  */
 export function ensureLiveExtract(): string {
-  if (existsSync(sentinel)) return extractRoot;
+  if (existsSync(sentinel)) {
+    patchPlayerPingLabelSpace(extractRoot);
+    return extractRoot;
+  }
   if (!existsSync(zipPath)) {
     throw new Error(
       `live pack extract missing and zip not found:\n` +
@@ -44,6 +70,7 @@ export function ensureLiveExtract(): string {
       `live pack extract finished but sentinel missing: ${sentinel}`,
     );
   }
+  patchPlayerPingLabelSpace(extractRoot);
   return extractRoot;
 }
 

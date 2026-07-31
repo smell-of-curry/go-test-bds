@@ -294,11 +294,20 @@ function layoutAnchored(
   visible: boolean,
   layer: number,
 ): LayoutNode {
-  const sizeSpec = readSizePair(el.props.size);
+  // Sidebar ball/ring hosts omit size — wiki "default"=100% would fill the
+  // row and center the square mid-plate. Pack plate `offset: [-11%,0]` matches
+  // data.png's ~12% left pad so the square can sit on the plate's left edge;
+  // treat omitted size as content (`100%c`) and default anchors as left_middle.
+  const sidebarIconHost = isSidebarIconHost(el);
+  const sizeSpec = sidebarIconHost
+    ? (["100%c", "100%c"] as [unknown, unknown])
+    : readSizePair(el.props.size);
   const minSpec = readSizePair(el.props.min_size);
   const maxSpec = readSizePair(el.props.max_size);
   const wParsed = parseSize(sizeSpec[0]);
   const hParsed = parseSize(sizeSpec[1]);
+  const anchorFromDefault: Anchor = sidebarIconHost ? "left_middle" : "center";
+  const anchorToDefault: Anchor = sidebarIconHost ? "left_middle" : "center";
 
   const needsChildPass = wParsed.needsChildren || hParsed.needsChildren;
   let childrenW = 0;
@@ -424,13 +433,13 @@ function layoutAnchored(
   const pos = positionWithAnchors(
     parentBox,
     boxSize,
-    readAnchor(el.props.anchor_from, "center"),
-    readAnchor(el.props.anchor_to, "center"),
+    readAnchor(el.props.anchor_from, anchorFromDefault),
+    readAnchor(el.props.anchor_to, anchorToDefault),
     offset,
   );
 
   const selfBox: LayoutBox = { x: pos.x, y: pos.y, w: boxSize.w, h: boxSize.h };
-  const anchorFrom = readAnchor(el.props.anchor_from, "center");
+  const anchorFrom = readAnchor(el.props.anchor_from, anchorFromDefault);
   clampHorizontalInParent(selfBox, parentBox, anchorFrom);
   clampBattleActorPlateToViewport(selfBox, el, viewport);
 
@@ -459,21 +468,24 @@ function layoutAnchored(
   }
 
   // Sidebar dock: right-anchored + `offset: ["47%",0]` hangs past main so the
-  // transparent left pad of dock.png sits off-screen. Clip the layout box to
-  // the on-screen slice (plates still size against full control width via
-  // prior layout), then paint dock.png at native 61×405 aspect — not stretch
-  // the opaque strip to fill the clipped box (that made the fat black column).
+  // transparent left pad of dock.png sits off-screen. Clip the *paint* box to
+  // the on-screen slice but lay out children against the full authored width
+  // — re-laying into the clipped width recenters ball/ring mid-plate and
+  // shrinks plates so the fixed 62gui XP bar overhangs the groove.
+  let childLayoutBox = selfBox;
   if (
     el.namespace === "phud_sidebar" &&
     el.name === "dock" &&
     ANCHORS[anchorFrom].x >= 0.999
   ) {
+    const fullDock = { ...selfBox };
     const parentRight = parentBox.x + parentBox.w;
     const overflow = selfBox.x + selfBox.w - parentRight;
     if (overflow > 1) {
       selfBox.w = Math.max(0, parentRight - selfBox.x);
     }
     if (selfBox.w > 0) el.props.$viewer_dock_natural = true;
+    childLayoutBox = fullDock;
   } else if (ANCHORS[anchorFrom].x >= 0.999) {
     const parentRight = parentBox.x + parentBox.w;
     const overflow = selfBox.x + selfBox.w - parentRight;
@@ -491,7 +503,7 @@ function layoutAnchored(
 
   // Re-layout children into final absolute parent box when we have controls.
   if (el.controls.length > 0) {
-    childNodes = layoutControls(el.controls, selfBox, viewport, opts);
+    childNodes = layoutControls(el.controls, childLayoutBox, viewport, opts);
   }
 
   // Plate buttons: portraits hang past the 90×42 host — clamp AABB after kids.
@@ -1344,6 +1356,40 @@ function positionWithAnchors(
     x: parentAx - selfAx + offset.x,
     y: parentAy - selfAy + offset.y,
   };
+}
+
+/**
+ * True when a size prop is omitted / default (scalar or `[default, default]`).
+ *
+ * @param sz - Element `size` prop.
+ * @returns whether both axes are unspecified.
+ */
+function sizeIsOmitted(sz: unknown): boolean {
+  if (sz === undefined || sz === null || sz === "default") return true;
+  if (!Array.isArray(sz) || sz.length < 2) return false;
+  const axisDefault = (v: unknown) =>
+    v === undefined || v === null || v === "default";
+  return axisDefault(sz[0]) && axisDefault(sz[1]);
+}
+
+/**
+ * Pack hosts for the sidebar ball / active ring. They omit `size` and anchors;
+ * treating that as wiki `100%`+`center` parks the square mid-plate. Real client
+ * placement matches the plate's `-11%` pad (data.png opaque starts ~x29/245):
+ * content-sized square on the row's left edge, half-overlapping the plate.
+ *
+ * @param el - Element being laid out.
+ * @returns true when this host should content-size + left-anchor.
+ */
+function isSidebarIconHost(el: ResolvedElement): boolean {
+  if (el.namespace !== "phud_sidebar") return false;
+  if (
+    el.name !== "pokemon_icon_wrapper" &&
+    el.name !== "pokemon_selected_indicator"
+  ) {
+    return false;
+  }
+  return sizeIsOmitted(el.props.size);
 }
 
 /**

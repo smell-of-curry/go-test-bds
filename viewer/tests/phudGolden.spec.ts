@@ -273,13 +273,14 @@ test("golden: sidebar + top bar + ping", async ({ page }) => {
             "37",
           ],
           [
-            "HP: 11/23§r§f Lv. 5",
+            "Fainted§r§f Lv. 5",
             "§fQuaxly",
             "quaxly",
             "false",
             "poke",
             "default/quaxly",
-            "82",
+            // clip percent 100 → #clip_ratio 1 → fully hidden (empty) bar
+            "100",
           ],
           ["???", "§f???", "egg", "false", "poke", "default/egg", "100"],
           EMPTY_SLOT,
@@ -301,12 +302,89 @@ test("golden: sidebar + top bar + ping", async ({ page }) => {
           !!dock &&
           !!ping &&
           getComputedStyle(ping).display !== "none" &&
-          (dock.textContent ?? "").includes("Bulbasaur")
+          (dock.textContent ?? "").includes("Bulbasaur") &&
+          (dock.textContent ?? "").includes("Fainted")
         );
       },
       undefined,
       { timeout: 15_000 },
     );
+
+    const geom = await page.evaluate(() => {
+      const box = (el: Element | null) => {
+        if (!el) return null;
+        const host = el as HTMLElement;
+        const r = host.getBoundingClientRect();
+        return {
+          x: r.x,
+          y: r.y,
+          w: r.width,
+          h: r.height,
+          clip: host.style.clipPath || "",
+        };
+      };
+      const plates = [
+        ...document.querySelectorAll<HTMLElement>(
+          '[data-jsonui-name="phud_sidebar.variable_parser"]',
+        ),
+      ].filter((el) => {
+        if (el.dataset.uiType !== "image") return false;
+        if (getComputedStyle(el).display === "none") return false;
+        const face = el.querySelector(
+          ".jsonui-image-face",
+        ) as HTMLElement | null;
+        return (face?.style.backgroundImage ?? "").includes("sidebar/data");
+      });
+      const fills = [
+        ...document.querySelectorAll<HTMLElement>(".jsonui"),
+      ].filter(
+        (el) =>
+          el.dataset.uiName === "xp_bar_fill" &&
+          getComputedStyle(el).display !== "none",
+      );
+      const rings = [
+        ...document.querySelectorAll<HTMLElement>(".jsonui-image-face"),
+      ]
+        .filter((face) =>
+          (face.style.backgroundImage ?? "").includes("sidebar/ring"),
+        )
+        .map((face) => face.closest(".jsonui") as HTMLElement | null)
+        .filter((el): el is HTMLElement => !!el);
+      const wrappers = [
+        ...document.querySelectorAll<HTMLElement>(".jsonui"),
+      ].filter(
+        (el) =>
+          el.dataset.uiName === "pokemon_icon_wrapper" &&
+          getComputedStyle(el).display !== "none" &&
+          el.getBoundingClientRect().width > 0,
+      );
+      const ping = document.querySelector<HTMLElement>(
+        '[data-jsonui-name="player_ping.main"]',
+      );
+      return {
+        plate: box(plates[0] ?? null),
+        fill0: box(fills[0] ?? null),
+        fill1: box(fills[1] ?? null),
+        ring: box(rings[0] ?? null),
+        wrapper0: box(wrappers[0] ?? null),
+        ping: ping?.textContent ?? "",
+      };
+    });
+
+    expect(geom.plate).not.toBeNull();
+    expect(geom.fill0).not.toBeNull();
+    expect(geom.fill1).not.toBeNull();
+    expect(geom.fill0!.x).toBeGreaterThanOrEqual(geom.plate!.x - 0.5);
+    expect(geom.fill0!.x + geom.fill0!.w).toBeLessThanOrEqual(
+      geom.plate!.x + geom.plate!.w + 0.5,
+    );
+    expect(geom.fill1!.clip).toContain("inset(100%)");
+    expect(geom.ring).not.toBeNull();
+    expect(geom.wrapper0).not.toBeNull();
+    expect(geom.wrapper0!.x).toBeLessThanOrEqual(geom.plate!.x + 4);
+    expect(geom.ring!.x).toBeLessThanOrEqual(geom.plate!.x + 4);
+    expect(geom.ping).toMatch(/Current Ping:\s/);
+
     await shoot(page, "sidebar");
   } finally {
     await closeHarness(page, h);
@@ -517,9 +595,7 @@ test("welcome ActionForm: body, button label, close X, form above nametag", asyn
       const hud = document.querySelector(
         "#json-hud, .jsonui-hud-host",
       ) as HTMLElement | null;
-      const hostZ = Number(
-        getComputedStyle(hud ?? formsHost!).zIndex || "0",
-      );
+      const hostZ = Number(getComputedStyle(hud ?? formsHost!).zIndex || "0");
       const tagZ = Number(nametag ? getComputedStyle(nametag).zIndex : "0");
       return {
         hasBody: !!body,

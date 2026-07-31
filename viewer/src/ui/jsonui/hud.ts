@@ -316,7 +316,12 @@ export function createHudRenderer(
           if (ctx) {
             ctx.font = `${fontPx}px "Minecraft", ui-sans-serif, system-ui, "Segoe UI", sans-serif`;
             for (const line of lines) {
-              maxW = Math.max(maxW, ctx.measureText(line || " ").width);
+              // Trailing spaces are significant (`Current Ping: ` + §value).
+              // measureText can ignore them — append a marker glyph and subtract.
+              const raw = line || " ";
+              const marker = ctx.measureText("M").width;
+              const w = Math.max(0, ctx.measureText(`${raw}M`).width - marker);
+              maxW = Math.max(maxW, w);
             }
           } else {
             let maxLen = 1;
@@ -680,6 +685,17 @@ function bindTree(
       out.localize ?? el.props.localize,
       lang,
     );
+    // playerPing.json splits label + §-colored value. Authored lang is
+    // `Current Ping: ` (trailing space); older pack extracts omit it and the
+    // value (`§a0`) glues to the colon. Preserve the separator space.
+    if (
+      el.name === "label_prefix" &&
+      el.namespace === "player_ping" &&
+      out.text.endsWith(":") &&
+      !out.text.endsWith(": ")
+    ) {
+      out.text = `${out.text} `;
+    }
   }
   // Empty party slots still bind ball texture `…/balls/empty` — hide that icon
   // so only occupied plates paint (matches real client empty = invisible).
@@ -1079,11 +1095,15 @@ function applyPropertyRefs(out: PropertyBag): void {
  * @param el - Pack element (authored offset, not latched out.offset).
  * @returns adjusted offset or undefined.
  */
-function rtlRowOffsetFromAuthored(el: ResolvedElement): [number, number] | undefined {
+function rtlRowOffsetFromAuthored(
+  el: ResolvedElement,
+): [number, number] | undefined {
   const authored = el.props.offset;
   if (!Array.isArray(authored) || authored.length < 2) return undefined;
-  const ox = typeof authored[0] === "number" ? authored[0] : Number(authored[0]);
-  const oy = typeof authored[1] === "number" ? authored[1] : Number(authored[1]);
+  const ox =
+    typeof authored[0] === "number" ? authored[0] : Number(authored[0]);
+  const oy =
+    typeof authored[1] === "number" ? authored[1] : Number(authored[1]);
   if (!Number.isFinite(ox) || !Number.isFinite(oy)) return undefined;
   return [ox - ICON * HEART_COUNT, oy];
 }
