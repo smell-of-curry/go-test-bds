@@ -1,6 +1,7 @@
 package actor
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -27,6 +28,75 @@ func TestPathSourceSolidWhenUnloaded(t *testing.T) {
 	if _, ok := src.Block(cube.Pos{31, -152_000_000, -97}).(block.Bedrock); !ok {
 		t.Fatal("out-of-range Y should read as bedrock for the pathfinder")
 	}
+}
+
+// TestPathSourceSolidWhenIncomplete: a LevelChunk that arrived in request mode
+// leaves an empty air column until sub-chunks land. Pathfinding must not treat
+// that air as walkable terrain (StartNode would descend to y=-64 and every
+// navigateToBlock would fail instantly — live showcase regression).
+func TestPathSourceSolidWhenIncomplete(t *testing.T) {
+	w := world.NewWorld(false)
+	dfworld.DefaultBlockRegistry.Finalize()
+	col := world.NewColumn(chunk.New(dfworld.DefaultBlockRegistry, dfworld.Overworld.Range()), nil)
+	col.ExpectSubChunks(4) // flips State to ColumnRequested
+	w.AddChunk(dfworld.ChunkPos{0, 0}, col)
+
+	src := pathSource{w: w}
+	pos := cube.Pos{1, 64, 1}
+	if _, ok := src.Block(pos).(block.Bedrock); !ok {
+		t.Fatalf("incomplete column should read as bedrock for the pathfinder, got %T", src.Block(pos))
+	}
+	// World.Block still returns air (physics) — only the pathfinder is gated.
+	if _, air := w.Block(pos).(block.Air); !air {
+		t.Fatalf("World.Block should still be air for incomplete columns, got %T", w.Block(pos))
+	}
+}
+
+// TestNavigateIncompleteStartWaitsThenFails: empty path while the start column
+// is requested must not StopNavigating on tick 1; after emptyPathWaitTicks it
+// fails with a diagnostic naming the incomplete start.
+func TestNavigateIncompleteStartWaitsThenFails(t *testing.T) {
+	const floorY = 64
+	a := Config{Conn: navStubConn{pos: mgl32.Vec3{0.5, float32(floorY + 1), 0.5}}}.New()
+	dfworld.DefaultBlockRegistry.Finalize()
+	col := world.NewColumn(chunk.New(dfworld.DefaultBlockRegistry, dfworld.Overworld.Range()), nil)
+	col.ExpectSubChunks(4)
+	a.World().AddChunk(dfworld.ChunkPos{0, 0}, col)
+
+	h := &navStopCounter{}
+	a.Handle(h)
+	a.Navigate(cube.Pos{8, floorY + 1, 0})
+	if !a.Navigating() {
+		t.Fatal("Navigate should keep a (possibly empty) path while waiting")
+	}
+
+	// First few ticks must not fail-fast.
+	for i := 0; i < 5; i++ {
+		a.Tick()
+		if h.stopped != 0 {
+			t.Fatalf("stopped on tick %d (detail=%q)", i, a.NavFailureDetail())
+		}
+	}
+
+	for i := 0; i < emptyPathWaitTicks+repathCooldownTicks+5 && h.stopped == 0; i++ {
+		a.Tick()
+	}
+	if h.stopped == 0 {
+		t.Fatal("expected fail after emptyPathWaitTicks with incomplete start")
+	}
+	detail := a.NavFailureDetail()
+	if detail == "" || !containsAll(detail, "empty_path_start_incomplete", "requested") {
+		t.Fatalf("diagnostic=%q, want empty_path_start_incomplete + requested", detail)
+	}
+}
+
+func containsAll(s string, parts ...string) bool {
+	for _, p := range parts {
+		if !strings.Contains(s, p) {
+			return false
+		}
+	}
+	return true
 }
 
 // TestFindPathUnloadedWorldTerminates guards the run-35/36 livelock: FindPath

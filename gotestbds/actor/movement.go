@@ -37,6 +37,21 @@ type movementData struct {
 	repathCooldown int
 	// fruitlessRepaths counts consecutive re-paths that made no progress.
 	fruitlessRepaths int
+	// emptyPathWaits counts ticks spent retrying while the start column is
+	// still incomplete (FindPath returns empty against pathSource bedrock).
+	emptyPathWaits int
+
+	// Last Navigate / fail-fast diagnostic for the instruction error line.
+	navFailDetail      string
+	navLastTarget      cube.Pos
+	navLastGoal        cube.Pos
+	navLastStart       cube.Pos
+	navLastPathCount   int
+	navLastReached     bool
+	navLastMaxVisited  int
+	navLastStartState  string
+	navLastGoalState   string
+	navLastUnknownNear int
 
 	mc *physics.Computer
 }

@@ -1,6 +1,8 @@
 package actor
 
 import (
+	"fmt"
+
 	pathfind "github.com/FDUTCH/Pathfinder"
 	"github.com/FDUTCH/Pathfinder/evaluator"
 	"github.com/df-mc/dragonfly/server/block"
@@ -40,34 +42,84 @@ const (
 	// navProgressEps: a re-path must shorten remaining distance by at least
 	// this much to count as useful (else fruitless).
 	navProgressEps = 0.5
+
+	// emptyPathWaitTicks: when FindPath returns empty because the start
+	// column is still requested/partial, keep retrying this long before
+	// failing (10s at 20 Hz — same ballpark as the suite's waitForWorldAt).
+	emptyPathWaitTicks = 200
 )
 
-// pathSource is the world as the pathfinder is allowed to see it: positions
-// the server has not sent (missing columns, out-of-range Y) read as solid
-// bedrock instead of air.
+// pathSource is the world as the pathfinder is allowed to see it.
 //
-// World.Block's air-for-unloaded default keeps physics alive, but it fed the
-// pathfinder's ground scans an infinite column of air: WalkNodeEvaluator's
-// StartNode descends from the actor while the block reads as air, and its
-// `air || pathfindable && y > -64` condition never bounds the air branch, so
-// one Navigate() from an unloaded column spun the tick loop through
-// world.Block at y=-152M until the process was killed (runs 35/36 — the
-// walking showcase prunes and reloads columns constantly). Solid unseen
-// terrain both terminates every scan and stops paths through terrain the bot
-// has never observed.
+// Missing columns AND columns that exist but are not ColumnComplete (LevelChunk
+// arrived in sub-chunk request mode, blocks not yet filled) read as bedrock.
+// Treating incomplete columns as "loaded air" — World.BlockAt's old behaviour —
+// made WalkNodeEvaluator.StartNode descend through an empty air column to y=-64
+// and FindPath return an empty path, so every navigateToBlock failed instantly
+// with 0 progress while the suite logged "column never reached the client".
 type pathSource struct{ w *world.World }
 
-// Block returns the block at pos, or bedrock when the column covering pos has
-// not reached the client (or pos is outside the column's vertical range).
+// Block returns the block at pos, or bedrock when the column is missing,
+// incomplete, or pos is outside its vertical range.
 //
 // @param pos The block position.
 // @returns the observed block, or bedrock for unobserved positions.
 func (s pathSource) Block(pos cube.Pos) w.Block {
-	bl, ok := s.w.BlockAt(pos)
-	if !ok {
+	c, ok := s.w.Chunk(w.ChunkPos{int32(pos[0] >> 4), int32(pos[2] >> 4)})
+	if !ok || pos.OutOfBounds(c.Range()) || c.State != world.ColumnComplete {
 		return block.Bedrock{}
 	}
-	return bl
+	return s.w.Block(pos)
+}
+
+// columnComplete reports whether the column covering pos has fully arrived.
+//
+// @param wr Bot world.
+// @param pos Block position.
+// @returns true when pathSource would see real blocks at pos.
+func columnComplete(wr *world.World, pos cube.Pos) bool {
+	c, ok := wr.Chunk(w.ChunkPos{int32(pos[0] >> 4), int32(pos[2] >> 4)})
+	return ok && !pos.OutOfBounds(c.Range()) && c.State == world.ColumnComplete
+}
+
+// columnStateName returns a short label for diagnostics.
+//
+// @param wr Bot world.
+// @param pos Block position.
+// @returns "missing", "requested", "partial", or "complete".
+func columnStateName(wr *world.World, pos cube.Pos) string {
+	c, ok := wr.Chunk(w.ChunkPos{int32(pos[0] >> 4), int32(pos[2] >> 4)})
+	if !ok {
+		return "missing"
+	}
+	if pos.OutOfBounds(c.Range()) {
+		return "oob"
+	}
+	return c.State.String()
+}
+
+// countUnknownNear counts UnknownBlock in the 3×3×3 neighbourhood of pos
+// (pathSource-complete view: incomplete columns do not count as unknown).
+//
+// @param wr Bot world.
+// @param pos Centre position.
+// @returns number of UnknownBlock cells in the neighbourhood.
+func countUnknownNear(wr *world.World, pos cube.Pos) int {
+	n := 0
+	for dx := -1; dx <= 1; dx++ {
+		for dy := -1; dy <= 1; dy++ {
+			for dz := -1; dz <= 1; dz++ {
+				p := pos.Add(cube.Pos{dx, dy, dz})
+				if !columnComplete(wr, p) {
+					continue
+				}
+				if _, ok := wr.Block(p).(world.UnknownBlock); ok {
+					n++
+				}
+			}
+		}
+	}
+	return n
 }
 
 // pathfindBudget returns FindPath limits for a straight-line distance.
@@ -125,9 +177,7 @@ func pathHasExcessiveFall(p *pathfind.Path, maxDrop int) bool {
 
 // truncatePathBeforeFall keeps the walkable prefix of p up to (but not
 // including) the first drop deeper than maxDrop. Returns p unchanged when no
-// such drop exists. Never returns an "unreachable" empty wipe — an empty wipe
-// made every city leg with a single deep step fail instantly with zero walking
-// (run-pr-704 showcase).
+// such drop exists.
 //
 // @param p Computed path.
 // @param maxDrop Maximum allowed Y drop between consecutive nodes.
@@ -165,17 +215,15 @@ func absInt(n int) int {
 	return n
 }
 
-// clampGoalToObserved projects to onto the farthest loaded column along the
-// from→to line. Unloaded space reads as bedrock to the pathfinder, so aiming
-// FindPath at a far unloaded block yields either an empty path or a rim path
-// that fail-fast used to discard; clamping makes the partial leg explicit.
+// clampGoalToObserved projects to onto the farthest complete column along the
+// from→to line. Incomplete columns are treated as unseen (same as pathSource).
 //
 // @param wr Bot world.
 // @param from Actor block position.
 // @param to True destination.
-// @returns to when loaded, otherwise the last loaded block toward to.
+// @returns to when its column is complete, otherwise the last complete block toward to.
 func clampGoalToObserved(wr *world.World, from, to cube.Pos) cube.Pos {
-	if wr.Loaded(to) {
+	if columnComplete(wr, to) {
 		return to
 	}
 	dx, dy, dz := to.X()-from.X(), to.Y()-from.Y(), to.Z()-from.Z()
@@ -196,7 +244,7 @@ func clampGoalToObserved(wr *world.World, from, to cube.Pos) cube.Pos {
 			from.Y() + dy*i/steps,
 			from.Z() + dz*i/steps,
 		}
-		if !wr.Loaded(p) {
+		if !columnComplete(wr, p) {
 			break
 		}
 		best = p
@@ -214,6 +262,64 @@ func distToNavTarget(pos mgl64.Vec3, target cube.Pos) float64 {
 	return pos.Sub(target.Vec3Centre()).Len()
 }
 
+// NavFailureDetail is the one-line diagnostic attached to "unable to reach
+// destination" so live showcase runs show why FindPath/fail-fast stopped.
+//
+// @returns empty when the last stop was not a navigation failure.
+func (a *Actor) NavFailureDetail() string {
+	return a.navFailDetail
+}
+
+// recordNavSnapshot stores diagnostic fields from the latest Navigate call.
+func (a *Actor) recordNavSnapshot(target, goal, start cube.Pos, p *pathfind.Path, maxVisited int) {
+	a.navLastTarget = target
+	a.navLastGoal = goal
+	a.navLastStart = start
+	a.navLastPathCount = 0
+	a.navLastReached = false
+	if p != nil {
+		a.navLastPathCount = p.Count()
+		a.navLastReached = p.Reached()
+	}
+	a.navLastMaxVisited = maxVisited
+	a.navLastStartState = columnStateName(a.world, start)
+	a.navLastGoalState = columnStateName(a.world, target)
+	a.navLastUnknownNear = countUnknownNear(a.world, start)
+}
+
+// formatNavFailure builds the diagnostic suffix for the instruction error.
+//
+// @param reason Short failure reason (empty_path, fruitless, etc.).
+// @returns one-line detail.
+func (a *Actor) formatNavFailure(reason string) string {
+	clamped := ""
+	if a.navLastGoal != a.navLastTarget {
+		clamped = fmt.Sprintf(" clamped=%v", a.navLastGoal)
+	}
+	return fmt.Sprintf(
+		"%s start=%v(%s) goal=%v(%s)%s pathNodes=%d reached=%v unknownNear=%d budgetVisited=%d fruitless=%d",
+		reason,
+		a.navLastStart, a.navLastStartState,
+		a.navLastTarget, a.navLastGoalState,
+		clamped,
+		a.navLastPathCount, a.navLastReached,
+		a.navLastUnknownNear, a.navLastMaxVisited,
+		a.fruitlessRepaths,
+	)
+}
+
+// failNavigation stops navigating and records why for the instruction error.
+//
+// @param reason Short failure reason.
+func (a *Actor) failNavigation(reason string) {
+	a.navFailDetail = a.formatNavFailure(reason)
+	a.path = nil
+	a.repathCooldown = 0
+	a.fruitlessRepaths = 0
+	a.emptyPathWaits = 0
+	a.Handler().HandleStopNavigation(a)
+}
+
 // Navigate builds a path to the destination position.
 func (a *Actor) Navigate(target cube.Pos) {
 	start := cube.PosFromVec3(a.Position())
@@ -225,8 +331,10 @@ func (a *Actor) Navigate(target cube.Pos) {
 	if pathHasExcessiveFall(p, maxSafeFallBlocks) {
 		p = truncatePathBeforeFall(p, maxSafeFallBlocks, target)
 	}
+	a.recordNavSnapshot(target, goal, start, p, maxVisited)
 	a.path = p
 	a.navigationTarget = target
+	a.navFailDetail = ""
 }
 
 // Navigating returns whether Actor is navigating.
@@ -245,10 +353,27 @@ func (a *Actor) tickNavigating() {
 	}
 
 	if a.path.Count() == 0 {
-		a.StopNavigating()
+		start := cube.PosFromVec3(a.Position())
+		// Incomplete start column: empty path is expected (pathSource=bedrock).
+		// Retry until the column completes or the wait budget expires — do not
+		// fire "unable to reach destination" on the first tick.
+		if !columnComplete(a.world, start) {
+			a.emptyPathWaits++
+			if a.emptyPathWaits > emptyPathWaitTicks {
+				a.failNavigation("empty_path_start_incomplete")
+				return
+			}
+			if a.repathCooldown == 0 {
+				a.Navigate(a.navigationTarget)
+				a.repathCooldown = repathCooldownTicks
+			}
+			return
+		}
+		a.failNavigation("empty_path")
 		return
 	}
 
+	a.emptyPathWaits = 0
 	path := a.path
 	pos := cube.PosFromVec3(a.Position())
 
@@ -259,17 +384,14 @@ func (a *Actor) tickNavigating() {
 	}
 
 	if path.IsDone() {
-		// Arrived at the true target (path.Reached may only mean a clamped
-		// intermediate goal inside the loaded view).
 		if distToNavTarget(a.Position(), a.navigationTarget) <= navArriveBlocks {
 			a.path = nil
 			a.fruitlessRepaths = 0
+			a.emptyPathWaits = 0
+			a.navFailDetail = ""
 			a.Handler().HandleReachTarget(a)
 			return
 		}
-		// Partial leg finished (edge of loaded view, rim of a pit, clamped
-		// goal). Repath toward the true target — not fruitless by itself;
-		// repathTowardTarget only fails when the new path cannot get closer.
 		a.repathTowardTarget(false)
 		return
 	}
@@ -287,7 +409,6 @@ func (a *Actor) tickNavigating() {
 		return
 	}
 
-	// if Actor cannot move, the path must be re-created.
 	if a.Position().ApproxEqual(previousPosition) {
 		a.repathTowardTarget(true)
 		return
@@ -300,8 +421,7 @@ func (a *Actor) tickNavigating() {
 // @param forceFruitless When true (no-movement tick), always counts toward the
 // fruitless limit. When false (partial-leg finished), the counter only
 // advances if the new path cannot get closer to the true target than the
-// actor already is — so walking to the loaded rim then re-pathing is progress,
-// not an instant "unable to reach destination".
+// actor already is.
 func (a *Actor) repathTowardTarget(forceFruitless bool) {
 	if a.repathCooldown > 0 {
 		return
@@ -319,13 +439,16 @@ func (a *Actor) repathTowardTarget(forceFruitless bool) {
 	if forceFruitless || !useful {
 		a.fruitlessRepaths++
 		if a.fruitlessRepaths >= fruitlessRepathLimit {
-			a.StopNavigating()
+			reason := "fruitless_no_closer_path"
+			if forceFruitless {
+				reason = "fruitless_stuck"
+			}
+			a.failNavigation(reason)
 			return
 		}
 		return
 	}
 	a.fruitlessRepaths = 0
-	// Continuation: start following the new path this tick.
 	a.tickNavigating()
 }
 
@@ -334,5 +457,11 @@ func (a *Actor) StopNavigating() {
 	a.path = nil
 	a.repathCooldown = 0
 	a.fruitlessRepaths = 0
+	a.emptyPathWaits = 0
+	// Leave navFailDetail set when failNavigation already filled it; clear
+	// only for external/timeout stops so a late false callback stays quiet.
+	if a.navFailDetail == "" {
+		a.navFailDetail = "stopped"
+	}
 	a.Handler().HandleStopNavigation(a)
 }

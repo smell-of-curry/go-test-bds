@@ -41,7 +41,14 @@ func (n *NavigateToBlock) Run(ctx context.Context, b *bot.Bot) error {
 		return ctx.Err()
 	case ok := <-navigateCh:
 		if !ok {
-			b.Execute(func(a *actor.Actor) { a.StopNavigating() })
+			var detail string
+			b.Execute(func(a *actor.Actor) {
+				detail = a.NavFailureDetail()
+				a.StopNavigating()
+			})
+			if detail != "" && detail != "stopped" {
+				return fmt.Errorf("unable to reach destination (%s)", detail)
+			}
 			return fmt.Errorf("unable to reach destination")
 		}
 	}
