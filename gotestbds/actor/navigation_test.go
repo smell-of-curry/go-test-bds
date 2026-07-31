@@ -99,6 +99,39 @@ func containsAll(s string, parts ...string) bool {
 	return true
 }
 
+// TestNavigateEmptyReachedIsSuccess: FindPath empty+Reached (start already in
+// reachRange) must fire HandleReachTarget, not empty_path fail — otherwise
+// every 1-block stride after resolveStandable hop-teleports (live 18e00ad).
+func TestNavigateEmptyReachedIsSuccess(t *testing.T) {
+	const floorY = 64
+	a := Config{Conn: navStubConn{pos: mgl32.Vec3{0.5, float32(floorY + 1), 0.5}}}.New()
+	fillFlatFloor(a.World(), -2, 4, 0, floorY)
+
+	h := &navReachCounter{}
+	a.Handle(h)
+	// Goal is the block the bot already occupies — FindPath reachRange=1.
+	a.Navigate(cube.Pos{0, floorY + 1, 0})
+	if !a.Navigating() {
+		t.Fatal("expected a path handle after Navigate")
+	}
+	a.Tick()
+	if h.reached == 0 {
+		t.Fatalf("empty+Reached should succeed, detail=%q stopped=%d", a.NavFailureDetail(), h.stopped)
+	}
+	if a.Navigating() {
+		t.Fatal("should not still be navigating after reach")
+	}
+}
+
+type navReachCounter struct {
+	NopHandler
+	reached int
+	stopped int
+}
+
+func (h *navReachCounter) HandleReachTarget(*Actor)    { h.reached++ }
+func (h *navReachCounter) HandleStopNavigation(*Actor) { h.stopped++ }
+
 // TestNavigateIncompleteNeighborWaits: start column complete but the 3×3
 // neighbourhood still requested must not empty_path-fail on tick 1 — those
 // neighbours read as bedrock and trap FindPath in a one-cell pocket (live

@@ -460,14 +460,32 @@ func (a *Actor) tickNavigating() {
 	}
 
 	if a.path.Count() == 0 {
+		// FindPath returns empty+Reached when start is already within
+		// reachRange of its (possibly clamped) goal. Only treat as arrival
+		// when the TRUE navigation target is close — otherwise we are sitting
+		// on a clamped intermediate (missing goal column) and must wait/repath.
+		// Live 18e00ad: empty_path pathNodes=0 reached=true on 1-block strides.
+		if a.path.Reached() && distToNavTarget(a.Position(), a.navigationTarget) <= navArriveBlocks {
+			a.path = nil
+			a.fruitlessRepaths = 0
+			a.emptyPathWaits = 0
+			a.navFailDetail = ""
+			a.Handler().HandleReachTarget(a)
+			return
+		}
 		start := cube.PosFromVec3(a.Position())
 		// Incomplete start OR neighbours: pathSource turns those columns into
 		// bedrock, so FindPath is stuck in a pocket. Wait for the ring to land.
-		if !columnComplete(a.world, start) || !neighborhoodComplete(a.world, start, pathNeighborhoodChunks) {
+		// Also wait when empty+Reached on a clamped goal (true target still far).
+		if !columnComplete(a.world, start) ||
+			!neighborhoodComplete(a.world, start, pathNeighborhoodChunks) ||
+			(a.path.Reached() && !columnComplete(a.world, a.navigationTarget)) {
 			a.emptyPathWaits++
 			reason := "empty_path_neighborhood_incomplete"
 			if !columnComplete(a.world, start) {
 				reason = "empty_path_start_incomplete"
+			} else if a.path.Reached() {
+				reason = "empty_path_reached_clamped"
 			}
 			if a.emptyPathWaits > emptyPathWaitTicks {
 				a.failNavigation(reason)
