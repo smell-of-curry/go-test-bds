@@ -381,7 +381,8 @@ function applyLabel(
       : 1;
   const basePx = 8 * opts.guiScale * fontScale;
   el.style.fontSize = `${basePx}px`;
-  el.style.lineHeight = "1.2";
+  // Match layout measureText line box (9gui ≈ font) so `\n` lines aren't clipped.
+  el.style.lineHeight = `${basePx}px`;
   el.style.whiteSpace = "pre";
   el.style.overflow = "hidden";
 

@@ -195,7 +195,8 @@ function ensureJsonHudStyles(): void {
   height: 100vh;
   pointer-events: none;
   z-index: 4;
-  overflow: hidden;
+  /* Hotbar hangs below the 5gui XP strip (offset [4,16]); clip would hide it. */
+  overflow: visible;
 }
 /* JSON UI owns title / vitals / hotbar; keep chat/actionbar from #player-hud. */
 body.jsonui-hud-active #player-hud .hud-title-wrap,

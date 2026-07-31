@@ -11,10 +11,15 @@ import type { PropertyBag, ResolvedChild, ResolvedElement } from "./types";
 
 const VP = { width: 200, height: 100 };
 
-const measureStub: MeasureText = (text, fontScale) => ({
-  w: text.length * 6 * fontScale,
-  h: 8 * fontScale,
-});
+const measureStub: MeasureText = (text, fontScale) => {
+  const lines = text.length ? text.split("\n") : [""];
+  let maxLen = 0;
+  for (const line of lines) maxLen = Math.max(maxLen, line.length);
+  return {
+    w: Math.max(1, maxLen) * 6 * fontScale,
+    h: Math.max(1, lines.length) * 8 * fontScale,
+  };
+};
 
 function el(
   type: string,
@@ -199,6 +204,18 @@ describe("layoutTree sizing", () => {
       { measureText: measureStub },
     );
     assert.deepEqual(boxOf(big), { x: 0, y: 0, w: 80, h: 60 });
+  });
+
+  it("sizes multiline label height from newline count", () => {
+    const root = el("label", {
+      size: ["default", "default"],
+      text: "LINE1\n\nLINE3",
+      anchor_from: "top_left",
+      anchor_to: "top_left",
+    });
+    const tree = layoutTree(root, VP, { measureText: measureStub });
+    assert.equal(tree.box.h, 24); // 3 lines × 8
+    assert.equal(tree.box.w, 5 * 6); // longest line
   });
 
   it("sizes label via measureText when using %c", () => {

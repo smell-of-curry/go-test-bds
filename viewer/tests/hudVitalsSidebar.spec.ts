@@ -379,11 +379,17 @@ test("empty slots hidden; air/armor/xp gated; no fat green XP", async ({
       ) as HTMLElement | null;
       if (!el || getComputedStyle(el).display === "none") return null;
       const r = el.getBoundingClientRect();
-      return { w: r.width, h: r.height };
+      return { w: r.width, h: r.height, y: r.y, bottom: r.bottom };
     });
     expect(pingBox).not.toBeNull();
     expect(pingBox!.h).toBeLessThan(40);
     expect(pingBox!.w).toBeLessThan(280);
+    // Fixture host is 1024×576: bottom_middle + offset lands ~442, not center (~276).
+    const hostH = await page.evaluate(
+      () => document.getElementById("host")?.clientHeight ?? 576,
+    );
+    expect(pingBox!.y).toBeGreaterThan(hostH * 0.5);
+    expect(pingBox!.bottom).toBeLessThanOrEqual(hostH + 1);
 
     // Live land glitch: AirSupply=0 must not paint a bubble row.
     await page.evaluate(() => {
@@ -585,8 +591,176 @@ test("loadingScreen PHUD paints TUTORIAL COMPLETE over sidebar", async ({
     });
     expect(card.visible).toBe(true);
     expect(card.text).toContain("TUTORIAL COMPLETE");
+    expect(card.text).toContain("Welcome to Season 5");
     expect(card.w).toBeGreaterThan(400);
     expect(card.h).toBeGreaterThan(200);
+
+    // Second line must actually paint (not clipped by single-line label box).
+    const welcomeVisible = await page.evaluate(() => {
+      const label = document.querySelector(
+        '[data-jsonui-name="phud_loadingScreen.main"] .jsonui[data-ui-type="label"]',
+      ) as HTMLElement | null;
+      if (!label) return false;
+      const r = label.getBoundingClientRect();
+      return r.height >= 36 && (label.textContent ?? "").includes("Welcome");
+    });
+    expect(welcomeVisible).toBe(true);
+  } finally {
+    await harness.close();
+  }
+});
+
+test("hearts sit above hotbar; quest-only currency hides coin chip", async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  const harness = await startHarness();
+  try {
+    await page.setViewportSize({ width: 1280, height: 720 });
+    await page.goto(harness.pageUrl, { waitUntil: "domcontentloaded" });
+    await page.waitForFunction(() => document.body.dataset.ready === "1", {
+      timeout: 60_000,
+    });
+
+    const EMPTY = ["null", "null", "null", "false", "empty", "null", "100"];
+    const pad = (s: string) => s.padEnd(120, "|");
+    const sidebar = [
+      [
+        "HP: 20/20§r§f Lv. 5",
+        "§fBulbasaur",
+        "bulbasaur",
+        "true",
+        "poke",
+        "default/bulbasaur",
+        "37",
+      ],
+      EMPTY,
+      EMPTY,
+      EMPTY,
+      EMPTY,
+      EMPTY,
+    ]
+      .flat()
+      .map(pad)
+      .join("|");
+
+    // Quest banner only — no currency half after the 80-char pad.
+    const currency = "Go see Professor Oak at the lab".padEnd(80, "_");
+
+    await page.evaluate(
+      ({ sidebar, currency, vitals }) => {
+        (
+          window as unknown as {
+            __jsonUi: {
+              setHud: (phud: Record<string, string>, v: typeof vitals) => void;
+            };
+          }
+        ).__jsonUi.setHud(
+          { sidebar, currency, playerPing: "§a0", phone: "" },
+          vitals,
+        );
+      },
+      {
+        sidebar,
+        currency,
+        vitals: {
+          v: 1 as const,
+          type: "vitals" as const,
+          bot: "TestBot",
+          tick: 3,
+          health: 16,
+          maxHealth: 20,
+          food: 18,
+          air: 300,
+          maxAir: 300,
+          armor: 0,
+          xpLevel: 0,
+          xpProgress: 0,
+          selectedSlot: 0,
+          hotbar: Array.from({ length: 9 }, () => null),
+        },
+      },
+    );
+
+    await page.waitForFunction(
+      () =>
+        !!document.querySelector('[data-jsonui-name="hud.heart_renderer"]') &&
+        !!document.querySelector('[data-jsonui-name="hud.hotbar_panel"]'),
+      undefined,
+      { timeout: 15_000 },
+    );
+
+    const layout = await page.evaluate(() => {
+      const heart = document.querySelector(
+        '[data-jsonui-name="hud.heart_renderer"]',
+      ) as HTMLElement | null;
+      const hotbar = document.querySelector(
+        '[data-jsonui-name="hud.hotbar_panel"]',
+      ) as HTMLElement | null;
+      const currency = document.querySelector(
+        '[data-jsonui-name="phud_currency.currency"]',
+      ) as HTMLElement | null;
+      const quest = document.querySelector(
+        '[data-jsonui-name="phud_currency.quest"]',
+      ) as HTMLElement | null;
+      const phone = document.querySelector(
+        '[data-jsonui-name="phud_phone.main"]',
+      ) as HTMLElement | null;
+      const plates = [
+        ...document.querySelectorAll(
+          '[data-jsonui-name="phud_sidebar.variable_parser"]',
+        ),
+      ].filter((el) => {
+        const bg = getComputedStyle(el as HTMLElement).backgroundImage;
+        return bg.includes("sidebar/data");
+      });
+      const rings = [
+        ...document.querySelectorAll(
+          '[data-jsonui-name="phud_sidebar.variable_parser"]',
+        ),
+      ].filter((el) => {
+        const bg = getComputedStyle(el as HTMLElement).backgroundImage;
+        return bg.includes("sidebar/ring");
+      });
+      // data.png / ring.png are on image faces inside variable_parser hosts.
+      const dataFaces = [
+        ...document.querySelectorAll(
+          '[data-jsonui-name="phud_sidebar.variable_parser"] .jsonui-image-face',
+        ),
+      ].filter((el) =>
+        (el as HTMLElement).style.backgroundImage.includes("sidebar/data"),
+      );
+      const ringFaces = [
+        ...document.querySelectorAll(
+          '[data-jsonui-name="phud_sidebar.variable_parser"] .jsonui-image-face, [data-jsonui-name="phud_sidebar.pokemon_selected_indicator"] .jsonui-image-face',
+        ),
+      ].filter((el) =>
+        (el as HTMLElement).style.backgroundImage.includes("sidebar/ring"),
+      );
+      const hr = heart?.getBoundingClientRect();
+      const hb = hotbar?.getBoundingClientRect();
+      return {
+        heartBottom: hr?.bottom ?? 0,
+        hotbarTop: hb?.top ?? 0,
+        currencyHidden:
+          !currency || getComputedStyle(currency).display === "none",
+        questText: quest?.textContent ?? "",
+        phoneHidden: !phone || getComputedStyle(phone).display === "none",
+        dataPlateCount: dataFaces.length || plates.length,
+        ringCount: ringFaces.length || rings.length,
+      };
+    });
+
+    expect(layout.heartBottom).toBeGreaterThan(0);
+    expect(layout.hotbarTop).toBeGreaterThan(0);
+    // Hearts row ends above the hotbar (run-44 had them on the same y).
+    expect(layout.heartBottom).toBeLessThanOrEqual(layout.hotbarTop + 2);
+    expect(layout.currencyHidden).toBe(true);
+    expect(layout.questText).toContain("Professor Oak");
+    expect(layout.phoneHidden).toBe(true);
+    // Authored: empty slots keep row height + dock, but no plate/ring paint.
+    expect(layout.dataPlateCount).toBe(1);
+    expect(layout.ringCount).toBe(1);
   } finally {
     await harness.close();
   }

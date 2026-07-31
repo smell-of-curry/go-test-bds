@@ -1120,7 +1120,7 @@ function labelIntrinsic(
     typeof el.props.font_scale_factor === "number"
       ? el.props.font_scale_factor
       : 1;
-  // Strip § codes for measurement width.
+  // Strip § codes for measurement; keep `\n` so multiline labels size tall.
   const plain = text.replace(/[§&]./g, "");
   return opts.measureText(plain, fontScale);
 }

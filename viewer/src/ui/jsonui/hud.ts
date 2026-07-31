@@ -294,10 +294,16 @@ export function createHudRenderer(
   const lang = opts.lang;
   const measureText =
     opts.measureText ??
-    ((text: string, fontScale: number) => ({
-      w: Math.max(1, stripSection(text).length * 6 * fontScale),
-      h: 9 * fontScale,
-    }));
+    ((text: string, fontScale: number) => {
+      const plain = stripSection(text);
+      const lines = plain.length ? plain.split("\n") : [""];
+      let maxLen = 1;
+      for (const line of lines) maxLen = Math.max(maxLen, line.length);
+      return {
+        w: Math.max(1, maxLen * 6 * fontScale),
+        h: Math.max(1, lines.length) * 9 * fontScale,
+      };
+    });
 
   const propStore = new Map<string, PropertyBag>();
   const titleTracker = new PhudTitleTracker();
@@ -330,6 +336,7 @@ export function createHudRenderer(
       );
       applyTitleQuirk(bound, title);
       applyPhudElementTokens(bound, state.phud);
+      applyEmptyChromeQuirks(bound);
 
       // Dirty check: skip layout/paint when bound props + vitals unchanged.
       const paintKey = boundPaintKey(bound, title, state.vitals);
@@ -474,14 +481,25 @@ function buildHudRoot(resolver: UiResolver): ResolvedElement {
     if (phud) controls.push({ id: "phud", element: phud });
   }
 
-  // Ping lives under chat_stack in the pack; keep the pruned HUD tree small
-  // but still mount player_ping for the PHUD top-left indicator.
+  // Ping lives under chat_stack in the pack (tip content is bottom_middle).
+  // Pruned HUD omits chat_stack — mount at root with the same bottom_middle
+  // anchors so the tip sits above the hotbar, not at default center.
   if (!controls.some((c) => c.id === "player_ping")) {
     const ping = resolver.resolve("player_ping", "main");
     if (ping) {
+      const el = applyPathKeyOverrides(resolver, "player_ping", "main", ping);
       controls.push({
         id: "player_ping",
-        element: applyPathKeyOverrides(resolver, "player_ping", "main", ping),
+        element: {
+          ...el,
+          props: {
+            ...el.props,
+            anchor_from: "bottom_middle",
+            anchor_to: "bottom_middle",
+            // Clear the survival strip (centered_gui is 50gui + hanging hotbar).
+            offset: el.props.offset ?? [0, -55],
+          },
+        },
       });
     }
   }
@@ -620,7 +638,18 @@ function bindTree(
     const ball = out.ball_type;
     if (ball === "empty" || ball === "null" || ball === "") out.visible = false;
   }
+  // Pack phone.main has no empty-token gate — only child $conditions hide
+  // icons. When the live map has `&_phone:`, hide/show the 64×64 host with it
+  // (always assign — seeding prev.visible=false would stick across setPhud).
+  if (
+    el.namespace === "phud_phone" &&
+    el.name === "main" &&
+    phud?.has("phone")
+  ) {
+    out.visible = Boolean(phud.get("phone"));
+  }
   applyRendererSizing(el, out, vitals);
+  applyHotbarHangPin(el, out, vitals);
   applyVisibilityChangedLatch(el, out, source, prev, phud);
   // Prefer live phud map on the elements panel before children bind, so
   // loadingScreen/phone see tokens even when title-lane latches lag. Clear
@@ -650,16 +679,33 @@ function bindTree(
     out.size = [HOTBAR_SLOT_W * HOTBAR_SLOTS + 2, HOTBAR_H];
     out.grid_dimensions = [1, 1];
   }
-  // XP strip HOSTS wrap the hotbar (offset [4,16]); grow only those so the
-  // hanging bar isn't clipped — never the 5px progress-bar images themselves
-  // (that painted the live-capture "two fat green bars").
-  if (
-    vitals &&
-    (el.name === "resizing_xp_bar_with_hotbar" ||
-      el.name === "exp_progress_bar_and_hotbar")
-  ) {
-    const h = 5 + 16 + HOTBAR_H;
-    out.size = [HOTBAR_SLOT_W * HOTBAR_SLOTS + 10, h];
+  // Pack keeps XP hosts at 5gui and nests hotbar under empty→full→nub→horse
+  // →dash (all layer≥1 stacking contexts). Chromium clips that overflow — grow
+  // the whole chain downward and nudge centered_gui up so the bar stays on
+  // screen. Growing only horse/dash still left nub/full/empty clipping.
+  if (vitals) {
+    const hang = 5 + 16 + HOTBAR_H;
+    if (
+      el.name === "resizing_xp_bar_with_hotbar" ||
+      el.name === "empty_progress_bar" ||
+      el.name === "full_progress_bar" ||
+      el.name === "progress_bar_nub" ||
+      el.name === "resizing_hotbar_no_xp_bar"
+    ) {
+      const w =
+        Array.isArray(out.size) && typeof out.size[0] === "number"
+          ? out.size[0]
+          : HOTBAR_SLOT_W * HOTBAR_SLOTS + 10;
+      out.size = [w, hang];
+      out.anchor_from = "top_middle";
+      out.anchor_to = "top_middle";
+    }
+    if (el.name === "centered_gui_elements_at_bottom_middle") {
+      const prev = Array.isArray(out.offset) ? out.offset : [0, 0];
+      const ox = typeof prev[0] === "number" ? prev[0] : 0;
+      const oy = typeof prev[1] === "number" ? prev[1] : 0;
+      out.offset = [ox, oy - hang];
+    }
   }
   // Hide the thin XP textures when there is nothing to show.
   if (
@@ -866,6 +912,28 @@ function applyPhudElementTokens(
 }
 
 /**
+ * Hide tip chrome that the pack always mounts but the real client collapses
+ * when its bound label is empty (quest-only `&_currency:` → no coin chip).
+ *
+ * @param root - Bound HUD tree.
+ */
+function applyEmptyChromeQuirks(root: ResolvedElement): void {
+  const walk = (el: ResolvedElement): void => {
+    if (el.namespace === "phud_currency" && el.name === "currency") {
+      let labelText = "";
+      for (const c of el.controls) {
+        if (c.element.type !== "label") continue;
+        const t = c.element.props.text;
+        if (typeof t === "string") labelText = t;
+      }
+      if (!labelText.trim()) el.props.visible = false;
+    }
+    for (const c of el.controls) walk(c.element);
+  };
+  walk(root);
+}
+
+/**
  * Resolve `text` / `texture` values that are `#property` refs or `(…)` exprs.
  *
  * @param out - Bound props.
@@ -956,15 +1024,41 @@ function applyRendererSizing(
       break;
     case "horse_jump_renderer":
     case "dash_renderer":
-      // Pack nests hotbar_chooser under these with offset [4, 16] and a fixed
-      // height of 5 (XP strip). Expand so the hanging hotbar isn't clipped by
-      // the stacking-context border box (z-index + short parent).
-      if (vitals)
+      // Pack size is ["100%c", 5]; hotbar hangs via offset [4, 16]. Chromium
+      // clips that overflow inside the layer:7 stacking context — grow the
+      // host downward (top_middle) so the bar stays inside this box. Do NOT
+      // keep bottom_middle + tall size (that pulled hearts onto the hotbar).
+      if (vitals) {
         out.size = [HOTBAR_SLOT_W * HOTBAR_SLOTS + 10, 5 + 16 + HOTBAR_H];
+        out.anchor_from = "top_middle";
+        out.anchor_to = "top_middle";
+      }
       break;
     default:
       break;
   }
+}
+
+/**
+ * Pin the hanging hotbar to the top of the expanded XP/dash host.
+ *
+ * Pack uses default center anchors + offset [4,16] against a 5gui strip; after
+ * we grow that host, center-anchoring parks the bar past the box bottom where
+ * Chromium clips it (invisible slots, page-bg luma in screenshots).
+ *
+ * @param el - Element.
+ * @param out - Props to mutate.
+ * @param vitals - Vitals (skip when absent).
+ */
+function applyHotbarHangPin(
+  el: ResolvedElement,
+  out: PropertyBag,
+  vitals: VitalsFrame | null,
+): void {
+  if (!vitals || el.name !== "hotbar_chooser") return;
+  out.anchor_from = "top_left";
+  out.anchor_to = "top_left";
+  out.offset = [4, 16];
 }
 
 /**
