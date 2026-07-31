@@ -27,6 +27,13 @@ const PRELOAD_TEXTURES = [
   "textures/ui/phud/standby",
   "textures/ui/phud/box_small",
   "textures/ui/phud/box_wide",
+  // Sidebar / XP chrome — warm texture-info before first PHUD paint so
+  // golden screenshots do not race createImageBitmap / .json fetches.
+  "textures/ui/sidebar/dock",
+  "textures/ui/sidebar/data",
+  "textures/ui/sidebar/ring",
+  "textures/ui/filled_progress_bar",
+  "textures/ui/Black",
 ] as const;
 
 /** Options for {@link createJsonUiRuntime}. */
@@ -107,7 +114,13 @@ export function createJsonUiRuntime(opts: JsonUiRuntimeOptions): JsonUiRuntime {
   let lastHover: number | null = null;
 
   const textureInfoCache = new Map<string, TextureInfo>();
+  const textureInfoInflight = new Map<string, Promise<void>>();
   const assetHttp = new AssetClient(assetBase || "http://127.0.0.1");
+  // Golden / capture harness polls this before screenshot.
+  const pendingWin = window as unknown as {
+    __jsonUiTexturesPending?: number;
+  };
+  pendingWin.__jsonUiTexturesPending = pendingWin.__jsonUiTexturesPending ?? 0;
 
   const assets: JsonUiAssets = {
     textureUrl(path: string): string {
@@ -127,32 +140,47 @@ export function createJsonUiRuntime(opts: JsonUiRuntimeOptions): JsonUiRuntime {
    */
   async function preloadTextureInfo(path: string): Promise<void> {
     if (textureInfoCache.has(path) || !assetBase) return;
-    try {
-      const [meta, bmp, pngSize] = await Promise.all([
-        assetHttp.fetchJson<{
-          nineslice_size?: unknown;
-          base_size?: unknown;
-        }>(`${path}.json`),
-        assetHttp.fetchImage(path),
-        readPngSize(path),
-      ]);
-      const base = Array.isArray(meta?.base_size) ? meta!.base_size : null;
-      const w = bmp?.width || pngSize?.w || (base && Number(base[0])) || 0;
-      const h = bmp?.height || pngSize?.h || (base && Number(base[1])) || 0;
-      if (w <= 0 && h <= 0 && meta?.nineslice_size === undefined) return;
-      textureInfoCache.set(path, {
-        w: w || Number(base?.[0]) || 0,
-        h: h || Number(base?.[1]) || 0,
-        nineslice: meta?.nineslice_size,
-      });
+    const existing = textureInfoInflight.get(path);
+    if (existing) return existing;
+
+    pendingWin.__jsonUiTexturesPending =
+      (pendingWin.__jsonUiTexturesPending ?? 0) + 1;
+    const work = (async () => {
       try {
-        bmp?.close();
+        const [meta, bmp, pngSize] = await Promise.all([
+          assetHttp.fetchJson<{
+            nineslice_size?: unknown;
+            base_size?: unknown;
+          }>(`${path}.json`),
+          assetHttp.fetchImage(path),
+          readPngSize(path),
+        ]);
+        const base = Array.isArray(meta?.base_size) ? meta!.base_size : null;
+        const w = bmp?.width || pngSize?.w || (base && Number(base[0])) || 0;
+        const h = bmp?.height || pngSize?.h || (base && Number(base[1])) || 0;
+        if (w <= 0 && h <= 0 && meta?.nineslice_size === undefined) return;
+        textureInfoCache.set(path, {
+          w: w || Number(base?.[0]) || 0,
+          h: h || Number(base?.[1]) || 0,
+          nineslice: meta?.nineslice_size,
+        });
+        try {
+          bmp?.close();
+        } catch {
+          /* ignore */
+        }
       } catch {
-        /* ignore */
+        // Missing vanilla chrome in fixture packs is fine.
+      } finally {
+        pendingWin.__jsonUiTexturesPending = Math.max(
+          0,
+          (pendingWin.__jsonUiTexturesPending ?? 1) - 1,
+        );
+        textureInfoInflight.delete(path);
       }
-    } catch {
-      // Missing vanilla chrome in fixture packs is fine.
-    }
+    })();
+    textureInfoInflight.set(path, work);
+    return work;
   }
 
   /**

@@ -4,7 +4,10 @@
  * solid background (canvas hidden — the world render has its own goldens;
  * these lock the DOM overlay's layout).
  *
- * Packs come from testdata/jsonui; textures 404 → empty icons (deterministic).
+ * Packs come from testdata/jsonui; chrome resolves from the live extract +
+ * vanilla baseline. Sidebar sprite/ball PNGs are forced 404 so icon paint
+ * cannot race the screenshot (empty ring = deterministic). Capture still
+ * waits for fonts + URL-set plateau + CSS decode (jsonUiPaintReady).
  * Same env knobs as golden.spec (GOLDEN_UPDATE=1 / GOLDEN_SOFT=1).
  */
 import { expect, test, type Page } from "@playwright/test";
@@ -23,6 +26,7 @@ import {
   type JsonlFrame,
 } from "./fixtureServer";
 import { assertGolden } from "./goldenCompare";
+import { waitForJsonUiPaintReady } from "./jsonUiPaintReady";
 import { handleJsonUiPackRequest } from "./jsonuiPackServer";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -72,6 +76,21 @@ async function startHarness(): Promise<Harness> {
       if (url.pathname === "/stream") {
         stream.handle(req, res);
         return;
+      }
+      // Live extract has 3k+ sprites; binding them a frame late flakes goldens.
+      // 404 keeps pokemon/ball faces empty while dock/plate/bar chrome still load.
+      if (url.pathname.startsWith("/asset/")) {
+        const rel = decodeURIComponent(
+          url.pathname.slice("/asset/".length),
+        ).replace(/\\/g, "/");
+        if (
+          rel.startsWith("textures/sprites/") ||
+          rel.includes("/sidebar/balls/")
+        ) {
+          res.writeHead(404, { "access-control-allow-origin": "*" });
+          res.end("golden: omit sprite/ball");
+          return;
+        }
       }
       if (handleJsonUiPackRequest(req, res)) return;
       res.writeHead(404);
@@ -189,8 +208,9 @@ function moveLabel(
  * @param name - Golden name (file `phud-<name>.png`).
  */
 async function shoot(page: Page, name: string): Promise<void> {
-  await page.waitForTimeout(150); // one settle paint
-  const png = await page.screenshot({ type: "png", animations: "disabled" });
+  // Fonts + CSS background decode + pending texture-info + two identical
+  // frames. Fixed 150ms raced font fallback and unfinished HP-bar textures.
+  const png = await waitForJsonUiPaintReady(page);
   expect(png.length).toBeGreaterThan(5_000);
   assertGolden({
     name: `phud-${name}`,
