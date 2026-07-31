@@ -481,24 +481,28 @@ function buildHudRoot(resolver: UiResolver): ResolvedElement {
     if (phud) controls.push({ id: "phud", element: phud });
   }
 
-  // Ping lives under chat_stack in the pack (tip content is bottom_middle).
-  // Pruned HUD omits chat_stack — mount at root with the same bottom_middle
-  // anchors so the tip sits above the hotbar, not at default center.
-  if (!controls.some((c) => c.id === "player_ping")) {
+  // Pack: `root_panel/chat_stack` insert_after `player_position` → player_ping.
+  // Pruned HUD drops the full chat stack; mount a slim top-left stack so ping
+  // inherits authored flow. Do NOT force tip `bottom_middle` — those anchors
+  // belong to the label row *inside* playerPing.json, not the host.
+  if (!controls.some((c) => c.id === "chat_stack" || c.id === "player_ping")) {
     const ping = resolver.resolve("player_ping", "main");
     if (ping) {
       const el = applyPathKeyOverrides(resolver, "player_ping", "main", ping);
       controls.push({
-        id: "player_ping",
+        id: "chat_stack",
         element: {
-          ...el,
+          type: "stack_panel",
+          name: "chat_stack",
+          namespace: "hud",
           props: {
-            ...el.props,
-            anchor_from: "bottom_middle",
-            anchor_to: "bottom_middle",
-            // Clear the survival strip (centered_gui is 50gui + hanging hotbar).
-            offset: el.props.offset ?? [0, -55],
+            orientation: "vertical",
+            size: ["40%", "100%"],
+            anchor_from: "top_left",
+            anchor_to: "top_left",
           },
+          bindings: [],
+          controls: [{ id: "player_ping", element: el }],
         },
       });
     }
@@ -634,6 +638,8 @@ function bindTree(
   }
   // Empty party slots still bind ball texture `…/balls/empty` — hide that icon
   // so only occupied plates paint (matches real client empty = invisible).
+  // `paintNode` still walks visible children when the host is hidden so a
+  // missing ball does not swallow `pokemon_icon`.
   if (el.name === "ball_icon") {
     const ball = out.ball_type;
     if (ball === "empty" || ball === "null" || ball === "") out.visible = false;
@@ -654,23 +660,28 @@ function bindTree(
   // Prefer live phud map on the elements panel before children bind, so
   // loadingScreen/phone see tokens even when title-lane latches lag. Clear
   // absent overlay tokens so a bad sibling latch cannot keep dirt painted.
-  if (el.name === "elements" && el.namespace === "phud" && phud) {
-    for (const token of [
-      "phone",
-      "sidebar",
-      "loadingScreen",
-      "evolutionWait",
-      "battleWait",
-      "playerPing",
-    ] as const) {
-      const prop = phudTokenProp(token);
-      if (!prop) continue;
-      const key = prop.startsWith("#") ? prop.slice(1) : prop;
-      // Keep "" on clear — `(not (#token = ''))` needs the empty string present.
-      if (phud.has(token)) out[key] = phud.get(token)!;
-      else delete out[key];
+  if (el.name === "elements" && el.namespace === "phud") {
+    // Pack omits size; Bedrock fills the parent. Our `default` size is content
+    // AABB + center anchors → live dump (193,92) 894×536 inset ("squished HUD").
+    out.size = ["100%", "100%"];
+    if (phud) {
+      for (const token of [
+        "phone",
+        "sidebar",
+        "loadingScreen",
+        "evolutionWait",
+        "battleWait",
+        "playerPing",
+      ] as const) {
+        const prop = phudTokenProp(token);
+        if (!prop) continue;
+        const key = prop.startsWith("#") ? prop.slice(1) : prop;
+        // Keep "" on clear — `(not (#token = ''))` needs the empty string present.
+        if (phud.has(token)) out[key] = phud.get(token)!;
+        else delete out[key];
+      }
+      if (phud.has("currency")) out.level_number = phud.get("currency")!;
     }
-    if (phud.has("currency")) out.level_number = phud.get("currency")!;
   }
   // Hotbar grid uses grid_item_template; HUD seeds dimensions. Form grids
   // (starter picker) expand via collections.expandCollections.
@@ -680,11 +691,25 @@ function bindTree(
     out.grid_dimensions = [1, 1];
   }
   // Pack keeps XP hosts at 5gui and nests hotbar under empty→full→nub→horse
-  // →dash (all layer≥1 stacking contexts). Chromium clips that overflow — grow
-  // the whole chain downward and nudge centered_gui up so the bar stays on
-  // screen. Growing only horse/dash still left nub/full/empty clipping.
+  // →dash (layer≥1 stacking contexts). Chromium clips that overflow — grow the
+  // chain to fit the bar. Keep centered_gui bottom-flush (do NOT nudge it up;
+  // that left an ~86css gap under the hotbar in live dumps). Inner hosts stay
+  // top_middle inside the grown exp panel so tall bottom_middle boxes do not
+  // eat the heart row. Hotbar pins to the host floor via applyHotbarHangPin.
   if (vitals) {
     const hang = 5 + 16 + HOTBAR_H;
+    if (el.name === "exp_progress_bar_and_hotbar") {
+      const w =
+        Array.isArray(out.size) && typeof out.size[0] === "number"
+          ? out.size[0]
+          : HOTBAR_SLOT_W * HOTBAR_SLOTS + 10;
+      out.size = [w, hang];
+      out.anchor_from = "bottom_middle";
+      out.anchor_to = "bottom_middle";
+      // Authored `$xp_control_offset` defaults to [0,-13]; zero keeps the bar
+      // on the screen floor (real client hotbar is edge-flush).
+      out.offset = [0, 0];
+    }
     if (
       el.name === "resizing_xp_bar_with_hotbar" ||
       el.name === "empty_progress_bar" ||
@@ -699,12 +724,6 @@ function bindTree(
       out.size = [w, hang];
       out.anchor_from = "top_middle";
       out.anchor_to = "top_middle";
-    }
-    if (el.name === "centered_gui_elements_at_bottom_middle") {
-      const prev = Array.isArray(out.offset) ? out.offset : [0, 0];
-      const ox = typeof prev[0] === "number" ? prev[0] : 0;
-      const oy = typeof prev[1] === "number" ? prev[1] : 0;
-      out.offset = [ox, oy - hang];
     }
   }
   // Hide the thin XP textures when there is nothing to show.
@@ -1040,11 +1059,11 @@ function applyRendererSizing(
 }
 
 /**
- * Pin the hanging hotbar to the top of the expanded XP/dash host.
+ * Pin the hotbar to the floor of the expanded XP/dash host.
  *
  * Pack uses default center anchors + offset [4,16] against a 5gui strip; after
  * we grow that host, center-anchoring parks the bar past the box bottom where
- * Chromium clips it (invisible slots, page-bg luma in screenshots).
+ * Chromium clips it. Floor-pin keeps the bar edge-flush with the screen.
  *
  * @param el - Element.
  * @param out - Props to mutate.
@@ -1056,9 +1075,9 @@ function applyHotbarHangPin(
   vitals: VitalsFrame | null,
 ): void {
   if (!vitals || el.name !== "hotbar_chooser") return;
-  out.anchor_from = "top_left";
-  out.anchor_to = "top_left";
-  out.offset = [4, 16];
+  out.anchor_from = "bottom_middle";
+  out.anchor_to = "bottom_middle";
+  out.offset = [4, 0];
 }
 
 /**

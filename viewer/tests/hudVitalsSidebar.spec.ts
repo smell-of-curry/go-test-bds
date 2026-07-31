@@ -379,17 +379,21 @@ test("empty slots hidden; air/armor/xp gated; no fat green XP", async ({
       ) as HTMLElement | null;
       if (!el || getComputedStyle(el).display === "none") return null;
       const r = el.getBoundingClientRect();
-      return { w: r.width, h: r.height, y: r.y, bottom: r.bottom };
+      return { w: r.width, h: r.height, x: r.x, y: r.y, bottom: r.bottom };
     });
     expect(pingBox).not.toBeNull();
     expect(pingBox!.h).toBeLessThan(40);
     expect(pingBox!.w).toBeLessThan(280);
-    // Fixture host is 1024×576: bottom_middle + offset lands ~442, not center (~276).
-    const hostH = await page.evaluate(
-      () => document.getElementById("host")?.clientHeight ?? 576,
-    );
-    expect(pingBox!.y).toBeGreaterThan(hostH * 0.5);
-    expect(pingBox!.bottom).toBeLessThanOrEqual(hostH + 1);
+    // Pack mounts ping under chat_stack (top_left), not tip bottom_middle.
+    const hostBox = await page.evaluate(() => {
+      const host = document.getElementById("host");
+      return {
+        w: host?.clientWidth ?? 1280,
+        h: host?.clientHeight ?? 720,
+      };
+    });
+    expect(pingBox!.y).toBeLessThan(hostBox.h * 0.25);
+    expect(pingBox!.x).toBeLessThan(hostBox.w * 0.25);
 
     // Live land glitch: AirSupply=0 must not paint a bubble row.
     await page.evaluate(() => {
@@ -761,6 +765,138 @@ test("hearts sit above hotbar; quest-only currency hides coin chip", async ({
     // Authored: empty slots keep row height + dock, but no plate/ring paint.
     expect(layout.dataPlateCount).toBe(1);
     expect(layout.ringCount).toBe(1);
+  } finally {
+    await harness.close();
+  }
+});
+
+test("HUD placement: full root, hotbar floor, top chips, ping top-left", async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  const harness = await startHarness();
+  try {
+    await page.setViewportSize({ width: 1280, height: 720 });
+    await page.goto(harness.pageUrl, { waitUntil: "domcontentloaded" });
+    await page.waitForFunction(() => document.body.dataset.ready === "1", {
+      timeout: 60_000,
+    });
+
+    const EMPTY = ["null", "null", "null", "false", "empty", "null", "100"];
+    const pad = (s: string) => s.padEnd(120, "|");
+    const sidebar = [
+      [
+        "HP: 20/20§r§f Lv. 5",
+        "§fBulbasaur",
+        "bulbasaur",
+        "true",
+        "poke",
+        "default/bulbasaur",
+        "37",
+      ],
+      EMPTY,
+      EMPTY,
+      EMPTY,
+      EMPTY,
+      EMPTY,
+    ]
+      .flat()
+      .map(pad)
+      .join("|");
+    const currency = "Go see Professor Oak at the lab".padEnd(80, "_");
+
+    await page.evaluate(
+      ({ sidebar, currency, vitals }) => {
+        (
+          window as unknown as {
+            __jsonUi: {
+              setHud: (phud: Record<string, string>, v: typeof vitals) => void;
+            };
+          }
+        ).__jsonUi.setHud(
+          { sidebar, currency, playerPing: "§a0", phone: "" },
+          vitals,
+        );
+      },
+      {
+        sidebar,
+        currency,
+        vitals: {
+          v: 1 as const,
+          type: "vitals" as const,
+          bot: "TestBot",
+          tick: 3,
+          health: 16,
+          maxHealth: 20,
+          food: 18,
+          air: 300,
+          maxAir: 300,
+          armor: 0,
+          xpLevel: 0,
+          xpProgress: 0,
+          selectedSlot: 0,
+          hotbar: Array.from({ length: 9 }, () => null),
+        },
+      },
+    );
+
+    await page.waitForFunction(
+      () =>
+        !!document.querySelector('[data-jsonui-name="hud.hotbar_panel"]') &&
+        !!document.querySelector('[data-jsonui-name="phud_currency.quest"]') &&
+        !!document.querySelector('[data-jsonui-name="player_ping.main"]'),
+      undefined,
+      { timeout: 15_000 },
+    );
+
+    const place = await page.evaluate(() => {
+      const host = document.getElementById("host")!;
+      const hostH = host.clientHeight;
+      const hostW = host.clientWidth;
+      const rect = (sel: string) => {
+        const el = document.querySelector(sel) as HTMLElement | null;
+        if (!el || getComputedStyle(el).display === "none") return null;
+        const r = el.getBoundingClientRect();
+        const hr = host.getBoundingClientRect();
+        return {
+          x: r.left - hr.left,
+          y: r.top - hr.top,
+          w: r.width,
+          h: r.height,
+          bottom: r.bottom - hr.top,
+        };
+      };
+      return {
+        hostW,
+        hostH,
+        elements: rect('[data-jsonui-name="phud.elements"]'),
+        hotbar: rect('[data-jsonui-name="hud.hotbar_panel"]'),
+        quest: rect('[data-jsonui-name="phud_currency.quest"]'),
+        ping: rect('[data-jsonui-name="player_ping.main"]'),
+      };
+    });
+
+    expect(place.elements).not.toBeNull();
+    // Full-bleed positioning context (live bug: ~894×536 inset at y≈92).
+    expect(place.elements!.x).toBeLessThanOrEqual(1);
+    expect(place.elements!.y).toBeLessThanOrEqual(1);
+    expect(place.elements!.w).toBeGreaterThanOrEqual(place.hostW - 2);
+    expect(place.elements!.h).toBeGreaterThanOrEqual(place.hostH - 2);
+
+    expect(place.hotbar).not.toBeNull();
+    // Hotbar floor-flush (live bug: bottom ~622 on 720 → ~98px gap).
+    expect(place.hotbar!.bottom).toBeGreaterThanOrEqual(place.hostH - 4);
+    expect(place.hotbar!.bottom).toBeLessThanOrEqual(place.hostH + 2);
+
+    expect(place.quest).not.toBeNull();
+    // Quest chip hugs top (authored top_middle + offset [0,8] gui → ~16css).
+    expect(place.quest!.y).toBeLessThan(40);
+
+    expect(place.ping).not.toBeNull();
+    expect(place.ping!.x).toBeLessThan(place.hostW * 0.25);
+    expect(place.ping!.y).toBeLessThan(place.hostH * 0.25);
+    // Must not sit inside the hotbar strip.
+    expect(place.ping!.y).toBeLessThan(place.hotbar!.y - 20);
   } finally {
     await harness.close();
   }
