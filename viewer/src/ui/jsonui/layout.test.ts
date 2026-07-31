@@ -506,6 +506,70 @@ describe("layoutTree layer and visibility", () => {
     assert.equal(tree.children[1]!.layer, 5);
   });
 
+  it("treats omitted / default size as 100% of parent", () => {
+    const root = el(
+      "panel",
+      {
+        size: [200, 100],
+        anchor_from: "top_left",
+        anchor_to: "top_left",
+      },
+      [
+        child(
+          "bg",
+          el("image", {
+            // no size → default → 100%
+            anchor_from: "top_left",
+            anchor_to: "top_left",
+          }),
+        ),
+      ],
+    );
+    const tree = layoutTree(root, VP, { measureText: measureStub });
+    assert.deepEqual(boxOf(tree.children[0]!), { x: 0, y: 0, w: 200, h: 100 });
+  });
+
+  it("overlays px×%c icon gutters so fill buttons stay full width", () => {
+    const root = el(
+      "stack_panel",
+      {
+        size: [200, 32],
+        orientation: "horizontal",
+        anchor_from: "top_left",
+        anchor_to: "top_left",
+      },
+      [
+        child(
+          "panel_name",
+          el("panel", { size: [34, "100%c"] }, [
+            child(
+              "image",
+              el("image", {
+                size: [32, 32],
+                anchor_from: "top_left",
+                anchor_to: "top_left",
+              }),
+            ),
+          ]),
+        ),
+        child(
+          "form_button",
+          el("panel", {
+            size: ["fill", 32],
+            anchor_from: "top_left",
+            anchor_to: "top_left",
+          }),
+        ),
+      ],
+    );
+    const tree = layoutTree(root, VP, { measureText: measureStub });
+    const icon = tree.children[0]!;
+    const btn = tree.children[1]!;
+    assert.equal(icon.box.x, 0);
+    assert.equal(btn.box.x, 0);
+    assert.equal(btn.box.w, 200);
+  });
+
   it("keeps visible:false nodes flagged", () => {
     const root = el(
       "panel",

@@ -566,18 +566,24 @@ function layoutStack(
     const sz = readSizePair(c.element.props.size);
     let w = parseSize(sz[0]);
     const h = parseSize(sz[1]);
-    // Horizontal stacks: bare `100%` beside fixed siblings = fill remainder
-    // (battle plate description next to 40px icon). Parent-width overflows
-    // the 90px plate and stretches HP fills.
+    const overlayGutter =
+      orientation === "horizontal" && isHorizontalOverlayGutter(c.element);
+    // Horizontal stacks: bare `100%` beside fixed *flow* siblings = fill
+    // remainder (battle plate description next to 40px icon). Overlay gutters
+    // (px × %c icon hosts) do not shrink a `100%` / `fill` sibling — ActionForm
+    // icons sit ON the full-width button.
     if (
       orientation === "horizontal" &&
-      childEls.length > 1 &&
+      !overlayGutter &&
+      childEls.some(
+        (o) => o.id !== c.id && !isHorizontalOverlayGutter(o.element),
+      ) &&
       typeof sz[0] === "string" &&
       sz[0].trim() === "100%"
     ) {
       w = parseSize("fill");
     }
-    return { child: c, w, h };
+    return { child: c, w, h, overlayGutter };
   });
 
   // Measure intrinsic (non-fill main-axis) children.
@@ -587,19 +593,23 @@ function layoutStack(
     hParsed: ParsedSize;
     node: LayoutNode;
     mainFill: boolean;
+    overlayGutter: boolean;
   };
   const measured: Measured[] = [];
   let usedMain = 0;
   let maxCross = 0;
 
-  for (const { child, w, h } of childParsed) {
-    const mainFill = orientation === "vertical" ? h.isFill : w.isFill;
+  for (const { child, w, h, overlayGutter } of childParsed) {
+    const mainFill =
+      !overlayGutter && (orientation === "vertical" ? h.isFill : w.isFill);
     const crossFill = orientation === "vertical" ? w.isFill : h.isFill;
 
     // For fill on main axis, measure with 0 remaining so fill→0 during probe.
     const probeFill = {
       remainingW:
-        orientation === "horizontal" && w.isFill ? 0 : tentativeParent.w,
+        orientation === "horizontal" && w.isFill && !overlayGutter
+          ? 0
+          : tentativeParent.w,
       remainingH:
         orientation === "vertical" && h.isFill ? 0 : tentativeParent.h,
     };
@@ -617,7 +627,8 @@ function layoutStack(
       probeFill,
     );
     // Re-parent coords later; for now use size only.
-    if (!mainFill) {
+    // Overlay gutters (ActionForm icon hosts) do not consume main-axis flow.
+    if (!mainFill && !overlayGutter) {
       usedMain += orientation === "vertical" ? node.box.h : node.box.w;
     }
     maxCross = Math.max(
@@ -630,6 +641,7 @@ function layoutStack(
       hParsed: h,
       node,
       mainFill,
+      overlayGutter,
     });
   }
 
@@ -637,7 +649,10 @@ function layoutStack(
   const childrenW =
     orientation === "vertical"
       ? maxCross
-      : measured.reduce((s, m) => s + (m.mainFill ? 0 : m.node.box.w), 0);
+      : measured.reduce(
+          (s, m) => s + (m.mainFill || m.overlayGutter ? 0 : m.node.box.w),
+          0,
+        );
   const childrenH =
     orientation === "horizontal"
       ? maxCross
@@ -733,6 +748,8 @@ function layoutStack(
     if (orientation === "vertical") {
       childFill.remainingH = m.mainFill ? perFill : selfBox.h;
     } else {
+      // Overlay gutters and non-fill siblings keep parent width for %; fill
+      // siblings take the remaining flow (full width when only overlays precede).
       childFill.remainingW = m.mainFill ? perFill : selfBox.w;
     }
 
@@ -751,6 +768,13 @@ function layoutStack(
       if (m.mainFill) stacked.box.h = h;
       shiftLayoutTree(stacked, 0, selfBox.y + cursor - stacked.box.y);
       cursor += h;
+    } else if (m.overlayGutter) {
+      // Icon host: pin to stack start (on top of the full-width fill button).
+      shiftLayoutTree(
+        stacked,
+        selfBox.x - stacked.box.x,
+        selfBox.y - stacked.box.y,
+      );
     } else {
       const w = m.mainFill ? perFill : stacked.box.w;
       if (m.mainFill) stacked.box.w = w;
@@ -789,6 +813,22 @@ function layoutStack(
  */
 function factoryUsesStackCompensatedOffsets(el: ResolvedElement): boolean {
   return el.controls.some((c) => c.element.name === "grid_button");
+}
+
+/**
+ * Horizontal stack child that should paint at the stack origin without
+ * consuming main-axis flow — e.g. `server_form.panel_name` (`[34, "100%c"]`)
+ * beside a `fill` ActionForm button. Real client puts the icon ON the button;
+ * flowing it would indent/shrink only textured rows.
+ *
+ * @param el - Stack child element.
+ * @returns true when this child is an overlay gutter.
+ */
+function isHorizontalOverlayGutter(el: ResolvedElement): boolean {
+  const sz = readSizePair(el.props.size);
+  if (typeof sz[0] !== "number" || !Number.isFinite(sz[0])) return false;
+  if (typeof sz[1] !== "string") return false;
+  return /%c/i.test(sz[1].trim());
 }
 
 /**
@@ -1505,17 +1545,14 @@ function readAnchor(raw: unknown, fallback: Anchor): Anchor {
 
 function parseSize(raw: unknown): ParsedSize {
   if (raw === undefined || raw === null || raw === "default") {
-    // Content-sized when children exist; else parent (empty panels keep fill).
+    // Bedrock: omitted / `"default"` size is `"100%"` of the parent (wiki).
+    // Labels still use text metrics via {@link resolveSizePair}.
     return {
-      needsChildren: true,
+      needsChildren: false,
       needsSelf: false,
       isFill: false,
       isDefault: true,
-      eval: (env, axis) => {
-        const content = axis === "w" ? env.childrenW : env.childrenH;
-        if (content > 0) return content;
-        return axis === "w" ? env.parentW : env.parentH;
-      },
+      eval: (env, axis) => (axis === "w" ? env.parentW : env.parentH),
     };
   }
   if (raw === "fill") {
