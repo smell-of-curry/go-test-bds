@@ -610,6 +610,68 @@ test("battle form renders the bottom battle bar and hover follows formHover", as
     expect(faces.moveFaces).toBeGreaterThanOrEqual(1);
     expect(faces.whiteSlabs).toBe(0);
 
+    // move_selection host is size 100% + offset 55%/20% — ball sits to the
+    // RIGHT of the move list (run-44 dump had it clamped onto Growl).
+    const moveChrome = await page.evaluate(() => {
+      const battle = document.querySelector(
+        '[data-jsonui-name="battle.main"]',
+      ) as HTMLElement;
+      const ball = [
+        ...battle.querySelectorAll<HTMLElement>(
+          '.jsonui[data-ui-name="move_selection_button"]',
+        ),
+      ].find((el) => {
+        if (el.style.display === "none") return false;
+        const r = el.getBoundingClientRect();
+        return r.width > 20 && r.height > 20;
+      });
+      const moveFaces = [
+        ...battle.querySelectorAll<HTMLElement>(
+          '.jsonui[data-ui-name="grid_button_check_id"] .jsonui[data-ui-name="button"]',
+        ),
+      ]
+        .filter((el) => {
+          if (el.style.display === "none") return false;
+          const r = el.getBoundingClientRect();
+          return r.width > 40 && r.height > 20;
+        })
+        .map((el) => {
+          const r = el.getBoundingClientRect();
+          return { x: r.x, y: r.y, right: r.right, bottom: r.bottom };
+        });
+      const ballBox = ball?.getBoundingClientRect();
+      const xs = [...new Set(moveFaces.map((m) => Math.round(m.x / 40) * 40))];
+      const leftCol = moveFaces.filter((m) => m.x < 450);
+      const leftYs = leftCol.map((m) => m.y).sort((a, b) => a - b);
+      let minLeftGap = Infinity;
+      for (let i = 1; i < leftYs.length; i++) {
+        minLeftGap = Math.min(minLeftGap, leftYs[i]! - leftYs[i - 1]!);
+      }
+      return {
+        ballX: ballBox?.x ?? -1,
+        ballRight: ballBox?.right ?? -1,
+        moveMaxRight: moveFaces.reduce((a, m) => Math.max(a, m.right), 0),
+        moveMinX: moveFaces.reduce((a, m) => Math.min(a, m.x), Infinity),
+        columnBuckets: xs.length,
+        leftColCount: leftCol.length,
+        minLeftGap: Number.isFinite(minLeftGap) ? minLeftGap : 0,
+        ballOverlapsLeftMoves:
+          !!ballBox &&
+          leftCol.some(
+            (m) =>
+              ballBox.x < m.right - 8 &&
+              ballBox.right > m.x + 8 &&
+              ballBox.y < m.bottom - 8 &&
+              ballBox.bottom > m.y + 8,
+          ),
+      };
+    });
+    expect(moveChrome.ballX).toBeGreaterThan(600);
+    expect(moveChrome.ballOverlapsLeftMoves).toBe(false);
+    // Pack grid_button: left column (-19%) + right column (21.5%).
+    expect(moveChrome.columnBuckets).toBeGreaterThanOrEqual(2);
+    expect(moveChrome.leftColCount).toBeGreaterThanOrEqual(1);
+
     // Hover the second move button (index 1 on the form).
     h.broadcast({
       v: 1,

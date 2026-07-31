@@ -298,6 +298,39 @@ describe("layoutTree anchors and offsets", () => {
     });
   });
 
+  it("keeps full-width center offset (battle move_selection host)", () => {
+    // Pack: size 100%×100% + offset 55% — must not clamp back to x=0.
+    const tree = layoutTree(
+      el(
+        "panel",
+        {
+          size: [200, 100],
+          anchor_from: "top_left",
+          anchor_to: "top_left",
+        },
+        [
+          child(
+            "move_selection_button",
+            el("panel", {
+              size: ["100%", "100%"],
+              anchor_from: "center",
+              anchor_to: "center",
+              offset: ["55%", "20%"],
+            }),
+          ),
+        ],
+      ),
+      VP,
+      { measureText: measureStub },
+    );
+    // center in 200×100 + 55% of self width (110) → x=110 (not clamped to 0)
+    const box = boxOf(tree.children[0]!);
+    assert.equal(box.w, 200);
+    assert.equal(box.h, 100);
+    assert.ok(Math.abs(box.x - 110) < 0.01, `x=${box.x}`);
+    assert.ok(Math.abs(box.y - 20) < 0.01, `y=${box.y}`);
+  });
+
   it("positions center", () => {
     const tree = layoutTree(
       el("panel", {

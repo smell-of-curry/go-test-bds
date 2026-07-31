@@ -1190,6 +1190,10 @@ function clipRightOverflow(
  * chip) stay put — actor plates are clamped separately via
  * {@link clampBattleActorPlateToViewport}.
  *
+ * Full-width (or wider) children are skipped: battle `move_selection_button`
+ * host is `size: ["100%","100%"]` with `offset: ["55%","20%"]` — clamping
+ * that back to `x=0` drops the pokéball on top of the move list (run-44).
+ *
  * @param box - Positioned box (mutated in place when clamped).
  * @param parent - Parent layout box.
  * @param anchorFrom - Element `anchor_from`.
@@ -1200,7 +1204,8 @@ function clampHorizontalInParent(
   anchorFrom: Anchor,
 ): void {
   if (ANCHORS[anchorFrom].x >= 0.999) return;
-  if (box.w <= 0 || box.w > parent.w) return;
+  // `>=` — equal-width + offset must keep the offset (not flush to 0).
+  if (box.w <= 0 || box.w >= parent.w) return;
   const parentRight = parent.x + parent.w;
   if (box.x < parent.x && parent.x - box.x > box.w * 0.5) {
     box.x = parent.x;
