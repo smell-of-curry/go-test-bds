@@ -3,9 +3,15 @@
  * layout, DOM paint, plus native-renderer stubs for vanilla vitals/hotbar.
  */
 
+import { mapMinecraftGlyphs } from "../formatCodes";
 import { applyBindings } from "./bindings";
 import { renderTree, type JsonUiAssets } from "./dom";
 import { evalExpr, parseExpr } from "./expr";
+import {
+  LABEL_FONT_SIZE_GUI,
+  LABEL_LINE_HEIGHT_GUI,
+  collapseLangPercentEscapes,
+} from "./labelMetrics";
 import { layoutTree, type LayoutNode, type MeasureText } from "./layout";
 import { localizeLabelText } from "./load";
 import type {
@@ -304,44 +310,59 @@ export function createHudRenderer(
 ): HudRenderer {
   const guiScale = opts.guiScale ?? DEFAULT_GUI_SCALE;
   const lang = opts.lang;
+  const fontStack =
+    '"Minecraft", ui-sans-serif, system-ui, "Segoe UI", sans-serif';
   const measureText =
     opts.measureText ??
     (typeof document !== "undefined"
       ? (text: string, fontScale: number) => {
-          const plain = stripSection(text);
+          // Collapse %% and strip § before split — same plain text paint sees.
+          const plain = mapMinecraftGlyphs(
+            collapseLangPercentEscapes(stripSection(text)),
+          );
           const lines = plain.length ? plain.split("\n") : [""];
           const canvas = document.createElement("canvas");
           const ctx = canvas.getContext("2d");
-          const fontPx = 8 * fontScale;
-          let maxW = 1;
+          // Measure at paint CSS size so wrap matches; convert back to gui px.
+          const cssFontPx = LABEL_FONT_SIZE_GUI * guiScale * fontScale;
+          let maxWcss = 1;
           if (ctx) {
-            ctx.font = `${fontPx}px "Minecraft", ui-sans-serif, system-ui, "Segoe UI", sans-serif`;
+            const measureLine = (raw: string, bold: boolean): number => {
+              ctx.font = `${bold ? "700 " : ""}${cssFontPx}px ${fontStack}`;
+              const marker = ctx.measureText("M").width;
+              return Math.max(0, ctx.measureText(`${raw}M`).width - marker);
+            };
             for (const line of lines) {
               // Trailing spaces are significant (`Current Ping: ` + §value).
-              // measureText can ignore them — append a marker glyph and subtract.
               const raw = line || " ";
-              const marker = ctx.measureText("M").width;
-              const w = Math.max(0, ctx.measureText(`${raw}M`).width - marker);
-              maxW = Math.max(maxW, w);
+              // Take bold max — §l titles (TUTORIAL COMPLETE) paint wider.
+              maxWcss = Math.max(
+                maxWcss,
+                measureLine(raw, false),
+                measureLine(raw, true),
+              );
             }
           } else {
             let maxLen = 1;
             for (const line of lines) maxLen = Math.max(maxLen, line.length);
-            maxW = maxLen * 6 * fontScale;
+            maxWcss = maxLen * 6 * guiScale * fontScale;
           }
+          // +1gui pad: hairline CSS/canvas mismatch must not wrap the last word.
           return {
-            w: Math.max(1, maxW),
-            h: Math.max(1, lines.length) * 9 * fontScale,
+            w: Math.max(1, maxWcss / guiScale + 1),
+            h: Math.max(1, lines.length) * LABEL_LINE_HEIGHT_GUI * fontScale,
           };
         }
       : (text: string, fontScale: number) => {
-          const plain = stripSection(text);
+          const plain = mapMinecraftGlyphs(
+            collapseLangPercentEscapes(stripSection(text)),
+          );
           const lines = plain.length ? plain.split("\n") : [""];
           let maxLen = 1;
           for (const line of lines) maxLen = Math.max(maxLen, line.length);
           return {
-            w: Math.max(1, maxLen * 6 * fontScale),
-            h: Math.max(1, lines.length) * 9 * fontScale,
+            w: Math.max(1, maxLen * 6 * fontScale + 1),
+            h: Math.max(1, lines.length) * LABEL_LINE_HEIGHT_GUI * fontScale,
           };
         });
 

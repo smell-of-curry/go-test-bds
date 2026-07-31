@@ -9,6 +9,10 @@
 
 import { mapMinecraftGlyphs } from "../formatCodes";
 import { evalExpr, parseExpr } from "./expr.js";
+import {
+  collapseLangPercentEscapes,
+  resolveLabelFontScale,
+} from "./labelMetrics";
 import type {
   LayoutBox,
   PropertyBag,
@@ -1270,14 +1274,11 @@ function resolveSizePair(
   return { w: finite(w), h: finite(h) };
 }
 
-function labelFontScale(el: ResolvedElement): number {
-  const raw = el.props.font_scale_factor;
-  if (typeof raw === "number") return raw;
-  if (typeof raw === "string" && raw.trim() !== "") {
-    const n = Number(raw);
-    if (Number.isFinite(n)) return n;
-  }
-  return 1;
+function labelPlainForMeasure(text: string): string {
+  // Strip § codes; collapse lang `%%`; keep `\n` for multiline height.
+  return mapMinecraftGlyphs(
+    collapseLangPercentEscapes(text.replace(/[§&]./g, "")),
+  );
 }
 
 function labelIntrinsic(
@@ -1286,10 +1287,8 @@ function labelIntrinsic(
 ): TextMetrics | null {
   if (el.type !== "label") return null;
   const text = typeof el.props.text === "string" ? el.props.text : "";
-  const fontScale = labelFontScale(el);
-  // Strip § codes for measurement; keep `\n` so multiline labels size tall.
-  const plain = mapMinecraftGlyphs(text.replace(/[§&]./g, ""));
-  return opts.measureText(plain, fontScale);
+  const fontScale = resolveLabelFontScale(el.props);
+  return opts.measureText(labelPlainForMeasure(text), fontScale);
 }
 
 /**
@@ -1306,8 +1305,8 @@ function labelWrappedHeight(
   maxW: number,
 ): number {
   const text = typeof el.props.text === "string" ? el.props.text : "";
-  const fontScale = labelFontScale(el);
-  const plain = mapMinecraftGlyphs(text.replace(/[§&]./g, ""));
+  const fontScale = resolveLabelFontScale(el.props);
+  const plain = labelPlainForMeasure(text);
   // Match the caller's measureText metrics (tests use 8gui/line; runtime 9).
   const sample = opts.measureText("X", fontScale);
   const charW = Math.max(1, sample.w);

@@ -12,6 +12,10 @@ import {
   type CollectionMap,
 } from "./collections.js";
 import { renderTree, type JsonUiAssets, type TextureInfoMap } from "./dom.js";
+import {
+  LABEL_LINE_HEIGHT_GUI,
+  collapseLangPercentEscapes,
+} from "./labelMetrics.js";
 import { layoutTree, type LayoutNode, type MeasureText } from "./layout.js";
 import type {
   BindingSource,
@@ -326,10 +330,16 @@ export function createFormRenderer(deps: FormRendererDeps): FormRenderer {
   const guiScale = deps.guiScale ?? 2;
   const measureText =
     deps.measureText ??
-    ((text: string, fontScale: number) => ({
-      w: Math.max(1, text.length * 6 * fontScale),
-      h: 9 * fontScale,
-    }));
+    ((text: string, fontScale: number) => {
+      const plain = collapseLangPercentEscapes(text.replace(/[§&]./g, ""));
+      const lines = plain.length ? plain.split("\n") : [""];
+      let maxLen = 1;
+      for (const line of lines) maxLen = Math.max(maxLen, line.length);
+      return {
+        w: Math.max(1, maxLen * 6 * fontScale + 1),
+        h: Math.max(1, lines.length) * LABEL_LINE_HEIGHT_GUI * fontScale,
+      };
+    });
 
   let lastTree: ResolvedElement | null = null;
   let lastRoute: FormRoute | null = null;

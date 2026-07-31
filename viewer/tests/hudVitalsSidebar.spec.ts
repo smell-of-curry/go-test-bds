@@ -634,16 +634,39 @@ test("loadingScreen PHUD paints TUTORIAL COMPLETE over sidebar", async ({
     expect(paint!.textAlign).toBe("center");
     expect(Math.abs(paint!.labelCx - paint!.viewCx)).toBeLessThan(80);
 
-    // Second line must actually paint (not clipped by single-line label box).
-    const welcomeVisible = await page.evaluate(() => {
+    // Trailing "Pokébedrock!" must sit inside the label box (measure==paint).
+    const multilineFit = await page.evaluate(() => {
       const label = document.querySelector(
         '[data-jsonui-name="phud_loadingScreen.main"] .jsonui[data-ui-type="label"]',
       ) as HTMLElement | null;
-      if (!label) return false;
-      const r = label.getBoundingClientRect();
-      return r.height >= 36 && (label.textContent ?? "").includes("Welcome");
+      if (!label) return { ok: false, reason: "no-label" };
+      const text = label.textContent ?? "";
+      if (!text.includes("Welcome") || !text.includes("Pokébedrock")) {
+        return { ok: false, reason: "missing-text", text };
+      }
+      const box = label.getBoundingClientRect();
+      const walker = document.createTreeWalker(label, NodeFilter.SHOW_TEXT);
+      let lastBottom = 0;
+      let node: Node | null;
+      while ((node = walker.nextNode())) {
+        const range = document.createRange();
+        range.selectNodeContents(node);
+        const rects = range.getClientRects();
+        for (let i = 0; i < rects.length; i++) {
+          lastBottom = Math.max(lastBottom, rects[i]!.bottom);
+        }
+      }
+      return {
+        ok: lastBottom <= box.bottom + 1,
+        reason: "clip",
+        lastBottom,
+        boxBottom: box.bottom,
+        boxH: box.height,
+        lineHeight: getComputedStyle(label).lineHeight,
+        fontSize: getComputedStyle(label).fontSize,
+      };
     });
-    expect(welcomeVisible).toBe(true);
+    expect(multilineFit.ok).toBe(true);
   } finally {
     await harness.close();
   }

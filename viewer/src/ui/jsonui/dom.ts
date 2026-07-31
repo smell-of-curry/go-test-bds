@@ -4,8 +4,16 @@
  */
 
 import { formatCodesToFragment } from "../formatCodes";
+import {
+  LABEL_FONT_SIZE_GUI,
+  LABEL_LINE_HEIGHT_GUI,
+  collapseLangPercentEscapes,
+  resolveLabelFontScale,
+} from "./labelMetrics";
 import { localizeLabelText } from "./load";
 import type { LayoutNode } from "./layout";
+
+export { resolveLabelFontScale } from "./labelMetrics";
 
 /** Natural pixel size + optional texture-json nineslice for a pack texture. */
 export interface TextureInfo {
@@ -631,27 +639,6 @@ function applyClip(
   }
 }
 
-export function resolveLabelFontScale(props: {
-  font_scale_factor?: unknown;
-  font_size?: unknown;
-}): number {
-  const raw = props.font_scale_factor;
-  const fromFactor =
-    typeof raw === "number"
-      ? raw
-      : typeof raw === "string" && raw.trim() !== ""
-        ? Number(raw)
-        : NaN;
-  const factor = Number.isFinite(fromFactor) ? fromFactor : 1;
-  const sizeKey =
-    typeof props.font_size === "string" ? props.font_size.toLowerCase() : "";
-  const sizeScale =
-    ({ small: 0.75, normal: 1, large: 1.25 } as Record<string, number>)[
-      sizeKey
-    ] ?? 1;
-  return factor * sizeScale;
-}
-
 function applyLabel(
   el: HTMLElement,
   node: LayoutNode,
@@ -663,15 +650,22 @@ function applyLabel(
   // bindings overwrite `text` with the final string). The real client renders
   // an unbound label empty, never the literal binding name.
   const unbound = raw.startsWith("#") ? "" : raw;
-  const text = localizeLabelText(
-    unbound,
-    node.element.props.localize,
-    opts.lang,
+  const text = collapseLangPercentEscapes(
+    localizeLabelText(unbound, node.element.props.localize, opts.lang),
   );
   const fontScale = resolveLabelFontScale(node.element.props);
-  const basePx = 8 * opts.guiScale * fontScale;
-  el.style.fontSize = `${basePx}px`;
-  el.style.lineHeight = `${Math.ceil(basePx * 1.125)}px`;
+  // Same constants as hud/forms measureText — not ceil(font*1.125) drift.
+  let fontPx = LABEL_FONT_SIZE_GUI * opts.guiScale * fontScale;
+  let linePx = LABEL_LINE_HEIGHT_GUI * opts.guiScale * fontScale;
+  const boxH = Math.max(0, node.box.h * opts.guiScale);
+  // Short authored boxes (battle HP bar ~8.4gui) must shrink glyphs to fit.
+  if (boxH > 0 && linePx > boxH) {
+    const fit = boxH / linePx;
+    fontPx *= fit;
+    linePx = boxH;
+  }
+  el.style.fontSize = `${fontPx}px`;
+  el.style.lineHeight = `${linePx}px`;
   el.style.whiteSpace = "pre-wrap";
   el.style.overflowWrap = "anywhere";
   // Dialogue body (`main_label`) sits under a hollow title band; keep glyphs

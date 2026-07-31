@@ -584,6 +584,44 @@ test("battle form renders the bottom battle bar and hover follows formHover", as
     expect(plates.plateClipped).toBe(false);
     expect(plates.whiteTinted).toBe(0);
 
+    // HP label: lang `%%` → `%`; glyphs must fit inside health_text box.
+    const hpLabel = await page.evaluate(() => {
+      const labels = [
+        ...document.querySelectorAll<HTMLElement>(
+          '[data-jsonui-name="battle.main"] .jsonui[data-ui-name="health_text"]',
+        ),
+      ].filter((el) => {
+        if (el.style.display === "none") return false;
+        const r = el.getBoundingClientRect();
+        return r.width > 8 && r.height > 2;
+      });
+      return labels.map((el) => {
+        const box = el.getBoundingClientRect();
+        const text = (el.textContent ?? "").trim();
+        const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+        let lastBottom = 0;
+        let node: Node | null;
+        while ((node = walker.nextNode())) {
+          const range = document.createRange();
+          range.selectNodeContents(node);
+          for (const r of range.getClientRects()) {
+            lastBottom = Math.max(lastBottom, r.bottom);
+          }
+        }
+        return {
+          text,
+          doublePercent: text.includes("%%"),
+          hasPercent: text.includes("%"),
+          clipped: lastBottom > box.bottom + 1,
+          boxH: box.height,
+        };
+      });
+    });
+    expect(hpLabel.length).toBeGreaterThanOrEqual(1);
+    expect(hpLabel.every((h) => !h.doublePercent)).toBe(true);
+    expect(hpLabel.some((h) => /100%/.test(h.text))).toBe(true);
+    expect(hpLabel.every((h) => !h.clipped)).toBe(true);
+
     // Default button faces (not hover/locked) must paint; a lone white
     // focus/White slab was the live-pack regression.
     const faces = await page.evaluate(() => {
