@@ -191,10 +191,14 @@ document.body.classList.toggle(
 );
 const motion = new MotionLerp();
 
+// Wired after stream / paint loop exist — placeholders until then.
+let paintGeneration = 0;
+let kickViewer: () => void = () => undefined;
+
 installViewerHandle(
   store,
   scene,
-  // Live remesh queue — `flush()` drains it without sync/tickRemesh, so a
+  // Live remesh queue — flush() drains it without sync/tickRemesh, so a
   // cached boolean would stay false forever after a forced drain.
   () => !store.getState().schemaOk || scene.pendingRemeshCount === 0,
   camera,
@@ -203,6 +207,8 @@ installViewerHandle(
   assetsSettled,
   hud,
   () => jsonUi.getResolver() !== null,
+  () => paintGeneration,
+  () => kickViewer(),
 );
 
 camera.bindOrbitControls(canvas);
@@ -317,44 +323,60 @@ stream.start();
  * matter. Interpolation still runs per paint, so motion stays smooth.
  */
 const PAINT_INTERVAL_MS = 50;
-// Negative infinity, not 0: `performance.now()` is already tens of milliseconds
+// Negative infinity, not 0: performance.now() is already tens of milliseconds
 // at load, so a zero start would skip the very first paint and leave the camera
 // at the origin for a frame — which a screenshot taken immediately would catch.
 let lastPaintAt = Number.NEGATIVE_INFINITY;
 
+kickViewer = () => {
+  stream.resync(true);
+  // Nudge the paint clock so the next rAF is not interval-throttled away.
+  lastPaintAt = Number.NEGATIVE_INFINITY;
+};
+
 function frame(): void {
-  const now = performance.now();
-  if (now - lastPaintAt < PAINT_INTERVAL_MS) {
-    requestAnimationFrame(frame);
-    return;
-  }
-  const dtSec = Math.min(0.25, (now - lastPaintAt) / 1000);
-  lastPaintAt = now;
+  // Always re-schedule via finally: an uncaught throw in remesh/render used
+  // to kill rAF permanently, which ends Playwright's recordVideo (Chromium
+  // only emits video frames when the page paints) while page.screenshot() /
+  // evaluate still succeed — the showcase-01 stall.
+  try {
+    const now = performance.now();
+    if (now - lastPaintAt < PAINT_INTERVAL_MS) return;
+    const dtSec = Math.min(0.25, (now - lastPaintAt) / 1000);
+    lastPaintAt = now;
 
-  const state = store.getState();
-  if (state.schemaOk) {
-    if (scene.pendingRemeshCount > 0) {
-      scene.tickRemesh(state);
+    const state = store.getState();
+    if (state.schemaOk) {
+      if (scene.pendingRemeshCount > 0) {
+        scene.tickRemesh(state);
+      }
+      const nowMs = performance.now();
+      scene.tickHighlights(nowMs);
+      hud.tick(nowMs);
+
+      const actor = motion.sampleActor() ?? state.actor;
+      const entities = motion.sampleEntities();
+      // MotionLerp (~inter-arrival / ~3 ticks) + Stage 9 bone animation.
+      scene.tickEntities(
+        dtSec > 0 ? dtSec : PAINT_INTERVAL_MS / 1000,
+        entities,
+      );
+
+      camera.setOccludeMeshes(scene.terrainMeshes());
+      camera.update(actor, dtSec > 0 ? dtSec : PAINT_INTERVAL_MS / 1000, now);
+      scene.setActorVisible(
+        showActorBody(),
+        actor ? actor.pos : null,
+        actor?.rot,
+      );
+      scene.render(camera);
     }
-    const nowMs = performance.now();
-    scene.tickHighlights(nowMs);
-    hud.tick(nowMs);
-
-    const actor = motion.sampleActor() ?? state.actor;
-    const entities = motion.sampleEntities();
-    // MotionLerp (~inter-arrival / ~3 ticks) + Stage 9 bone animation.
-    scene.tickEntities(dtSec > 0 ? dtSec : PAINT_INTERVAL_MS / 1000, entities);
-
-    camera.setOccludeMeshes(scene.terrainMeshes());
-    camera.update(actor, dtSec > 0 ? dtSec : PAINT_INTERVAL_MS / 1000, now);
-    scene.setActorVisible(
-      showActorBody(),
-      actor ? actor.pos : null,
-      actor?.rot,
-    );
-    scene.render(camera);
+    paintOverlay();
+    paintGeneration++;
+  } catch (err) {
+    console.warn("viewer: paint frame failed (kept alive):", err);
+  } finally {
+    requestAnimationFrame(frame);
   }
-  paintOverlay();
-  requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);

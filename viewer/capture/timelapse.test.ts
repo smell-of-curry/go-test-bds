@@ -14,6 +14,7 @@ import {
   parseDurationMs,
   REQUIRED_FILTERS,
   resolveKeepSuite,
+  resolveTimelapsePlan,
 } from "./timelapse";
 
 const start = (tMs: number) => ({ message: "walk:start", tMs });
@@ -480,4 +481,50 @@ test("buildSegmentPlan: cutting pre-showcase removes the void open", () => {
     endMs: 6_000,
     mode: "idle",
   });
+});
+
+test("resolveTimelapsePlan: truncated recording with keep-suite past EOF does not idle whole file", () => {
+  const durationMs = 204_000;
+  const intervals = computeMarkedIntervals(
+    [
+      suiteStart(0, "Smoke"),
+      suiteEnd(30_000, "Smoke"),
+      suiteStart(30_000, "Machines"),
+      suiteEnd(200_000, "Machines"),
+      suiteStart(210_000, "Tutorial Showcase"),
+      suiteEnd(600_000, "Tutorial Showcase"),
+    ],
+    durationMs,
+    /showcase/i,
+  );
+  assert.ok(
+    intervals.some((iv) => iv.kind === "loading" && iv.endMs === durationMs),
+  );
+  const resolved = resolveTimelapsePlan(intervals, durationMs, 24);
+  assert.equal(resolved.entireCut, true);
+  assert.equal(resolved.plan, null);
+});
+
+test("resolveTimelapsePlan: truncated recording still keeps in-frame showcase", () => {
+  const durationMs = 204_000;
+  const intervals = computeMarkedIntervals(
+    [
+      suiteStart(0, "Smoke"),
+      suiteEnd(180_000, "Smoke"),
+      suiteStart(180_000, "Tutorial Showcase"),
+      suiteEnd(600_000, "Tutorial Showcase"),
+    ],
+    durationMs,
+    /showcase/i,
+  );
+  const resolved = resolveTimelapsePlan(intervals, durationMs, 24);
+  assert.equal(resolved.entireCut, false);
+  assert.ok(resolved.plan);
+  assert.ok(resolved.plan![0].startMs >= 180_000);
+});
+
+test("resolveTimelapsePlan: idle whole-file only when there are no cuts", () => {
+  const resolved = resolveTimelapsePlan([], 10_000, 24);
+  assert.equal(resolved.entireCut, false);
+  assert.deepEqual(resolved.plan, [{ startMs: 0, endMs: null, mode: "idle" }]);
 });

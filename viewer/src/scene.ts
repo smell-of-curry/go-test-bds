@@ -573,10 +573,20 @@ export class ViewerScene {
     return this.pendingSections.length === 0;
   }
 
-  /** Force-drain every pending section (used by the smoke test settle path). */
-  flush(state: WorldState): void {
+  /**
+   * Drain pending sections synchronously.
+   *
+   * @param state - World model used for meshing.
+   * @param budgetMs - Wall-clock cap. Infinity drains everything (tests).
+   * Capture harness passes a short budget so dense stills cannot wedge rAF.
+   */
+  flush(state: WorldState, budgetMs: number = Number.POSITIVE_INFINITY): void {
     this.storeRef = state;
+    const start = performance.now();
     while (this.pendingSections.length > 0) {
+      if (Number.isFinite(budgetMs) && performance.now() - start >= budgetMs) {
+        break;
+      }
       this.remeshOne(state, this.pendingSections[0]!);
     }
     this.recomputeCounts();
@@ -868,43 +878,47 @@ export class ViewerScene {
 
   private remeshOne(state: WorldState, key: string): void {
     this.dequeueSection(key);
-    const [xs, zs, ys] = key.split(",");
-    const cx = Number(xs);
-    const cz = Number(zs);
-    const sy = Number(ys);
-    const col = state.columns.get(`${cx},${cz}`);
-    if (!col || col.state === "requested") {
-      this.removeSection(key);
-      return;
-    }
-    const section = col.sections.get(sy);
-    if (!section) {
-      this.removeSection(key);
-      return;
-    }
+    try {
+      const [xs, zs, ys] = key.split(",");
+      const cx = Number(xs);
+      const cz = Number(zs);
+      const sy = Number(ys);
+      const col = state.columns.get(`${cx},${cz}`);
+      if (!col || col.state === "requested") {
+        this.removeSection(key);
+        return;
+      }
+      const section = col.sections.get(sy);
+      if (!section) {
+        this.removeSection(key);
+        return;
+      }
 
-    this.removeSection(key);
-    const { meshes, instanceCount } = this.mesher.meshSection(
-      section,
-      col,
-      state,
-    );
-    if (meshes.length === 0 && instanceCount === 0) {
-      // Empty after culling — still count as a meshed section only if we keep a marker?
-      // No geometry → no section node (absent air sections stay absent).
-      return;
+      this.removeSection(key);
+      const { meshes, instanceCount } = this.mesher.meshSection(
+        section,
+        col,
+        state,
+      );
+      if (meshes.length === 0 && instanceCount === 0) {
+        // Empty after culling — still count as a meshed section only if we keep a marker?
+        // No geometry → no section node (absent air sections stay absent).
+        return;
+      }
+      const group = new THREE.Group();
+      group.name = `section:${key}`;
+      group.visible = this.worldVisible;
+      for (const m of meshes) group.add(m);
+      this.scene.add(group);
+      this.sections.set(key, {
+        key,
+        group,
+        instanceCount,
+        meshCount: meshes.length,
+      });
+    } catch (err) {
+      console.warn("viewer: remesh failed:", key, err);
     }
-    const group = new THREE.Group();
-    group.name = `section:${key}`;
-    group.visible = this.worldVisible;
-    for (const m of meshes) group.add(m);
-    this.scene.add(group);
-    this.sections.set(key, {
-      key,
-      group,
-      instanceCount,
-      meshCount: meshes.length,
-    });
   }
 
   private removeSection(key: string): void {

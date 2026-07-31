@@ -451,6 +451,28 @@ export interface PlanPiece {
  * @returns kept pieces covering the non-cut ranges, or null when there is
  * nothing to rewrite.
  */
+/**
+ * Resolve encode plan; entireCut when suite cuts removed everything (do not
+ * idle-fallback the whole file — that re-ships Smoke on truncated recordings).
+ *
+ * @param intervals Disjoint tagged intervals.
+ * @param durationMs Source video duration.
+ * @param idleFactor Idle speed-up (`<= 1` disables whole-file idle).
+ * @returns plan and whether the source was entirely cut.
+ */
+export function resolveTimelapsePlan(
+  intervals: readonly TaggedInterval[],
+  durationMs: number,
+  idleFactor: number,
+): { plan: PlanPiece[] | null; entireCut: boolean } {
+  const hasCuts = intervals.some((iv) => iv.kind === "loading");
+  let plan = buildSegmentPlan(intervals, durationMs);
+  if (!plan && idleFactor > 1 && !hasCuts)
+    plan = [{ startMs: 0, endMs: null, mode: "idle" }];
+  if (!plan && hasCuts) return { plan: null, entireCut: true };
+  return { plan, entireCut: false };
+}
+
 export function buildSegmentPlan(
   intervals: readonly TaggedInterval[],
   durationMs: number,
@@ -683,6 +705,14 @@ export function applyTimelapse(opts: ApplyTimelapseOptions): TimelapseResult {
   const suiteMarkCount = segmentMarks.filter(
     (m) => m.message === "suite:start" || m.message === "suite:end",
   ).length;
+  const maxMarkMs = segmentMarks.reduce((m, x) => Math.max(m, x.tMs), 0);
+  if (maxMarkMs > durationMs + 5_000) {
+    log.warn(
+      `timelapse: RECORDING SHORTER THAN RUN — video=${(durationMs / 1000).toFixed(1)}s ` +
+        `but marks span to ${(maxMarkMs / 1000).toFixed(1)}s ` +
+        `(capture likely stalled mid-run; suite cuts still applied to what exists)`,
+    );
+  }
   log.info(
     `timelapse: marks=${segmentMarks.length} suiteBounds=${suiteMarkCount} ` +
       `keepSuite=${keepSuite ? keepSuite.source : "off"} ` +
@@ -690,7 +720,6 @@ export function applyTimelapse(opts: ApplyTimelapseOptions): TimelapseResult {
   );
 
   let intervals = computeMarkedIntervals(segmentMarks, durationMs, keepSuite);
-  // Speed-up is opt-in per factor; loading/suite cuts are unconditional.
   if (factor <= 1) intervals = intervals.filter((iv) => iv.kind !== "walk");
   if (idleFactor <= 1) intervals = intervals.filter((iv) => iv.kind !== "idle");
   intervals = capIntervals(intervals, MAX_FAST_INTERVALS);
@@ -702,18 +731,27 @@ export function applyTimelapse(opts: ApplyTimelapseOptions): TimelapseResult {
     return { applied: false, reason: "no intervals" };
   }
 
-  // Idle gaps need a plan even when the only tagged intervals are cuts (or
-  // walks): buildSegmentPlan fills unmarked kept ranges as idle pieces. When
-  // idle speed-up is on but every tagged interval was stripped (e.g. factor
-  // 1 with only walk marks), rewrite the whole file as one idle piece.
-  let plan = buildSegmentPlan(intervals, durationMs);
-  if (!plan && idleFactor > 1)
-    plan = [{ startMs: 0, endMs: null, mode: "idle" }];
-  if (!plan) {
+  const resolved = resolveTimelapsePlan(intervals, durationMs, idleFactor);
+  if (resolved.entireCut) {
+    log.warn(
+      "timelapse: keep-suite footage absent from (truncated?) recording; " +
+        "refusing to ship cut suites — writing a minimal black placeholder",
+    );
+    const placeholderOk = writeBlackPlaceholder(ff, videoPath, keepRaw, log);
+    return placeholderOk
+      ? {
+          applied: true,
+          pieces: 0,
+          inputDurationMs: durationMs,
+          outputDurationMs: placeholderOk,
+        }
+      : { applied: false, reason: "entire cut; placeholder failed" };
+  }
+  if (!resolved.plan) {
     log.info("timelapse: no usable intervals; leaving the video as-is");
     return { applied: false, reason: "no intervals" };
   }
-  const effectivePlan = plan;
+  const effectivePlan = resolved.plan;
 
   const walkIvs = intervals.filter((iv) => iv.kind === "walk");
   const idleIvs = intervals.filter((iv) => iv.kind === "idle");
@@ -833,6 +871,78 @@ export function applyTimelapse(opts: ApplyTimelapseOptions): TimelapseResult {
     inputDurationMs: durationMs,
     ...(outputDurationMs ? { outputDurationMs } : {}),
   };
+}
+
+/**
+ * Replace videoPath with a short black webm so a full suite-cut never ships Smoke.
+ *
+ * @param ff ffmpeg binary.
+ * @param videoPath Output path to overwrite.
+ * @param keepRaw Keep the pre-cut source as -full.
+ * @param log Logger.
+ * @returns placeholder duration ms, or null on failure.
+ */
+function writeBlackPlaceholder(
+  ff: string,
+  videoPath: string,
+  keepRaw: boolean,
+  log: { info(m: string): void; warn(m: string): void },
+): number | null {
+  const rawPath = rawSiblingPath(videoPath);
+  const tmpPath = `${videoPath}.tmp.webm`;
+  try {
+    execFileSync(
+      ff,
+      [
+        "-nostdin",
+        "-y",
+        "-loglevel",
+        "error",
+        "-f",
+        "lavfi",
+        "-i",
+        "color=c=black:s=1280x720:d=0.04",
+        "-c:v",
+        "libvpx",
+        "-crf",
+        "8",
+        "-b:v",
+        "1M",
+        "-deadline",
+        "realtime",
+        "-cpu-used",
+        "8",
+        "-an",
+        tmpPath,
+      ],
+      { stdio: ["ignore", "ignore", "pipe"] },
+    );
+    if (keepRaw) renameSync(videoPath, rawPath);
+    else {
+      try {
+        unlinkSync(videoPath);
+      } catch {
+        /* ignore */
+      }
+    }
+    renameSync(tmpPath, videoPath);
+    const outMs = probeDurationMs(ff, videoPath) ?? 40;
+    log.info(
+      `timelapse: wrote black placeholder ${(outMs / 1000).toFixed(2)}s` +
+        (keepRaw ? `; raw kept at ${rawPath}` : ""),
+    );
+    return outMs;
+  } catch (err) {
+    try {
+      unlinkSync(tmpPath);
+    } catch {
+      /* ignore */
+    }
+    log.warn(
+      `timelapse: black placeholder failed (${String(err).split("\n")[0]})`,
+    );
+    return null;
+  }
 }
 
 /**

@@ -41,10 +41,10 @@ export class SnapshotStream {
    *
    * At most once every {@link RESYNC_INTERVAL_MS}.
    */
-  private resync(): void {
+  resync(force = false): void {
     if (this.closed) return;
     const now = Date.now();
-    if (now - this.lastResyncAt < RESYNC_INTERVAL_MS) return;
+    if (!force && now - this.lastResyncAt < RESYNC_INTERVAL_MS) return;
     this.lastResyncAt = now;
     this.source?.close();
     this.source = null;

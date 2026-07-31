@@ -44,8 +44,20 @@ export interface ViewerHandle {
    * (resolver ready). False while packs are still loading or if load failed.
    */
   readonly jsonUiReady: boolean;
-  /** Force-drain the remesh queue (test helper). */
-  flush: () => void;
+  /**
+   * Force-drain the remesh queue (test helper / capture stills).
+   *
+   * @param budgetMs - Optional wall-clock cap; omit to drain everything.
+   */
+  flush: (budgetMs?: number) => void;
+  /**
+   * Paint-frame counter for harness stall detection.
+   */
+  readonly paintGeneration: number;
+  /**
+   * Resubscribe SSE + nudge paint (harness watchdog).
+   */
+  kick: () => void;
   /**
    * Raycast a viewport pixel into the world meshes (diagnostic/test helper).
    *
@@ -120,6 +132,8 @@ declare global {
  * @param getAssetsSettled - True once atlas load succeeded or failed.
  * @param hud - Player HUD (chat / hotbar) for test counters.
  * @param getJsonUiReady - True once JSON UI packs loaded and HUD mounted.
+ * @param getPaintGeneration - Monotonic paint-loop counter for stall detection.
+ * @param kick - Resync SSE + nudge paint (harness watchdog).
  */
 export function installViewerHandle(
   store: Store,
@@ -131,6 +145,8 @@ export function installViewerHandle(
   getAssetsSettled: () => boolean = () => true,
   hud?: HudHandle,
   getJsonUiReady: () => boolean = () => false,
+  getPaintGeneration: () => number = () => 0,
+  kick: () => void = () => undefined,
 ): void {
   window.__viewerInternals = { store, scene, camera, THREE };
   window.__viewer = {
@@ -194,15 +210,19 @@ export function installViewerHandle(
     get jsonUiReady() {
       return getJsonUiReady();
     },
+    get paintGeneration() {
+      return getPaintGeneration();
+    },
     get phud() {
       const out: Record<string, string> = {};
       for (const [k, v] of store.getState().phud) out[k] = v;
       return out;
     },
-    flush: () => {
-      scene.flush(store.getState());
+    flush: (budgetMs?: number) => {
+      scene.flush(store.getState(), budgetMs);
       store.clearDirty();
     },
+    kick,
     probe: (sx: number, sy: number) => {
       const canvas = scene.renderer.domElement;
       const ndc = new THREE.Vector2(

@@ -139,6 +139,14 @@ const SETTLE_GRACE_MS = 10_000;
  * at 2s — bump so the completion card has time to land in the muxer.
  */
 const TAIL_FLUSH_MS = 5_000;
+
+/** Sync remesh budget for capture stills (dense subway must not kill rAF). */
+const CAPTURE_FLUSH_BUDGET_MS = 150;
+
+/** Paint stall watchdog before forcing SSE resubscribe + paint nudge. */
+const PAINT_STALL_MS = 8_000;
+const PAINT_WATCHDOG_POLL_MS = 2_000;
+
 const GL_ARGS = [
   "--use-gl=angle",
   "--use-angle=swiftshader",
@@ -470,11 +478,48 @@ export async function runHarness(opts: HarnessOptions): Promise<void> {
     for (const p of pending) enqueue(p.type, p.data, p.at);
     pending.length = 0;
 
-    await sse.done.catch(() => undefined);
-    await chain.catch(() => undefined);
-    log.info("capture: stream closed");
-    // Let the recorder mux the last painted frames before page.close().
-    await new Promise<void>((r) => setTimeout(r, TAIL_FLUSH_MS));
+    let lastPaintGen = -1;
+    let lastPaintChangeAt = Date.now();
+    const paintWatchdog = setInterval(() => {
+      void stillsPage
+        .evaluate(() => {
+          const v = (
+            window as unknown as {
+              __viewer?: { paintGeneration?: number; kick?: () => void };
+            }
+          ).__viewer;
+          return v?.paintGeneration ?? -1;
+        })
+        .then((gen) => {
+          if (typeof gen !== "number" || gen < 0) return;
+          if (gen !== lastPaintGen) {
+            lastPaintGen = gen;
+            lastPaintChangeAt = Date.now();
+            return;
+          }
+          if (Date.now() - lastPaintChangeAt < PAINT_STALL_MS) return;
+          lastPaintChangeAt = Date.now();
+          log.warn(
+            `capture: paint stall ${PAINT_STALL_MS}ms (paintGeneration=${gen}); kicking stream+paint`,
+          );
+          return stillsPage.evaluate(() => {
+            (
+              window as unknown as { __viewer?: { kick?: () => void } }
+            ).__viewer?.kick?.();
+          });
+        })
+        .catch(() => undefined);
+    }, PAINT_WATCHDOG_POLL_MS);
+    if (typeof paintWatchdog.unref === "function") paintWatchdog.unref();
+
+    try {
+      await sse.done.catch(() => undefined);
+      await chain.catch(() => undefined);
+      log.info("capture: stream closed");
+      await new Promise<void>((r) => setTimeout(r, TAIL_FLUSH_MS));
+    } finally {
+      clearInterval(paintWatchdog);
+    }
   } finally {
     clearTimeout(capTimer);
     setShutdownHandler(null);
@@ -634,11 +679,13 @@ async function handleCapture(
       // grant an animation frame, and the predicate has to keep running.
       { timeout: timeoutMs, polling: 250 },
     );
-    await stillsPage.evaluate(() => {
+    await stillsPage.evaluate((budgetMs) => {
       (
-        window as unknown as { __viewer?: { flush: () => void } }
-      ).__viewer?.flush();
-    });
+        window as unknown as {
+          __viewer?: { flush: (budgetMs?: number) => void };
+        }
+      ).__viewer?.flush(budgetMs);
+    }, CAPTURE_FLUSH_BUDGET_MS);
     // Settling is best-effort: while the world is still streaming columns the
     // mesher never goes idle, so a hard wait here starved run 15's subway
     // still for its whole budget ("Timeout 30000ms exceeded" — the Playwright
@@ -728,11 +775,13 @@ async function uploadFailureStill(
   log: Logger,
 ): Promise<void> {
   try {
-    await page.evaluate(() => {
+    await page.evaluate((budgetMs) => {
       (
-        window as unknown as { __viewer?: { flush: () => void } }
-      ).__viewer?.flush();
-    });
+        window as unknown as {
+          __viewer?: { flush: (budgetMs?: number) => void };
+        }
+      ).__viewer?.flush(budgetMs);
+    }, CAPTURE_FLUSH_BUDGET_MS);
     const tick = await page.evaluate(
       () =>
         (window as unknown as { __viewer?: { tick: number } }).__viewer?.tick ??
