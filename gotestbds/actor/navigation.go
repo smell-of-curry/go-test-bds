@@ -32,6 +32,14 @@ const (
 	// rejects when fallDistance >= this value, so maxSafeFallBlocks+1 allows
 	// drops of at most maxSafeFallBlocks.
 	walkMaxFallDistance = maxSafeFallBlocks + 1
+
+	// navArriveBlocks: feet within this of the true target counts as arrived
+	// (path.Reached may refer to a clamped intermediate goal only).
+	navArriveBlocks = 1.5
+
+	// navProgressEps: a re-path must shorten remaining distance by at least
+	// this much to count as useful (else fruitless).
+	navProgressEps = 0.5
 )
 
 // pathSource is the world as the pathfinder is allowed to see it: positions
@@ -115,16 +123,107 @@ func pathHasExcessiveFall(p *pathfind.Path, maxDrop int) bool {
 	return false
 }
 
+// truncatePathBeforeFall keeps the walkable prefix of p up to (but not
+// including) the first drop deeper than maxDrop. Returns p unchanged when no
+// such drop exists. Never returns an "unreachable" empty wipe — an empty wipe
+// made every city leg with a single deep step fail instantly with zero walking
+// (run-pr-704 showcase).
+//
+// @param p Computed path.
+// @param maxDrop Maximum allowed Y drop between consecutive nodes.
+// @param target True navigation target (stored on the rebuilt path).
+// @returns p, or a truncated non-Reached path ending before the fall.
+func truncatePathBeforeFall(p *pathfind.Path, maxDrop int, target cube.Pos) *pathfind.Path {
+	if p == nil || p.Count() == 0 {
+		return p
+	}
+	cut := p.Count()
+	for i := 1; i < p.Count(); i++ {
+		if p.Node(i-1).Y()-p.Node(i).Y() > maxDrop {
+			cut = i
+			break
+		}
+	}
+	if cut == p.Count() {
+		return p
+	}
+	nodes := make([]*pathfind.Node, cut)
+	for i := 0; i < cut; i++ {
+		nodes[i] = p.Node(i)
+	}
+	return pathfind.NewPath(nodes, false, target)
+}
+
+// absInt returns the absolute value of n.
+//
+// @param n Integer value.
+// @returns |n|.
+func absInt(n int) int {
+	if n < 0 {
+		return -n
+	}
+	return n
+}
+
+// clampGoalToObserved projects to onto the farthest loaded column along the
+// from→to line. Unloaded space reads as bedrock to the pathfinder, so aiming
+// FindPath at a far unloaded block yields either an empty path or a rim path
+// that fail-fast used to discard; clamping makes the partial leg explicit.
+//
+// @param wr Bot world.
+// @param from Actor block position.
+// @param to True destination.
+// @returns to when loaded, otherwise the last loaded block toward to.
+func clampGoalToObserved(wr *world.World, from, to cube.Pos) cube.Pos {
+	if wr.Loaded(to) {
+		return to
+	}
+	dx, dy, dz := to.X()-from.X(), to.Y()-from.Y(), to.Z()-from.Z()
+	steps := absInt(dx)
+	if absInt(dy) > steps {
+		steps = absInt(dy)
+	}
+	if absInt(dz) > steps {
+		steps = absInt(dz)
+	}
+	if steps == 0 {
+		return from
+	}
+	best := from
+	for i := 1; i <= steps; i++ {
+		p := cube.Pos{
+			from.X() + dx*i/steps,
+			from.Y() + dy*i/steps,
+			from.Z() + dz*i/steps,
+		}
+		if !wr.Loaded(p) {
+			break
+		}
+		best = p
+	}
+	return best
+}
+
+// distToNavTarget returns Euclidean distance from pos to the block centre of
+// target.
+//
+// @param pos Feet position.
+// @param target Block position.
+// @returns distance in blocks.
+func distToNavTarget(pos mgl64.Vec3, target cube.Pos) float64 {
+	return pos.Sub(target.Vec3Centre()).Len()
+}
+
 // Navigate builds a path to the destination position.
 func (a *Actor) Navigate(target cube.Pos) {
+	start := cube.PosFromVec3(a.Position())
+	goal := clampGoalToObserved(a.world, start, target)
 	cfg := walkEvaluatorConfig(a.State().Box(), a.Position())
-	pos := cube.PosFromVec3(a.Position())
-	dist := a.Position().Sub(target.Vec3()).Len()
+	dist := a.Position().Sub(goal.Vec3()).Len()
 	maxVisited, maxDist := pathfindBudget(dist)
-	p := pathfind.FindPath(cfg.New(), pathSource{a.world}, pos, target, maxVisited, maxDist, 1)
+	p := pathfind.FindPath(cfg.New(), pathSource{a.world}, start, goal, maxVisited, maxDist, 1)
 	if pathHasExcessiveFall(p, maxSafeFallBlocks) {
-		// Treat as unreachable so recovery teleport can take over immediately.
-		p = pathfind.NewPath(nil, false, target)
+		p = truncatePathBeforeFall(p, maxSafeFallBlocks, target)
 	}
 	a.path = p
 	a.navigationTarget = target
@@ -160,17 +259,18 @@ func (a *Actor) tickNavigating() {
 	}
 
 	if path.IsDone() {
-		// Partial path finished without reaching the goal (e.g. target only
-		// reachable by falling into a pit). Count as fruitless so we fail fast
-		// instead of re-pathing forever around the rim; real progress while
-		// walking the previous segment already reset fruitlessRepaths.
-		if !path.Reached() {
-			a.repathTowardTarget(true)
+		// Arrived at the true target (path.Reached may only mean a clamped
+		// intermediate goal inside the loaded view).
+		if distToNavTarget(a.Position(), a.navigationTarget) <= navArriveBlocks {
+			a.path = nil
+			a.fruitlessRepaths = 0
+			a.Handler().HandleReachTarget(a)
 			return
 		}
-		a.path = nil
-		a.fruitlessRepaths = 0
-		a.Handler().HandleReachTarget(a)
+		// Partial leg finished (edge of loaded view, rim of a pit, clamped
+		// goal). Repath toward the true target — not fruitless by itself;
+		// repathTowardTarget only fails when the new path cannot get closer.
+		a.repathTowardTarget(false)
 		return
 	}
 
@@ -197,27 +297,34 @@ func (a *Actor) tickNavigating() {
 
 // repathTowardTarget runs FindPath again, throttled and fail-fast when stuck.
 //
-// @param fruitless When true, this re-path follows a no-movement tick and
-// counts toward the fruitless limit. When false (partial-path continuation
-// after walking), the counter resets — progress was already made.
-func (a *Actor) repathTowardTarget(fruitless bool) {
+// @param forceFruitless When true (no-movement tick), always counts toward the
+// fruitless limit. When false (partial-leg finished), the counter only
+// advances if the new path cannot get closer to the true target than the
+// actor already is — so walking to the loaded rim then re-pathing is progress,
+// not an instant "unable to reach destination".
+func (a *Actor) repathTowardTarget(forceFruitless bool) {
 	if a.repathCooldown > 0 {
 		return
 	}
-	if fruitless {
+	before := distToNavTarget(a.Position(), a.navigationTarget)
+	a.Navigate(a.navigationTarget)
+	a.repathCooldown = repathCooldownTicks
+
+	useful := false
+	if a.path != nil && a.path.Count() > 0 {
+		if end := a.path.EndNode(); end != nil {
+			useful = distToNavTarget(end.Pos.Vec3Centre(), a.navigationTarget) < before-navProgressEps
+		}
+	}
+	if forceFruitless || !useful {
 		a.fruitlessRepaths++
 		if a.fruitlessRepaths >= fruitlessRepathLimit {
 			a.StopNavigating()
 			return
 		}
-	} else {
-		a.fruitlessRepaths = 0
-	}
-	a.Navigate(a.navigationTarget)
-	a.repathCooldown = repathCooldownTicks
-	if fruitless {
 		return
 	}
+	a.fruitlessRepaths = 0
 	// Continuation: start following the new path this tick.
 	a.tickNavigating()
 }

@@ -307,3 +307,90 @@ func TestNavigateDeepFallUnreachableFailsFast(t *testing.T) {
 		t.Fatal("still Navigating after deep-fall fail-fast")
 	}
 }
+
+// navStopCounter counts HandleStopNavigation without cancelling Move.
+type navStopCounter struct {
+	NopHandler
+	stopped int
+}
+
+func (h *navStopCounter) HandleStopNavigation(_ *Actor) { h.stopped++ }
+
+// TestNavigateBeyondLoadedWalksPartial: destination outside loaded columns must
+// still produce a walkable partial path and real XY progress (not instant
+// "unable to reach destination" with 0 blocks moved). FindPath may report
+// Reached for the clamped loaded-edge goal — that is fine; the true target
+// stays on navigationTarget.
+func TestNavigateBeyondLoadedWalksPartial(t *testing.T) {
+	const floorY = 64
+	a := Config{Conn: navStubConn{pos: mgl32.Vec3{0.5, float32(floorY + 1), 0.5}}}.New()
+	fillFlatFloor(a.World(), -2, 30, 0, floorY)
+	target := cube.Pos{80, floorY + 1, 0}
+
+	h := &navStopCounter{}
+	a.Handle(h)
+	a.Navigate(target)
+	if !a.Navigating() || a.path == nil || a.path.Count() == 0 {
+		t.Fatal("expected partial path toward loaded edge for beyond-loaded target")
+	}
+	if a.navigationTarget != target {
+		t.Fatalf("navigationTarget=%v, want true target %v", a.navigationTarget, target)
+	}
+	if end := a.path.EndNode(); end == nil || end.X() < 10 {
+		t.Fatalf("partial path end %#v did not advance toward target", end)
+	}
+
+	start := a.Position()
+	for i := 0; i < 400 && a.Navigating(); i++ {
+		a.Tick()
+	}
+	moved := a.Position().Sub(start).Len()
+	if moved < 5 {
+		t.Fatalf("want >=5 blocks toward loaded edge, got %.2f (stopped=%d navigating=%v)",
+			moved, h.stopped, a.Navigating())
+	}
+}
+
+// TestClampGoalToObserved: unloaded targets clamp to the last loaded column
+// along the line (chunk-granular — fillFlatFloor to x=20 loads the whole
+// chunk covering x=16..31).
+func TestClampGoalToObserved(t *testing.T) {
+	w := world.NewWorld(false)
+	fillFlatFloor(w, -2, 20, 0, 64)
+	from := cube.Pos{0, 65, 0}
+	to := cube.Pos{80, 65, 0}
+	got := clampGoalToObserved(w, from, to)
+	if got.X() < 16 || got.X() > 31 {
+		t.Fatalf("clampGoalToObserved = %v, want X in loaded chunk range [16,31]", got)
+	}
+	if !w.Loaded(got) {
+		t.Fatalf("clamped goal %v is not loaded", got)
+	}
+	if clampGoalToObserved(w, from, cube.Pos{10, 65, 0}) != (cube.Pos{10, 65, 0}) {
+		t.Fatal("loaded goal should pass through unchanged")
+	}
+}
+
+// TestTruncatePathBeforeFallKeepsPrefix: a deep drop mid-path must keep the
+// walkable prefix (not wipe to empty — that made Navigate fail with 0 progress).
+func TestTruncatePathBeforeFallKeepsPrefix(t *testing.T) {
+	n0 := &pathfind.Node{Pos: cube.Pos{0, 70, 0}}
+	n1 := &pathfind.Node{Pos: cube.Pos{1, 70, 0}}
+	n2 := &pathfind.Node{Pos: cube.Pos{2, 70, 0}}
+	n3 := &pathfind.Node{Pos: cube.Pos{3, 60, 0}} // 10-block drop
+	n4 := &pathfind.Node{Pos: cube.Pos{4, 60, 0}}
+	p := pathfind.NewPath([]*pathfind.Node{n0, n1, n2, n3, n4}, true, cube.Pos{4, 60, 0})
+	if !pathHasExcessiveFall(p, maxSafeFallBlocks) {
+		t.Fatal("setup path should report excessive fall")
+	}
+	out := truncatePathBeforeFall(p, maxSafeFallBlocks, cube.Pos{4, 60, 0})
+	if out.Count() != 3 {
+		t.Fatalf("truncated count=%d, want 3 (prefix before fall)", out.Count())
+	}
+	if out.Reached() {
+		t.Fatal("truncated path must not stay Reached")
+	}
+	if out.EndNode().Pos != (cube.Pos{2, 70, 0}) {
+		t.Fatalf("truncated end=%v, want (2,70,0)", out.EndNode().Pos)
+	}
+}

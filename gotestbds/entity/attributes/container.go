@@ -68,7 +68,7 @@ func (c *Values) Decode(attributes []protocol.Attribute) {
 	for _, attr := range attributes {
 		val := float64(attr.Value)
 		switch attr.Name {
-		case "minecraft:movement":
+		case "minecraft:movement", "minecraft:movement_speed", "minecraft:player.movement_speed":
 			c.speed = val
 		case "minecraft:player.hunger":
 			c.hunger = val

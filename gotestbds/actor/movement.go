@@ -149,13 +149,22 @@ func (a *Actor) BreakingBlock() bool {
 	return a.breakingBlock
 }
 
+// defaultMovementAttribute is vanilla player movement until UpdateAttributes
+// arrives. A zero attribute makes MoveRawInput a no-op, so every navigateToBlock
+// fails instantly with "0 blocks of progress" under fail-fast.
+const defaultMovementAttribute = 0.1
+
 // Speed returns Actor's speed in blocks per tick.
 func (a *Actor) Speed() float64 {
 	// https://minecraft.wiki/w/Walking
 	mPerSecond := 4.317
 	mPerTick := mPerSecond / 20
 	// TODO swimming speed.
-	multiplier := a.Attributes().Speed() * 10
+	attr := a.Attributes().Speed()
+	if attr <= 0 {
+		attr = defaultMovementAttribute
+	}
+	multiplier := attr * 10
 	if !a.OnGround() && a.State().Sprinting() {
 		// sprinting does not affect air strafing.
 		multiplier /= 1.3
