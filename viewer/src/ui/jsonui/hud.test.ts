@@ -87,10 +87,10 @@ describe("PhudTitleTracker latch across tokens", () => {
   it("emits &_token: when value cleared so pack latches hide", () => {
     const tracker = new PhudTitleTracker();
     const phud = new Map<string, string>();
-    phud.set("playerPing", "§a63");
-    assert.equal(tracker.update(phud), "&_playerPing:§a63");
-    phud.set("playerPing", "");
-    assert.equal(tracker.update(phud), "&_playerPing:");
+    phud.set("phone", "ring");
+    assert.equal(tracker.update(phud), "&_phone:ring");
+    phud.set("phone", "");
+    assert.equal(tracker.update(phud), "&_phone:");
   });
 });
 
