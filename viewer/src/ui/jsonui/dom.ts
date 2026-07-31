@@ -81,9 +81,20 @@ function paintNode(
   opts: RenderOptions,
   parentOrigin: { x: number; y: number },
 ): void {
-  // Drop invisible subtrees (battle factory expands every button template;
-  // hidden bag/move slots must not flood the DOM with 404 image faces).
-  if (!node.visible) return;
+  // Invisible hosts usually drop the subtree (battle factory / empty slots).
+  // Exception: sidebar `ball_icon` wraps `pokemon_icon` — keep the mon head
+  // when the empty-ball host is hidden.
+  if (!node.visible) {
+    if (node.element.name === "ball_icon") {
+      const kids = [...node.children]
+        .filter((c) => c.visible)
+        .sort((a, b) => a.layer - b.layer);
+      for (const child of kids) {
+        paintNode(child, parentEl, opts, parentOrigin);
+      }
+    }
+    return;
+  }
 
   const el = document.createElement("div");
   el.className = `jsonui jsonui-${cssType(node.element.type)}`;
@@ -192,11 +203,23 @@ function applyImage(
       const bh = (natural.h * eh) / uh!;
       face.style.backgroundSize = `${bw}px ${bh}px`;
       face.style.backgroundPosition = `${(-u! * ew) / uw!}px ${(-v! * eh) / uh!}px`;
-    } else if (node.element.props.$viewer_bg_align === "right") {
-      // Clipped overflow dock: stretch as if still full-width, pin right edge.
-      const scale = Number(node.element.props.$viewer_bg_scale_x) || 1;
-      face.style.backgroundSize = `${scale * 100}% 100%`;
+    } else if (node.element.props.$viewer_dock_natural === true) {
+      // dock.png is 61×405 — preserve aspect, pin to the right of the wide
+      // layout box (plates still size against the full control).
+      const eh = Math.max(0, node.box.h * opts.guiScale);
+      const tw = eh * (61 / 405);
+      face.style.backgroundSize = `${tw}px ${eh}px`;
       face.style.backgroundPosition = "right center";
+      face.style.backgroundRepeat = "no-repeat";
+    } else if (
+      node.element.props.$viewer_bg_align === "left" ||
+      node.element.props.$viewer_bg_align === "right"
+    ) {
+      const scale = Number(node.element.props.$viewer_bg_scale_x) || 1;
+      const align =
+        node.element.props.$viewer_bg_align === "right" ? "right" : "left";
+      face.style.backgroundSize = `${scale * 100}% 100%`;
+      face.style.backgroundPosition = `${align} center`;
     } else {
       face.style.backgroundSize = "100% 100%";
       face.style.backgroundPosition = "0 0";

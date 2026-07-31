@@ -175,10 +175,17 @@ function layoutElement(
 
   if (el.type === "stack_panel") {
     // Collection hosts sized to the parent (100%, not %c) overlay factory
-    // children — battle move/action buttons share one grid origin.
+    // children — battle bag/run/actor chips share one origin. Exception:
+    // `battle.grid_button` move slots author Y `$offset`s that *compensate*
+    // for vertical stack index (`-175%` / `-120%` for slots 3–4) to form a
+    // 2×2; overlaying them on one origin scatters/overlaps the cards.
     if (el.props.factory && el.props.collection_name) {
       const hSpec = parseSize(readSizePair(el.props.size)[1]);
-      if (!hSpec.needsChildren && !hSpec.isDefault) {
+      if (
+        !hSpec.needsChildren &&
+        !hSpec.isDefault &&
+        !factoryUsesStackCompensatedOffsets(el)
+      ) {
         return layoutFactoryOverlay(
           el,
           parentBox,
@@ -710,6 +717,17 @@ function layoutStack(
     layer,
     visible,
   };
+}
+
+/**
+ * True when factory children are `grid_button` panels whose per-slot
+ * `$offset` Y values only resolve to a 2×2 when each child is stacked.
+ *
+ * @param el - Factory collection host (already expanded).
+ * @returns whether layout must use {@link layoutStack} instead of overlay.
+ */
+function factoryUsesStackCompensatedOffsets(el: ResolvedElement): boolean {
+  return el.controls.some((c) => c.element.name === "grid_button");
 }
 
 /**
