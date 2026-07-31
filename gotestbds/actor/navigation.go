@@ -62,6 +62,10 @@ type pathSource struct{ w *world.World }
 // Block returns the block at pos, or bedrock when the column is missing,
 // incomplete, or pos is outside its vertical range.
 //
+// Blocks whose Model() panics (network-decoded dragonfly ShulkerBox with
+// nil progress, etc.) are replaced with UnknownBlock so FindPath cannot
+// SIGSEGV the bot process mid-showcase.
+//
 // @param pos The block position.
 // @returns the observed block, or bedrock for unobserved positions.
 func (s pathSource) Block(pos cube.Pos) w.Block {
@@ -69,7 +73,36 @@ func (s pathSource) Block(pos cube.Pos) w.Block {
 	if !ok || pos.OutOfBounds(c.Range()) || c.State != world.ColumnComplete {
 		return block.Bedrock{}
 	}
-	return s.w.Block(pos)
+	return safePathBlock(s.w.Block(pos))
+}
+
+// safePathBlock returns bl when Model() is callable; otherwise UnknownBlock.
+//
+// Live failure (102016f showcase): FindPath expanded a neighbour onto a
+// palette-decoded ShulkerBox{progress:nil} → Model() → atomic.Int32.Load on
+// nil → process panic, run aborted before any walk progress.
+//
+// @param bl Block from the world palette.
+// @returns bl, or solid UnknownBlock when Model is unsafe.
+func safePathBlock(bl w.Block) w.Block {
+	if !blockModelCallable(bl) {
+		return world.UnknownBlock{}
+	}
+	return bl
+}
+
+// blockModelCallable reports whether bl.Model() returns without panicking.
+//
+// @param bl Block to probe.
+// @returns false when Model panics (nil internal pointers).
+func blockModelCallable(bl w.Block) (ok bool) {
+	defer func() {
+		if recover() != nil {
+			ok = false
+		}
+	}()
+	_ = bl.Model()
+	return true
 }
 
 // columnComplete reports whether the column covering pos has fully arrived.
@@ -327,7 +360,9 @@ func (a *Actor) Navigate(target cube.Pos) {
 	cfg := walkEvaluatorConfig(a.State().Box(), a.Position())
 	dist := a.Position().Sub(goal.Vec3()).Len()
 	maxVisited, maxDist := pathfindBudget(dist)
-	p := pathfind.FindPath(cfg.New(), pathSource{a.world}, start, goal, maxVisited, maxDist, 1)
+	// Belt: pathSource already sanitizes panic-prone blocks, but any other
+	// FindPath panic must not kill the bot process (instruction can fail).
+	p := findPathSafe(cfg.New(), pathSource{a.world}, start, goal, maxVisited, maxDist)
 	if pathHasExcessiveFall(p, maxSafeFallBlocks) {
 		p = truncatePathBeforeFall(p, maxSafeFallBlocks, target)
 	}
@@ -335,6 +370,30 @@ func (a *Actor) Navigate(target cube.Pos) {
 	a.path = p
 	a.navigationTarget = target
 	a.navFailDetail = ""
+}
+
+// findPathSafe wraps Pathfinder.FindPath and returns an empty path on panic.
+//
+// @param e Node evaluator.
+// @param src Block source.
+// @param start Start block.
+// @param goal Goal block.
+// @param maxVisited Visit budget.
+// @param maxDist Max distance from start.
+// @returns a path, or empty on panic.
+func findPathSafe(
+	e pathfind.NodeEvaluator,
+	src w.BlockSource,
+	start, goal cube.Pos,
+	maxVisited int,
+	maxDist float64,
+) (p *pathfind.Path) {
+	defer func() {
+		if recover() != nil {
+			p = pathfind.NewPath(nil, false, goal)
+		}
+	}()
+	return pathfind.FindPath(e, src, start, goal, maxVisited, maxDist, 1)
 }
 
 // Navigating returns whether Actor is navigating.

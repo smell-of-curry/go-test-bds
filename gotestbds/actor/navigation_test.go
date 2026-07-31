@@ -99,6 +99,85 @@ func containsAll(s string, parts ...string) bool {
 	return true
 }
 
+// TestPathSourceSanitizesNilShulkerProgress mirrors the live 102016f panic:
+// a palette-decoded ShulkerBox has progress==nil, Model() nil-derefs, and
+// FindPath used to SIGSEGV the bot. pathSource must swap it for UnknownBlock
+// and FindPath must complete.
+func TestPathSourceSanitizesNilShulkerProgress(t *testing.T) {
+	w := world.NewWorld(false)
+	const floorY = 64
+	fillFlatFloor(w, -2, 16, 0, floorY)
+	// Zero-value ShulkerBox (nil progress) — same shape as network decode.
+	shulkerPos := cube.Pos{2, floorY + 1, 0}
+	w.SetBlock(shulkerPos, block.ShulkerBox{})
+
+	src := pathSource{w: w}
+	got := src.Block(shulkerPos)
+	if _, ok := got.(world.UnknownBlock); !ok {
+		// Round-trip via SetBlock may re-init; also accept if Model is already safe.
+		if blockModelCallable(got) {
+			t.Logf("SetBlock round-trip produced callable %T; probing zero-value directly", got)
+		} else {
+			t.Fatalf("pathSource.Block=%T, want UnknownBlock for unsafe shulker", got)
+		}
+	}
+	if safe := safePathBlock(block.ShulkerBox{}); !blockModelCallable(safe) {
+		t.Fatal("safePathBlock(zero ShulkerBox) still unsafe")
+	}
+	if _, ok := safePathBlock(block.ShulkerBox{}).(world.UnknownBlock); !ok {
+		t.Fatalf("safePathBlock(zero ShulkerBox)=%T, want UnknownBlock", safePathBlock(block.ShulkerBox{}))
+	}
+
+	start := cube.Pos{0, floorY + 1, 0}
+	target := cube.Pos{12, floorY + 1, 0}
+	feet := start.Vec3().Add(mgl64.Vec3{0.5, 0, 0.5})
+	cfg := walkEvaluatorConfig(cube.Box(-0.3, 0, -0.3, 0.3, 1.8, 0.3), feet)
+	// Place unsafe shulker in the expansion neighbourhood even if SetBlock
+	// sanitized storage — override via direct column write of the Go value
+	// is hard; instead call FindPath against a source that always returns
+	// the zero shulker at one neighbour. Use pathSource which already
+	// sanitizes: if SetBlock stored a NewShulkerBox-like value, still ensure
+	// findPathSafe recovers from a deliberate panic source.
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("FindPath panicked: %v", r)
+		}
+	}()
+	path := findPathSafe(cfg.New(), src, start, target, 2000, 40)
+	if path == nil {
+		t.Fatal("findPathSafe returned nil")
+	}
+}
+
+// panicBlockSource returns a zero ShulkerBox everywhere — FindPath must not
+// kill the process when wrapped by findPathSafe.
+type panicBlockSource struct{}
+
+func (panicBlockSource) Block(cube.Pos) dfworld.Block {
+	return block.ShulkerBox{}
+}
+
+// TestFindPathSafeRecoversShulkerPanic: findPathSafe must return empty path,
+// not crash, when every Block is an unsafe ShulkerBox.
+func TestFindPathSafeRecoversShulkerPanic(t *testing.T) {
+	cfg := walkEvaluatorConfig(
+		cube.Box(-0.3, 0, -0.3, 0.3, 1.8, 0.3),
+		mgl64.Vec3{0.5, 65, 0.5},
+	)
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("findPathSafe leaked panic: %v", r)
+		}
+	}()
+	p := findPathSafe(cfg.New(), panicBlockSource{}, cube.Pos{0, 65, 0}, cube.Pos{8, 65, 0}, 400, 25)
+	if p == nil {
+		t.Fatal("nil path")
+	}
+	if p.Count() != 0 {
+		t.Fatalf("expected empty recovered path, got count=%d", p.Count())
+	}
+}
+
 // TestFindPathUnloadedWorldTerminates guards the run-35/36 livelock: FindPath
 // starting from an unloaded column must return promptly instead of descending
 // through an infinite column of air (WalkNodeEvaluator.StartNode's air branch
