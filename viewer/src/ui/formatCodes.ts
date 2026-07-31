@@ -95,6 +95,28 @@ export function parseFormatCodes(input: string): FormatSegment[] {
 }
 
 /**
+ * Map Minecraft private-use glyphs the canvas font lacks onto unicode, and
+ * drop unknown PUA codepoints (avoids tofu next to sidebar names).
+ *
+ * Pack font maps: U+E108 male, U+E109 female, U+E10A shiny.
+ *
+ * @param input - Raw text that may contain PUA glyphs.
+ * @returns text safe for system/canvas fonts.
+ */
+export function mapMinecraftGlyphs(input: string): string {
+  let out = "";
+  for (const ch of input) {
+    const code = ch.codePointAt(0) ?? 0;
+    if (code === 0xe108) out += "♂";
+    else if (code === 0xe109) out += "♀";
+    else if (code === 0xe10a) out += "★";
+    else if (code >= 0xe000 && code <= 0xf8ff) continue;
+    else out += ch;
+  }
+  return out;
+}
+
+/**
  * Render format-coded text into a document fragment of coloured spans.
  *
  * @param input - Raw text that may contain `§` codes.
@@ -102,7 +124,7 @@ export function parseFormatCodes(input: string): FormatSegment[] {
  */
 export function formatCodesToFragment(input: string): DocumentFragment {
   const frag = document.createDocumentFragment();
-  for (const seg of parseFormatCodes(input)) {
+  for (const seg of parseFormatCodes(mapMinecraftGlyphs(input))) {
     if (!seg.text) continue;
     const span = document.createElement("span");
     if (seg.color) span.style.color = seg.color;

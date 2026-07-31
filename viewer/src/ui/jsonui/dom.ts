@@ -327,6 +327,25 @@ function applyImage(
     face.style.backgroundSize = `${tw}px ${eh}px`;
     face.style.backgroundPosition = "right center";
     face.style.backgroundRepeat = "no-repeat";
+  } else if (node.element.props.tiled === true) {
+    // Pack loadingScreen uses common.dirt_background (tiled bg32). Black
+    // underlay covers the world if the tile texture 404s.
+    el.style.backgroundColor = "#000";
+    face.style.backgroundImage = `url("${cssUrl(url)}")`;
+    face.style.backgroundRepeat = "repeat";
+    const scaleRaw = node.element.props.tiled_scale;
+    const sx =
+      Array.isArray(scaleRaw) && Number.isFinite(Number(scaleRaw[0]))
+        ? Number(scaleRaw[0])
+        : 1;
+    const sy =
+      Array.isArray(scaleRaw) && Number.isFinite(Number(scaleRaw[1]))
+        ? Number(scaleRaw[1])
+        : sx;
+    const tw = Math.max(1, (info?.w || 32) * opts.guiScale * sx);
+    const th = Math.max(1, (info?.h || 32) * opts.guiScale * sy);
+    face.style.backgroundSize = `${tw}px ${th}px`;
+    face.style.backgroundPosition = "0 0";
   } else {
     // Element nineslice wins; else texture-json nineslice (control.png is 2x2
     // with nineslice_size:1 — stretching without it = giant white blob).
@@ -386,7 +405,7 @@ function applyImage(
 
   const alpha =
     typeof node.element.props.alpha === "number" ? node.element.props.alpha : 1;
-  if (alpha < 1) face.style.opacity = String(alpha);
+  face.style.opacity = alpha < 1 ? String(alpha) : "1";
 
   el.appendChild(face);
 }
@@ -531,6 +550,27 @@ function applyClip(
   }
 }
 
+export function resolveLabelFontScale(props: {
+  font_scale_factor?: unknown;
+  font_size?: unknown;
+}): number {
+  const raw = props.font_scale_factor;
+  const fromFactor =
+    typeof raw === "number"
+      ? raw
+      : typeof raw === "string" && raw.trim() !== ""
+        ? Number(raw)
+        : NaN;
+  const factor = Number.isFinite(fromFactor) ? fromFactor : 1;
+  const sizeKey =
+    typeof props.font_size === "string" ? props.font_size.toLowerCase() : "";
+  const sizeScale =
+    ({ small: 0.75, normal: 1, large: 1.25 } as Record<string, number>)[
+      sizeKey
+    ] ?? 1;
+  return factor * sizeScale;
+}
+
 function applyLabel(
   el: HTMLElement,
   node: LayoutNode,
@@ -547,23 +587,16 @@ function applyLabel(
     node.element.props.localize,
     opts.lang,
   );
-  const fontScale =
-    typeof node.element.props.font_scale_factor === "number"
-      ? node.element.props.font_scale_factor
-      : 1;
+  const fontScale = resolveLabelFontScale(node.element.props);
   const basePx = 8 * opts.guiScale * fontScale;
   el.style.fontSize = `${basePx}px`;
-  // Match layout measureText line box (9gui ≈ font) so `\n` lines aren't clipped.
   el.style.lineHeight = `${Math.ceil(basePx * 1.125)}px`;
-  // Form body labels use size ["100%","default"] — wrap inside the box rather
-  // than one clipped line (`pre` never wraps → cramped title/body).
   el.style.whiteSpace = "pre-wrap";
   el.style.overflowWrap = "anywhere";
   // Dialogue body (`main_label`) sits under a hollow title band; keep glyphs
   // visible when the measured box is a hair short (avoid first-line clip).
   el.style.overflow =
     node.element.name === "main_label" ? "visible" : "hidden";
-
   const align = node.element.props.text_alignment;
   if (align === "center" || align === "left" || align === "right") {
     el.style.textAlign = align;

@@ -665,6 +665,22 @@ function bindTree(
   ) {
     out.visible = Boolean(phud.get("phone"));
   }
+  // Pack fades oak_talk_bg / oak_loop in via wait→alpha anims we do not run.
+  // When talking chrome is shown, force the settled frame (not oak_start ghost).
+  if (el.namespace === "phud_phone") {
+    const phoneVal = String(phud?.get("phone") ?? out.value ?? "");
+    const talking = phoneVal.slice(0, 4) === "loop";
+    if (el.name === "oak_talk_bg") out.alpha = 1;
+    if (el.name === "oak_icon") {
+      const tex = String(out.texture ?? "");
+      const icon = String(out.$name ?? el.props.$name ?? "");
+      if (tex.includes("oak_loop") || icon === "loop") out.alpha = 1;
+      if (talking && (tex.includes("oak_start") || icon === "start")) {
+        out.visible = false;
+        out.alpha = 0;
+      }
+    }
+  }
   applyRendererSizing(el, out, vitals);
   applyHotbarHangPin(el, out, vitals);
   applyVisibilityChangedLatch(el, out, source, prev, phud);

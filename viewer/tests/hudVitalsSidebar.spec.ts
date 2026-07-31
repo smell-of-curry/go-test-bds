@@ -599,6 +599,37 @@ test("loadingScreen PHUD paints TUTORIAL COMPLETE over sidebar", async ({
     expect(card.w).toBeGreaterThan(400);
     expect(card.h).toBeGreaterThan(200);
 
+    const paint = await page.evaluate(() => {
+      const el = document.querySelector(
+        '[data-jsonui-name="phud_loadingScreen.main"]',
+      ) as HTMLElement | null;
+      const label = el?.querySelector(
+        '.jsonui[data-ui-type="label"]',
+      ) as HTMLElement | null;
+      const face = el?.querySelector(
+        ".jsonui-image-face",
+      ) as HTMLElement | null;
+      if (!el || !label) return null;
+      const er = el.getBoundingClientRect();
+      const lr = label.getBoundingClientRect();
+      return {
+        bg: getComputedStyle(el).backgroundColor,
+        tiled: face?.style.backgroundRepeat ?? "",
+        textAlign: getComputedStyle(label).textAlign,
+        labelCx: lr.left + lr.width / 2,
+        viewCx: window.innerWidth / 2,
+        covers:
+          er.width >= window.innerWidth * 0.95 &&
+          er.height >= window.innerHeight * 0.95,
+      };
+    });
+    expect(paint).not.toBeNull();
+    expect(paint!.covers).toBe(true);
+    expect(paint!.bg).toMatch(/rgb\(\s*0,\s*0,\s*0\s*\)|#000/i);
+    expect(paint!.tiled).toBe("repeat");
+    expect(paint!.textAlign).toBe("center");
+    expect(Math.abs(paint!.labelCx - paint!.viewCx)).toBeLessThan(80);
+
     // Second line must actually paint (not clipped by single-line label box).
     const welcomeVisible = await page.evaluate(() => {
       const label = document.querySelector(

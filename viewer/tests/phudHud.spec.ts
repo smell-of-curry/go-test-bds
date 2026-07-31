@@ -193,7 +193,7 @@ test("phud lanes render ping, banner+currency and the sidebar", async ({
         packSidebar([
           [
             "HP: 20/20§r§f Lv. 11",
-            "§fBulbasaur",
+            "§fBulbasaur\uE108",
             "bulbasaur",
             "true",
             "poke",
@@ -246,6 +246,11 @@ test("phud lanes render ping, banner+currency and the sidebar", async ({
         '[data-jsonui-name="player_ping.value_text"]',
       ) as HTMLElement | null;
       const valueSpan = valueLabel?.querySelector("span") as HTMLElement | null;
+      const hpLabel = [
+        ...document.querySelectorAll<HTMLElement>(
+          '.jsonui[data-ui-type="label"]',
+        ),
+      ].find((el) => (el.textContent ?? "").includes("HP: 20/20"));
       return {
         dockCount: docks.length,
         dockText: docks[0]?.textContent ?? "",
@@ -258,6 +263,9 @@ test("phud lanes render ping, banner+currency and the sidebar", async ({
         banner: quest?.textContent ?? "",
         currency: currency?.textContent ?? "",
         currencyHostText: currencyRoot?.textContent ?? "",
+        hpFontSize: hpLabel
+          ? parseFloat(getComputedStyle(hpLabel).fontSize)
+          : 0,
         noRawTitle: ![...document.querySelectorAll(".jsonui")].some((el) =>
           /^&_[A-Za-z]+:/.test((el.textContent ?? "").trim()),
         ),
@@ -266,6 +274,10 @@ test("phud lanes render ping, banner+currency and the sidebar", async ({
 
     expect(got.dockCount).toBe(1);
     expect(got.dockText).toContain("Bulbasaur");
+    expect(got.dockText).toContain("♂");
+    expect(got.dockText).not.toMatch(/\uE108|\uFFFD/);
+    expect(got.hpFontSize).toBeGreaterThanOrEqual(7);
+    expect(got.hpFontSize).toBeLessThanOrEqual(12);
     expect(got.dockText).toMatch(/Lv\.?\s*11|HP:\s*20\/20/);
     expect(got.pingText).toContain("63");
     expect(got.pingText).toContain("Current Ping");

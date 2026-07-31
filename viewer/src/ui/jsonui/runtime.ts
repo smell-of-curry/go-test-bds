@@ -34,6 +34,7 @@ const PRELOAD_TEXTURES = [
   "textures/ui/sidebar/ring",
   "textures/ui/filled_progress_bar",
   "textures/ui/Black",
+  "textures/ui/bg32",
 ] as const;
 
 /** Options for {@link createJsonUiRuntime}. */

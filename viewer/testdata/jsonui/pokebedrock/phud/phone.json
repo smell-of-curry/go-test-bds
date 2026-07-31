@@ -51,7 +51,7 @@
   },
   "phone_background@abstract_phone_conditional": {
     "texture": "textures/ui/phud/box_small",
-    "$condition": "((#value = 'ring') or (#value = 'standby')"
+    "$condition": "((#value = 'ring') or (#value = 'standby'))"
   },
   "oak_talk_bg@abstract_phone_conditional": {
     "type": "image",

@@ -331,6 +331,53 @@ test.describe("jsonui HUD fixtures", () => {
       ).toBeGreaterThan(0);
       const [bw, bh] = cropped[0]!.size.split(/\s+/).map((s) => parseFloat(s));
       expect(bw).toBeGreaterThan(bh!);
+
+      const layout = await page.evaluate(() => {
+        const host = document.querySelector(
+          '[data-jsonui-name="phud_phone.main"]',
+        );
+        const bg = document.querySelector(
+          '.jsonui[data-ui-name="oak_talk_bg"]',
+        );
+        const icons = [
+          ...document.querySelectorAll('.jsonui[data-ui-name="oak_icon"]'),
+        ];
+        const faceOf = (el) => el?.querySelector(".jsonui-image-face");
+        const faceOpacity = (face) =>
+          !face
+            ? "missing"
+            : face.style.opacity === ""
+              ? "1"
+              : face.style.opacity;
+        const byTex = (frag) =>
+          icons.find((el) =>
+            (faceOf(el)?.style.backgroundImage ?? "").includes(frag),
+          ) ?? null;
+        const start = byTex("oak_start");
+        const loop = byTex("oak_loop");
+        const hr = host?.getBoundingClientRect();
+        return {
+          hostW: hr?.width ?? 0,
+          hostH: hr?.height ?? 0,
+          hostLeft: hr?.left ?? -1,
+          bgOpacity: faceOpacity(faceOf(bg)),
+          loopOpacity: faceOpacity(faceOf(loop)),
+          startHidden:
+            !start ||
+            getComputedStyle(start).display === "none" ||
+            faceOpacity(faceOf(start)) === "0",
+          loopImage: faceOf(loop)?.style.backgroundImage ?? "",
+        };
+      });
+      expect(layout.hostW).toBeGreaterThanOrEqual(60);
+      expect(layout.hostW).toBeLessThanOrEqual(140);
+      expect(layout.hostH).toBeGreaterThanOrEqual(60);
+      expect(layout.hostH).toBeLessThanOrEqual(140);
+      expect(layout.hostLeft).toBeLessThan(120);
+      expect(Number(layout.bgOpacity)).toBeGreaterThan(0.9);
+      expect(Number(layout.loopOpacity)).toBeGreaterThan(0.9);
+      expect(layout.loopImage).toContain("oak_loop");
+      expect(layout.startHidden).toBe(true);
     } finally {
       await harness.close();
     }

@@ -7,6 +7,7 @@
  * (e.g. sidebar `["222.22%y", 192]` and ball icons `["100%y", "100%"]`).
  */
 
+import { mapMinecraftGlyphs } from "../formatCodes";
 import { evalExpr, parseExpr } from "./expr.js";
 import type {
   LayoutBox,
@@ -1196,18 +1197,25 @@ function resolveSizePair(
   return { w: finite(w), h: finite(h) };
 }
 
+function labelFontScale(el: ResolvedElement): number {
+  const raw = el.props.font_scale_factor;
+  if (typeof raw === "number") return raw;
+  if (typeof raw === "string" && raw.trim() !== "") {
+    const n = Number(raw);
+    if (Number.isFinite(n)) return n;
+  }
+  return 1;
+}
+
 function labelIntrinsic(
   el: ResolvedElement,
   opts: LayoutOptions,
 ): TextMetrics | null {
   if (el.type !== "label") return null;
   const text = typeof el.props.text === "string" ? el.props.text : "";
-  const fontScale =
-    typeof el.props.font_scale_factor === "number"
-      ? el.props.font_scale_factor
-      : 1;
+  const fontScale = labelFontScale(el);
   // Strip § codes for measurement; keep `\n` so multiline labels size tall.
-  const plain = text.replace(/[§&]./g, "");
+  const plain = mapMinecraftGlyphs(text.replace(/[§&]./g, ""));
   return opts.measureText(plain, fontScale);
 }
 
@@ -1225,11 +1233,8 @@ function labelWrappedHeight(
   maxW: number,
 ): number {
   const text = typeof el.props.text === "string" ? el.props.text : "";
-  const fontScale =
-    typeof el.props.font_scale_factor === "number"
-      ? el.props.font_scale_factor
-      : 1;
-  const plain = text.replace(/[§&]./g, "");
+  const fontScale = labelFontScale(el);
+  const plain = mapMinecraftGlyphs(text.replace(/[§&]./g, ""));
   // Match the caller's measureText metrics (tests use 8gui/line; runtime 9).
   const sample = opts.measureText("X", fontScale);
   const charW = Math.max(1, sample.w);
