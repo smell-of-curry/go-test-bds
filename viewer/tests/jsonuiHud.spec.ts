@@ -3,21 +3,15 @@
  * Asserts one sidebar dock, party name/level text, no centered &_ title.
  */
 import { expect, test } from "@playwright/test";
-import {
-  createServer as createHttpServer,
-  type IncomingMessage,
-  type Server,
-  type ServerResponse,
-} from "node:http";
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { createServer as createHttpServer, type Server } from "node:http";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { PNG } from "pngjs";
 import { createServer as createViteServer, type ViteDevServer } from "vite";
+import { handleJsonUiPackRequest } from "./jsonuiPackServer";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const viewerRoot = join(here, "..");
-const fixturesRoot = join(viewerRoot, "testdata", "jsonui");
 
 interface Harness {
   pageUrl: string;
@@ -31,57 +25,10 @@ interface Harness {
  */
 async function startHarness(): Promise<Harness> {
   const packHttp: Server = createHttpServer((req, res) => {
-    void handlePack(req, res);
-  });
-
-  async function handlePack(
-    req: IncomingMessage,
-    res: ServerResponse,
-  ): Promise<void> {
-    const url = new URL(req.url ?? "/", "http://127.0.0.1");
-    const cors = {
-      "access-control-allow-origin": "*",
-      "access-control-allow-methods": "GET, OPTIONS",
-    };
-    if (req.method === "OPTIONS") {
-      res.writeHead(204, cors);
-      res.end();
-      return;
-    }
-    if (url.pathname === "/packs") {
-      res.writeHead(200, { ...cors, "content-type": "application/json" });
-      res.end(
-        JSON.stringify([
-          { id: "vanilla", priority: 0 },
-          { id: "pokebedrock", priority: 1 },
-        ]),
-      );
-      return;
-    }
-    const packMatch = /^\/pack\/([^/]+)\/(.+)$/.exec(url.pathname);
-    if (packMatch) {
-      const packId = decodeURIComponent(packMatch[1]!);
-      let rel = decodeURIComponent(packMatch[2]!);
-      if (rel.toLowerCase().startsWith("ui/")) rel = rel.slice(3);
-      const abs = join(fixturesRoot, packId, rel);
-      if (!existsSync(abs) || !statSync(abs).isFile()) {
-        res.writeHead(404, cors);
-        res.end("missing");
-        return;
-      }
-      res.writeHead(200, { ...cors, "content-type": "application/json" });
-      res.end(readFileSync(abs));
-      return;
-    }
-    if (url.pathname.startsWith("/asset/")) {
-      // No textures in fixture tree for most paths — 404 is fine (empty icons).
-      res.writeHead(404, cors);
-      res.end("no asset");
-      return;
-    }
-    res.writeHead(404, cors);
+    if (handleJsonUiPackRequest(req, res)) return;
+    res.writeHead(404);
     res.end("not found");
-  }
+  });
 
   await new Promise<void>((resolve) =>
     packHttp.listen(0, "127.0.0.1", resolve),
@@ -330,6 +277,60 @@ test.describe("jsonui HUD fixtures", () => {
         ).__jsonUi.setPhud({ phone: "" });
       });
       expect(await phonePaintedArea(page)).toBe(0);
+    } finally {
+      await harness.close();
+    }
+  });
+
+  test("phone oak flipbook crops one frame (not whole strip)", async ({
+    page,
+  }) => {
+    const harness = await startHarness();
+    try {
+      await page.setViewportSize({ width: 1280, height: 720 });
+      await page.goto(harness.pageUrl, { waitUntil: "domcontentloaded" });
+      await page.waitForFunction(() => document.body.dataset.ready === "1", {
+        timeout: 60_000,
+      });
+
+      await page.evaluate(() => {
+        (
+          window as unknown as {
+            __jsonUi: { setPhud: (p: Record<string, string>) => void };
+          }
+        ).__jsonUi.setPhud({ phone: "loop" });
+      });
+      await expect(
+        page.locator('.jsonui[data-ui-name="oak_talk"]').first(),
+      ).toBeVisible();
+
+      // oak_loop is 512x64 (8x64 frames). Cropped frame → background-size
+      // wider than the element (not `100% 100%` whole-strip stretch).
+      const paint = await page.evaluate(() => {
+        const faces = [
+          ...document.querySelectorAll<HTMLElement>(
+            '.jsonui[data-ui-name="oak_icon"] .jsonui-image-face',
+          ),
+        ];
+        return faces.map((face) => ({
+          size: face.style.backgroundSize,
+          position: face.style.backgroundPosition,
+          image: face.style.backgroundImage,
+        }));
+      });
+      const cropped = paint.filter(
+        (p) =>
+          p.image.includes("oak_") &&
+          p.size !== "" &&
+          p.size !== "100% 100%" &&
+          !p.size.endsWith("%"),
+      );
+      expect(
+        cropped.length,
+        `expected UV-cropped oak face, got ${JSON.stringify(paint)}`,
+      ).toBeGreaterThan(0);
+      const [bw, bh] = cropped[0]!.size.split(/\s+/).map((s) => parseFloat(s));
+      expect(bw).toBeGreaterThan(bh!);
     } finally {
       await harness.close();
     }

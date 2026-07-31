@@ -11,7 +11,7 @@ import {
   prepareCollectionTree,
   type CollectionMap,
 } from "./collections.js";
-import { renderTree, type JsonUiAssets } from "./dom.js";
+import { renderTree, type JsonUiAssets, type TextureInfoMap } from "./dom.js";
 import { layoutTree, type LayoutNode, type MeasureText } from "./layout.js";
 import type {
   BindingSource,
@@ -79,6 +79,11 @@ export interface FormRendererDeps {
   measureText?: MeasureText;
   /** Merged pack lang table for `localize: true` labels. */
   lang?: Readonly<Record<string, string>>;
+  /**
+   * Texture size + nineslice map for dialogue chrome / portraits.
+   * Prefer `assets.textureInfo`; this is a test/fixture override.
+   */
+  textureInfo?: TextureInfoMap;
 }
 
 export interface FormRenderer {
@@ -356,7 +361,16 @@ export function createFormRenderer(deps: FormRendererDeps): FormRenderer {
   }
 
   function showEngine(form: FormSnapshot): boolean {
-    const prepared = prepareFormTree(deps.resolver, form, deps.globals ?? {});
+    // Dialogue / vanilla long_form only — battle + other flag screens keep
+    // their own layout (another agent owns that path).
+    const routed = routeForm(form);
+    const dialogue =
+      routed.kind === "long_form" || routed.kind === "custom_form";
+    const prepared = prepareFormTree(
+      deps.resolver,
+      dialogue ? normalizeDialogueForm(form) : form,
+      deps.globals ?? {},
+    );
     if (!prepared) return false;
     clear();
     lastTree = prepared.tree;
@@ -371,6 +385,7 @@ export function createFormRenderer(deps: FormRendererDeps): FormRenderer {
       guiScale,
       assets: deps.assets,
       lang: deps.lang,
+      textureInfo: deps.textureInfo,
     });
     tagCollectionIndices(layout, engineRoot);
     applyHover();
@@ -395,6 +410,21 @@ export function createFormRenderer(deps: FormRendererDeps): FormRenderer {
       clear();
       hoverIndex = null;
     },
+  };
+}
+
+/**
+ * Soft-normalize dialogue ActionForm / ModalForm snapshots before layout.
+ * Collapses runaway whitespace so title/body regions don't read as one blob.
+ *
+ * @param form - Raw form snapshot.
+ * @returns shallow-cloned snapshot for the dialogue path.
+ */
+function normalizeDialogueForm(form: FormSnapshot): FormSnapshot {
+  return {
+    ...form,
+    title: (form.title ?? "").replace(/\s+/g, " ").trim(),
+    content: (form.content ?? "").replace(/[ \t]+\n/g, "\n").trim(),
   };
 }
 

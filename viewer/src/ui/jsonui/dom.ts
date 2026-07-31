@@ -7,6 +7,25 @@ import { formatCodesToFragment } from "../formatCodes";
 import { localizeLabelText } from "./load";
 import type { LayoutNode } from "./layout";
 
+/** Natural pixel size + optional texture-json nineslice for a pack texture. */
+export interface TextureInfo {
+  /** Pixel width of the PNG. */
+  w: number;
+  /** Pixel height of the PNG. */
+  h: number;
+  /**
+   * Bedrock `textures/.../*.json` `nineslice_size` (number, `[x,y]`, or
+   * `[left,top,right,bottom]`). Applied when the UI element omits its own.
+   */
+  nineslice?: unknown;
+}
+
+/** Natural pixel size of a texture, keyed by pack path (no extension). */
+export type TextureSizeMap = Readonly<Record<string, { w: number; h: number }>>;
+
+/** Texture info map (size + optional nineslice), keyed by pack path. */
+export type TextureInfoMap = Readonly<Record<string, TextureInfo>>;
+
 /** Maps a pack-relative texture path to a fetchable URL. */
 export interface JsonUiAssets {
   /**
@@ -14,18 +33,25 @@ export interface JsonUiAssets {
    * @returns URL (e.g. `/asset/textures/ui/White.png`).
    */
   textureUrl(path: string): string;
+  /**
+   * Optional sync lookup for natural size + texture-json nineslice.
+   * Flipbook UV crop and tiny chrome (2x2 `control.png`) need this.
+   *
+   * @param path - Pack path without extension.
+   * @returns size/nineslice, or undefined when unknown.
+   */
+  textureInfo?(path: string): TextureInfo | undefined;
 }
-
-/** Natural pixel size of a texture, keyed by pack path (no extension). */
-export type TextureSizeMap = Readonly<Record<string, { w: number; h: number }>>;
 
 /** Options for {@link renderTree}. */
 export interface RenderOptions {
   /** Multiplier from gui pixels → CSS pixels (e.g. 2 or 3). */
   guiScale: number;
   assets: JsonUiAssets;
-  /** Optional natural sizes for UV background math. */
+  /** Optional natural sizes for UV background math (legacy; prefer assets.textureInfo). */
   textureSizes?: TextureSizeMap;
+  /** Optional size + nineslice map (merged under assets.textureInfo when both set). */
+  textureInfo?: TextureInfoMap;
   /** Merged pack lang table for `localize: true` labels. */
   lang?: Readonly<Record<string, string>>;
   /**
@@ -73,6 +99,80 @@ export function renderTree(
 /** Reset the per-type warn set (tests). */
 export function resetJsonUiWarnCache(): void {
   warnedTypes.clear();
+}
+
+/**
+ * Resolve UV origin for an image face.
+ *
+ * Flipbook anim refs (`@ns.anim__…`) stay as strings after resolve — treat as
+ * frame 0 (`[0,0]`). Objects with `initial_uv` (inlined flip_book) use that.
+ *
+ * @param rawUv - Element `uv` prop.
+ * @param hasUvSize - Whether `uv_size` resolved to a positive pair.
+ * @returns `[u,v]` pixel origin, or null when UV cropping should not run.
+ */
+export function resolveImageUv(
+  rawUv: unknown,
+  hasUvSize: boolean,
+): [number, number] | null {
+  const pair = asIntPair(rawUv);
+  if (pair) return pair;
+  if (rawUv && typeof rawUv === "object" && !Array.isArray(rawUv)) {
+    const initial = asIntPair((rawUv as { initial_uv?: unknown }).initial_uv);
+    if (initial) return initial;
+  }
+  // Unresolved `@ns.flipbook` string (or missing uv) + uv_size → first frame.
+  if (hasUvSize) return [0, 0];
+  return null;
+}
+
+/**
+ * Pick texture info for a pack path from opts + assets.
+ *
+ * @param texture - Pack path without extension.
+ * @param opts - Render options.
+ * @returns info or undefined.
+ */
+export function lookupTextureInfo(
+  texture: string,
+  opts: Pick<RenderOptions, "assets" | "textureSizes" | "textureInfo">,
+): TextureInfo | undefined {
+  const fromAssets = opts.assets.textureInfo?.(texture);
+  const fromMap = opts.textureInfo?.[texture];
+  const sizeOnly = opts.textureSizes?.[texture];
+  if (!fromAssets && !fromMap && !sizeOnly) return undefined;
+  return {
+    w: fromAssets?.w ?? fromMap?.w ?? sizeOnly?.w ?? 0,
+    h: fromAssets?.h ?? fromMap?.h ?? sizeOnly?.h ?? 0,
+    nineslice: fromAssets?.nineslice ?? fromMap?.nineslice,
+  };
+}
+
+/**
+ * Compute CSS background-size / background-position for a UV crop.
+ *
+ * @param natural - Full texture pixel size.
+ * @param uv - Top-left of the source rect.
+ * @param uvSize - Source rect size (one flipbook frame).
+ * @param elemCss - Painted element size in CSS px.
+ * @returns size + position CSS pixel values.
+ */
+export function uvBackgroundCss(
+  natural: { w: number; h: number },
+  uv: [number, number],
+  uvSize: [number, number],
+  elemCss: { w: number; h: number },
+): { size: string; position: string } {
+  const [u, v] = uv;
+  const [uw, uh] = uvSize;
+  const ew = Math.max(0, elemCss.w);
+  const eh = Math.max(0, elemCss.h);
+  const bw = (natural.w * ew) / uw;
+  const bh = (natural.h * eh) / uh;
+  return {
+    size: `${bw}px ${bh}px`,
+    position: `${(-u * ew) / uw}px ${(-v * eh) / uh}px`,
+  };
 }
 
 function paintNode(
@@ -186,23 +286,36 @@ function applyImage(
   face.style.zIndex = "0";
 
   const tint = asColor(node.element.props.color);
-  const nine = node.element.props.nineslice_size;
+  const info = lookupTextureInfo(texture, opts);
+  // Element nineslice wins; else texture-json nineslice (control.png is 2x2
+  // with nineslice_size:1 — stretching without it = giant white blob).
+  const nine =
+    node.element.props.nineslice_size !== undefined &&
+    node.element.props.nineslice_size !== null
+      ? node.element.props.nineslice_size
+      : info?.nineslice;
   if (nine !== undefined && nine !== null) {
     applyNineslice(face, url, nine, opts.guiScale);
   } else {
     face.style.backgroundImage = `url("${cssUrl(url)}")`;
-    const uv = asIntPair(node.element.props.uv);
     const uvSize = asIntPair(node.element.props.uv_size);
-    const natural = opts.textureSizes?.[texture];
-    if (uv && uvSize && natural && uvSize[0]! > 0 && uvSize[1]! > 0) {
-      const ew = Math.max(0, node.box.w * opts.guiScale);
-      const eh = Math.max(0, node.box.h * opts.guiScale);
-      const [u, v] = uv;
-      const [uw, uh] = uvSize;
-      const bw = (natural.w * ew) / uw!;
-      const bh = (natural.h * eh) / uh!;
-      face.style.backgroundSize = `${bw}px ${bh}px`;
-      face.style.backgroundPosition = `${(-u! * ew) / uw!}px ${(-v! * eh) / uh!}px`;
+    const hasUvSize = !!(uvSize && uvSize[0]! > 0 && uvSize[1]! > 0);
+    const uv = resolveImageUv(node.element.props.uv, hasUvSize);
+    if (
+      uv &&
+      uvSize &&
+      info &&
+      info.w > 0 &&
+      info.h > 0 &&
+      uvSize[0]! > 0 &&
+      uvSize[1]! > 0
+    ) {
+      const css = uvBackgroundCss({ w: info.w, h: info.h }, uv, uvSize, {
+        w: Math.max(0, node.box.w * opts.guiScale),
+        h: Math.max(0, node.box.h * opts.guiScale),
+      });
+      face.style.backgroundSize = css.size;
+      face.style.backgroundPosition = css.position;
     } else if (node.element.props.$viewer_dock_natural === true) {
       // dock.png is 61×405 — preserve aspect, pin to the right of the wide
       // layout box (plates still size against the full control).
@@ -215,6 +328,8 @@ function applyImage(
       node.element.props.$viewer_bg_align === "left" ||
       node.element.props.$viewer_bg_align === "right"
     ) {
+      // Clipped overflow image: paint as if still full-width. Prefer left —
+      // right-align showed only the opaque end of textures with a left pad.
       const scale = Number(node.element.props.$viewer_bg_scale_x) || 1;
       const align =
         node.element.props.$viewer_bg_align === "right" ? "right" : "left";
@@ -406,7 +521,10 @@ function applyLabel(
   el.style.fontSize = `${basePx}px`;
   // Match layout measureText line box (9gui ≈ font) so `\n` lines aren't clipped.
   el.style.lineHeight = `${basePx}px`;
-  el.style.whiteSpace = "pre";
+  // Form body labels use size ["100%","default"] — wrap inside the box rather
+  // than one clipped line (`pre` never wraps → cramped title/body).
+  el.style.whiteSpace = "pre-wrap";
+  el.style.overflowWrap = "anywhere";
   el.style.overflow = "hidden";
 
   const color = asColor(node.element.props.color);
