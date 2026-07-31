@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Playwright: mount JSON UI runtime against testdata/jsonui fixtures.
  * Asserts one sidebar dock, party name/level text, no centered &_ title.
  */
@@ -163,7 +163,8 @@ test.describe("jsonui HUD fixtures", () => {
   test("one dock, party text, no centered &_ title", async ({ page }) => {
     const harness = await startHarness();
     try {
-      await page.setViewportSize({ width: 1024, height: 576 });
+      // Fixture #host is fixed 1280×720 (layout uses host CSS, not page viewport).
+      await page.setViewportSize({ width: 1280, height: 720 });
       await page.goto(harness.pageUrl, { waitUntil: "domcontentloaded" });
       await page.waitForFunction(() => document.body.dataset.ready === "1", {
         timeout: 60_000,
@@ -228,7 +229,8 @@ test.describe("jsonui HUD fixtures", () => {
       // so data.png `80%` plates stay sane. h stays 192gui×scale.
       expect(geom.main).not.toBeNull();
       expect(geom.main!.h).toBeCloseTo(384, 0);
-      expect(geom.main!.w).toBeLessThanOrEqual(1024 * 0.25 + 2);
+      // 0.25 × 640gui × scale2 → 320 CSS on the 1280 host.
+      expect(geom.main!.w).toBeLessThanOrEqual(1280 * 0.25 + 2);
       expect(geom.main!.w).toBeGreaterThan(250);
       // Ball icons ["100%y","100%"] of 32-tall row → ~64×64 CSS, not viewport-tall.
       for (const b of geom.balls) {
@@ -239,7 +241,8 @@ test.describe("jsonui HUD fixtures", () => {
       const nameLabel = geom.labels.find((l) => l.text.includes("TestBot"));
       expect(nameLabel).toBeTruthy();
       expect(nameLabel!.text).toMatch(/^TestBot$/);
-      expect(nameLabel!.x).toBeLessThan(1024);
+      expect(nameLabel!.x).toBeGreaterThan(700);
+      expect(nameLabel!.x).toBeLessThan(1280);
       expect(nameLabel!.w).toBeLessThan(400);
 
       // Centered title must not show the raw control token.
