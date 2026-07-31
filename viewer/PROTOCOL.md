@@ -300,13 +300,24 @@ run timeline. Conventions:
   leg. After the recording is written these intervals play sped-up
   (`--timelapse <factor>`, default 8, env `GOTESTBDS_TIMELAPSE`; requires a
   full ffmpeg — see the capture CLI help).
+- `message: "idle:start"` / `message: "idle:end"` — bracket a sit-and-wait
+  (VO, form pause). Play at `--idle-timelapse` (default 24, env
+  `GOTESTBDS_IDLE_TIMELAPSE`). Unmarked gaps between walks use the same
+  idle factor.
 - `message: "loading:start"` / `message: "loading:end"` — bracket a
   chunk-load wait (e.g. after a teleport). These intervals are **cut** from
   the output video entirely (not sped). Cuts shorter than ~1s are kept to
-  avoid jarring pops. Loading wins over walk on overlap.
+  avoid jarring pops. An unmatched `loading:start` is ignored (never
+  cut-to-EOF). Loading wins over walk/idle on overlap.
 
-The harness times `segment` marks against the run video; message strings pass
-through untouched. `segment` marks never update the caption or run lifecycle.
+The harness also synthesises `suite:start` / `suite:end` timeline marks from
+`suiteStart` / `suiteEnd` lifecycle frames and **cuts** suites whose names do
+not match `GOTESTBDS_TIMELAPSE_KEEP_SUITES` (default `/showcase/i`), plus the
+prefix before the first kept suite. The post-suite tail is kept so celebration
+frames after the last assertion still land in the reel.
+
+The harness times `segment` / suite marks against the run video; message
+strings pass through untouched. `segment` marks never update the caption.
 
 ### `capture`
 

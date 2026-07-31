@@ -22,6 +22,8 @@ Options:
   --timelapse <factor>           Speed-up for marked walking segments
                                  (default GOTESTBDS_TIMELAPSE or 8; 1 disables
                                  walk speed-up; loading:start/end cuts still apply)
+  --idle-timelapse <factor>      Speed-up for idle gaps + idle:start/end
+                                 (default GOTESTBDS_IDLE_TIMELAPSE or 24; 1 = realtime)
   --keep-raw                     Keep the real-time original as run-full.webm
   --log-level <level>            debug | info | warn | error (default info)
   --help                         Show this help
@@ -30,6 +32,10 @@ ffmpeg for --timelapse is resolved from the FFMPEG env var, then PATH, then
 Playwright's bundled build, and must carry the setpts/fps filters
 (Playwright's bundled ffmpeg is filter-stripped and gets skipped). Without a
 capable ffmpeg the video is left real-time with a warning.
+
+Non-showcase suites (Smoke / Machines / Tutorial) are cut via suite:start/end
+marks synthesised from suiteStart/suiteEnd. Override with
+GOTESTBDS_TIMELAPSE_KEEP_SUITES (RegExp source; empty/0 disables).
 `;
 
 interface ParsedArgs {
@@ -43,6 +49,7 @@ interface ParsedArgs {
     browser?: string;
     videoOut?: string;
     timelapse?: number;
+    idleTimelapse?: number;
     keepRaw?: boolean;
     logLevel?: LogLevel;
   };
@@ -104,6 +111,10 @@ export function parseArgs(argv: string[]): ParsedArgs {
     }
     if (a === "--timelapse") {
       options.timelapse = Number(next());
+      continue;
+    }
+    if (a === "--idle-timelapse") {
+      options.idleTimelapse = Number(next());
       continue;
     }
     if (a === "--keep-raw") {
@@ -194,6 +205,15 @@ async function main(): Promise<void> {
     process.exitCode = 1;
     return;
   }
+  const envIdle = Number(process.env.GOTESTBDS_IDLE_TIMELAPSE ?? "");
+  const idleTimelapse =
+    parsed.options.idleTimelapse ??
+    (Number.isFinite(envIdle) && envIdle > 0 ? envIdle : 24);
+  if (!Number.isFinite(idleTimelapse) || idleTimelapse < 1) {
+    console.error(`invalid --idle-timelapse factor: ${String(idleTimelapse)}`);
+    process.exitCode = 1;
+    return;
+  }
 
   const opts: HarnessOptions = {
     stream: stream.replace(/\/+$/, ""),
@@ -204,6 +224,7 @@ async function main(): Promise<void> {
     browserPath,
     logLevel: parsed.options.logLevel ?? "info",
     timelapse,
+    idleTimelapse,
     keepRaw: parsed.options.keepRaw ?? false,
     ...(parsed.options.videoOut ? { videoOut: parsed.options.videoOut } : {}),
   };

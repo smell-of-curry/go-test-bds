@@ -7,17 +7,31 @@ import {
   buildSegmentPlan,
   capIntervals,
   computeMarkedIntervals,
+  computeSuiteCutIntervals,
   computeWalkIntervals,
   hasAllFilters,
   MIN_CUT_INTERVAL_MS,
   parseDurationMs,
   REQUIRED_FILTERS,
+  resolveKeepSuite,
 } from "./timelapse";
 
 const start = (tMs: number) => ({ message: "walk:start", tMs });
 const end = (tMs: number) => ({ message: "walk:end", tMs });
 const loadStart = (tMs: number) => ({ message: "loading:start", tMs });
 const loadEnd = (tMs: number) => ({ message: "loading:end", tMs });
+const idleStart = (tMs: number) => ({ message: "idle:start", tMs });
+const idleEnd = (tMs: number) => ({ message: "idle:end", tMs });
+const suiteStart = (tMs: number, suite: string) => ({
+  message: "suite:start",
+  tMs,
+  suite,
+});
+const suiteEnd = (tMs: number, suite: string) => ({
+  message: "suite:end",
+  tMs,
+  suite,
+});
 
 test("computeWalkIntervals: simple pair", () => {
   assert.deepEqual(computeWalkIntervals([start(5000), end(20000)], 30000), [
@@ -97,6 +111,7 @@ test("computeMarkedIntervals: walk and loading side by side", () => {
     computeMarkedIntervals(
       [start(1000), end(3000), loadStart(5000), loadEnd(9000)],
       10000,
+      null,
     ),
     [
       { startMs: 1000, endMs: 3000, kind: "walk" },
@@ -110,6 +125,7 @@ test("computeMarkedIntervals: loading wins overlap inside a walk", () => {
     computeMarkedIntervals(
       [start(0), loadStart(3000), loadEnd(7000), end(10000)],
       10000,
+      null,
     ),
     [
       { startMs: 0, endMs: 3000, kind: "walk" },
@@ -124,15 +140,20 @@ test("computeMarkedIntervals: stray loading:end is ignored", () => {
     computeMarkedIntervals(
       [loadEnd(500), loadStart(2000), loadEnd(5000)],
       10000,
+      null,
     ),
     [{ startMs: 2000, endMs: 5000, kind: "loading" }],
   );
 });
 
-test("computeMarkedIntervals: unmatched loading:start closes at video end", () => {
-  assert.deepEqual(computeMarkedIntervals([loadStart(4000)], 10000), [
-    { startMs: 4000, endMs: 10000, kind: "loading" },
-  ]);
+test("computeMarkedIntervals: unmatched loading:start is dropped (not cut-to-EOF)", () => {
+  // Run 45: a lost loading:end near the crate leg erased the finale when
+  // unmatched starts closed at durationMs. Dropping them keeps the tail.
+  assert.deepEqual(computeMarkedIntervals([loadStart(4000)], 10000, null), []);
+  assert.deepEqual(
+    computeMarkedIntervals([start(0), loadStart(6000), end(8000)], 10000, null),
+    [{ startMs: 0, endMs: 8000, kind: "walk" }],
+  );
 });
 
 test("computeMarkedIntervals: sub-1s loading interval is kept (not cut)", () => {
@@ -143,13 +164,89 @@ test("computeMarkedIntervals: sub-1s loading interval is kept (not cut)", () => 
     computeMarkedIntervals(
       [start(0), loadStart(4000), loadEnd(4500), end(10000)],
       10000,
+      null,
     ),
     [{ startMs: 0, endMs: 10000, kind: "walk" }],
   );
   assert.deepEqual(
-    computeMarkedIntervals([loadStart(4000), loadEnd(4500)], 10000),
+    computeMarkedIntervals([loadStart(4000), loadEnd(4500)], 10000, null),
     [],
   );
+});
+
+test("computeMarkedIntervals: idle marks are tagged idle", () => {
+  assert.deepEqual(
+    computeMarkedIntervals([idleStart(2000), idleEnd(8000)], 10000, null),
+    [{ startMs: 2000, endMs: 8000, kind: "idle" }],
+  );
+});
+
+test("computeMarkedIntervals: walk wins over idle on overlap", () => {
+  assert.deepEqual(
+    computeMarkedIntervals(
+      [idleStart(0), start(3000), end(7000), idleEnd(10000)],
+      10000,
+      null,
+    ),
+    [
+      { startMs: 0, endMs: 3000, kind: "idle" },
+      { startMs: 3000, endMs: 7000, kind: "walk" },
+      { startMs: 7000, endMs: 10000, kind: "idle" },
+    ],
+  );
+});
+
+test("computeSuiteCutIntervals: cuts non-showcase and prefix before first keep", () => {
+  assert.deepEqual(
+    computeSuiteCutIntervals(
+      [
+        suiteStart(0, "Smoke"),
+        suiteEnd(30_000, "Smoke"),
+        suiteStart(30_000, "Machines"),
+        suiteEnd(90_000, "Machines"),
+        suiteStart(90_000, "Tutorial Showcase"),
+        suiteEnd(400_000, "Tutorial Showcase"),
+      ],
+      450_000,
+      /showcase/i,
+    ),
+    [
+      // prefix (empty here — Smoke starts at 0) merged with Smoke + Machines
+      { startMs: 0, endMs: 90_000 },
+    ],
+  );
+});
+
+test("computeSuiteCutIntervals: does not cut after the last suite (finale tail)", () => {
+  const cuts = computeSuiteCutIntervals(
+    [
+      suiteStart(10_000, "Tutorial Showcase"),
+      suiteEnd(200_000, "Tutorial Showcase"),
+    ],
+    250_000,
+    /showcase/i,
+  );
+  // Prefix before showcase is cut; post-suiteEnd tail is kept.
+  assert.deepEqual(cuts, [{ startMs: 0, endMs: 10_000 }]);
+});
+
+test("computeMarkedIntervals: suite cuts act as loading", () => {
+  const ivs = computeMarkedIntervals(
+    [
+      suiteStart(0, "Smoke"),
+      suiteEnd(50_000, "Smoke"),
+      suiteStart(50_000, "Tutorial Showcase"),
+      start(60_000),
+      end(80_000),
+      suiteEnd(100_000, "Tutorial Showcase"),
+    ],
+    120_000,
+    /showcase/i,
+  );
+  assert.deepEqual(ivs, [
+    { startMs: 0, endMs: 50_000, kind: "loading" },
+    { startMs: 60_000, endMs: 80_000, kind: "walk" },
+  ]);
 });
 
 test("capIntervals: under the cap is untouched", () => {
@@ -184,13 +281,13 @@ test("capIntervals: loading wins when merging mixed kinds", () => {
   ]);
 });
 
-test("buildSegmentPlan: mid-video walk yields normal/fast/normal", () => {
+test("buildSegmentPlan: mid-video walk yields idle/walk/idle", () => {
   assert.deepEqual(
     buildSegmentPlan([{ startMs: 5000, endMs: 20000, kind: "walk" }], 30000),
     [
-      { startMs: 0, endMs: 5000, mode: "normal" },
-      { startMs: 5000, endMs: 20000, mode: "fast" },
-      { startMs: 20000, endMs: null, mode: "normal" },
+      { startMs: 0, endMs: 5000, mode: "idle" },
+      { startMs: 5000, endMs: 20000, mode: "walk" },
+      { startMs: 20000, endMs: null, mode: "idle" },
     ],
   );
 });
@@ -199,23 +296,23 @@ test("buildSegmentPlan: walk at t=0 has no leading piece", () => {
   assert.deepEqual(
     buildSegmentPlan([{ startMs: 0, endMs: 4000, kind: "walk" }], 10000),
     [
-      { startMs: 0, endMs: 4000, mode: "fast" },
-      { startMs: 4000, endMs: null, mode: "normal" },
+      { startMs: 0, endMs: 4000, mode: "walk" },
+      { startMs: 4000, endMs: null, mode: "idle" },
     ],
   );
 });
 
-test("buildSegmentPlan: walk reaching EOF is fast and open-ended", () => {
+test("buildSegmentPlan: walk reaching EOF is walk and open-ended", () => {
   assert.deepEqual(
     buildSegmentPlan([{ startMs: 6000, endMs: 10000, kind: "walk" }], 10000),
     [
-      { startMs: 0, endMs: 6000, mode: "normal" },
-      { startMs: 6000, endMs: null, mode: "fast" },
+      { startMs: 0, endMs: 6000, mode: "idle" },
+      { startMs: 6000, endMs: null, mode: "walk" },
     ],
   );
 });
 
-test("buildSegmentPlan: two walk legs alternate normal and fast", () => {
+test("buildSegmentPlan: two walk legs alternate idle and walk", () => {
   assert.deepEqual(
     buildSegmentPlan(
       [
@@ -225,11 +322,11 @@ test("buildSegmentPlan: two walk legs alternate normal and fast", () => {
       10000,
     ),
     [
-      { startMs: 0, endMs: 1000, mode: "normal" },
-      { startMs: 1000, endMs: 3000, mode: "fast" },
-      { startMs: 3000, endMs: 7000, mode: "normal" },
-      { startMs: 7000, endMs: 9000, mode: "fast" },
-      { startMs: 9000, endMs: null, mode: "normal" },
+      { startMs: 0, endMs: 1000, mode: "idle" },
+      { startMs: 1000, endMs: 3000, mode: "walk" },
+      { startMs: 3000, endMs: 7000, mode: "idle" },
+      { startMs: 7000, endMs: 9000, mode: "walk" },
+      { startMs: 9000, endMs: null, mode: "idle" },
     ],
   );
 });
@@ -244,13 +341,12 @@ test("buildSegmentPlan: loading cut is absent; neighbours abut across the hole",
     10000,
   );
   assert.deepEqual(plan, [
-    { startMs: 0, endMs: 1000, mode: "normal" },
-    { startMs: 1000, endMs: 3000, mode: "fast" },
+    { startMs: 0, endMs: 1000, mode: "idle" },
+    { startMs: 1000, endMs: 3000, mode: "walk" },
     // 3000–7000 cut: no piece
-    { startMs: 7000, endMs: 9000, mode: "fast" },
-    { startMs: 9000, endMs: null, mode: "normal" },
+    { startMs: 7000, endMs: 9000, mode: "walk" },
+    { startMs: 9000, endMs: null, mode: "idle" },
   ]);
-  assert.ok(plan && plan.every((p) => p.mode !== ("cut" as string)));
   // No piece covers the cut range.
   assert.ok(
     plan &&
@@ -264,18 +360,34 @@ test("buildSegmentPlan: trailing loading stays closed (not open-ended)", () => {
   // Open-ending the preceding piece would re-include the cut region.
   assert.deepEqual(
     buildSegmentPlan([{ startMs: 5000, endMs: 10000, kind: "loading" }], 10000),
-    [{ startMs: 0, endMs: 5000, mode: "normal" }],
+    [{ startMs: 0, endMs: 5000, mode: "idle" }],
   );
 });
 
-test("buildSegmentPlan: mid-video loading only leaves normal flanks", () => {
+test("buildSegmentPlan: mid-video loading only leaves idle flanks", () => {
   assert.deepEqual(
     buildSegmentPlan([{ startMs: 2000, endMs: 6000, kind: "loading" }], 10000),
     [
-      { startMs: 0, endMs: 2000, mode: "normal" },
-      { startMs: 6000, endMs: null, mode: "normal" },
+      { startMs: 0, endMs: 2000, mode: "idle" },
+      { startMs: 6000, endMs: null, mode: "idle" },
     ],
   );
+});
+
+test("buildSegmentPlan: suite cut of the black open leaves showcase idle/walk", () => {
+  // Smoke 0–120s cut; walk inside showcase; idle gaps around the walk.
+  const plan = buildSegmentPlan(
+    [
+      { startMs: 0, endMs: 120_000, kind: "loading" },
+      { startMs: 150_000, endMs: 180_000, kind: "walk" },
+    ],
+    200_000,
+  );
+  assert.deepEqual(plan, [
+    { startMs: 120_000, endMs: 150_000, mode: "idle" },
+    { startMs: 150_000, endMs: 180_000, mode: "walk" },
+    { startMs: 180_000, endMs: null, mode: "idle" },
+  ]);
 });
 
 test("buildSegmentPlan: nothing to do returns null", () => {
@@ -310,4 +422,15 @@ test("hasAllFilters: full build passes, Playwright's stripped build fails", () =
     " ... trim              V->V       Pick one continuous section",
   ].join("\n");
   assert.equal(hasAllFilters(stripped, REQUIRED_FILTERS), false);
+});
+
+test("resolveKeepSuite: default / empty / custom", () => {
+  assert.equal(resolveKeepSuite(undefined)!.source, "showcase");
+  assert.equal(resolveKeepSuite("1")!.source, "showcase");
+  assert.equal(resolveKeepSuite(""), null);
+  assert.equal(resolveKeepSuite("0"), null);
+  assert.equal(
+    resolveKeepSuite("Tutorial Showcase")!.test("Tutorial Showcase"),
+    true,
+  );
 });

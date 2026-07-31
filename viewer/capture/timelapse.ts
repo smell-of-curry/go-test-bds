@@ -1,11 +1,16 @@
 // Timelapse post-processing for the run video. Test suites mark spans on the
 // SSE stream (mark phase "segment"):
-//   walk:start / walk:end       → play sped-up
+//   walk:start / walk:end       → play at walk speed-up factor
+//   idle:start / idle:end       → play at idle speed-up factor (high)
 //   loading:start / loading:end → cut from the output entirely
-// After the recording is finalised those intervals are re-timed with ffmpeg so
-// an 8x walk does not dominate a recording, chunk-load waits disappear, and
-// everything else stays real-time. Pure interval/filter computation lives in
-// exported functions so it can be unit-tested without ffmpeg.
+// The harness also synthesises suite:start / suite:end from suiteStart/suiteEnd
+// lifecycle marks so non-showcase suites (Smoke / Machines / Tutorial void)
+// can be cut without pixel analysis. Unmarked gaps inside kept ranges play at
+// the idle factor — waiting between legs should not dominate the reel.
+//
+// After the recording is finalised those intervals are re-timed with ffmpeg.
+// Pure interval/filter computation lives in exported functions so it can be
+// unit-tested without ffmpeg.
 import { execFileSync } from "node:child_process";
 import {
   existsSync,
@@ -21,14 +26,19 @@ import { dirname, join } from "node:path";
 
 /** A segment mark as recorded by the harness, timed against the video timeline. */
 export interface WalkMark {
-  /** Mark message: "walk:start"/"walk:end" or "loading:start"/"loading:end". */
+  /**
+   * Mark message: walk/idle/loading start|end, or suite:start / suite:end
+   * synthesised from lifecycle marks.
+   */
   message: string;
   /** Milliseconds since video t=0 (the harness's page-open anchor). */
   tMs: number;
+  /** Suite name for suite:start / suite:end marks. */
+  suite?: string;
 }
 
 /** Kind of a tagged timeline interval. */
-export type IntervalKind = "walk" | "loading";
+export type IntervalKind = "walk" | "loading" | "idle";
 
 /** A half-open time range of the video. */
 export interface Interval {
@@ -36,46 +46,72 @@ export interface Interval {
   endMs: number;
 }
 
-/** A half-open time range tagged as walk (speed up) or loading (cut). */
+/** A half-open time range tagged as walk / idle (speed up) or loading (cut). */
 export interface TaggedInterval extends Interval {
   kind: IntervalKind;
 }
 
 /**
- * Hard cap on walk+loading intervals. Each interval costs a couple of
+ * Hard cap on walk+loading+idle intervals. Each interval costs a couple of
  * per-piece encodes; 32 keeps the ffmpeg argument far below the ~32k Windows
  * command-line limit while covering any sane run.
  */
 export const MAX_FAST_INTERVALS = 32;
 
 /**
- * Walk intervals shorter than this are dropped: at 8x they save under a
- * quarter second of playback but cost an encode piece and a visible time jump.
+ * Walk/idle intervals shorter than this are dropped: at high speed-up they
+ * save under a quarter second of playback but cost an encode piece.
  */
 export const MIN_INTERVAL_MS = 250;
 
 /**
- * Loading intervals shorter than this are kept (played, not cut). Cutting a
- * sub-second blip causes a jarring pop for almost no time saved.
+ * Loading / suite-cut intervals shorter than this are kept (played, not cut).
+ * Cutting a sub-second blip causes a jarring pop for almost no time saved.
  */
 export const MIN_CUT_INTERVAL_MS = 1000;
+
+/** Default speed-up for unmarked gaps and idle:start/end spans. */
+export const DEFAULT_IDLE_FACTOR = 24;
+
+/**
+ * Suites whose names match are kept in the timelapse. Everything else with a
+ * suite:start/suite:end bracket is cut (Smoke / Machines / step Tutorial void).
+ * Override with {@link ApplyTimelapseOptions.keepSuite} or env
+ * `GOTESTBDS_TIMELAPSE_KEEP_SUITES` (JS RegExp source).
+ */
+export const DEFAULT_KEEP_SUITE = /showcase/i;
 
 const SEGMENT_MESSAGES = new Set([
   "walk:start",
   "walk:end",
+  "idle:start",
+  "idle:end",
   "loading:start",
   "loading:end",
+  "suite:start",
+  "suite:end",
 ]);
+
+/** Options for pairing start/end marks into intervals. */
+interface PairOptions {
+  /**
+   * When true (default), an unmatched start closes at `durationMs`.
+   * When false, unmatched starts are dropped — critical for loading marks:
+   * a lost `loading:end` used to cut the entire remainder of the video
+   * (run 45 lost the crate finale this way).
+   */
+  closeOpen?: boolean;
+}
 
 /**
  * Pair start/end marks of one kind into raw (unclamped) intervals using a
- * depth counter. Nested/overlapping opens merge; stray ends are ignored;
- * an unmatched start closes at `durationMs`.
+ * depth counter. Nested/overlapping opens merge; stray ends are ignored.
  *
  * @param marks Marks sorted by time.
  * @param startMsg Message that opens an interval.
  * @param endMsg Message that closes an interval.
- * @param durationMs Close-at for an unmatched start.
+ * @param durationMs Close-at for an unmatched start when `closeOpen` is true.
+ * @param opts Pairing options.
  * @returns raw intervals (may be empty, unsorted beyond mark order).
  */
 function pairMarkIntervals(
@@ -83,7 +119,9 @@ function pairMarkIntervals(
   startMsg: string,
   endMsg: string,
   durationMs: number,
+  opts: PairOptions = {},
 ): Interval[] {
+  const closeOpen = opts.closeOpen !== false;
   const intervals: Interval[] = [];
   let depth = 0;
   let openedAt = 0;
@@ -97,7 +135,8 @@ function pairMarkIntervals(
       if (depth === 0) intervals.push({ startMs: openedAt, endMs: m.tMs });
     }
   }
-  if (depth > 0) intervals.push({ startMs: openedAt, endMs: durationMs });
+  if (closeOpen && depth > 0)
+    intervals.push({ startMs: openedAt, endMs: durationMs });
   return intervals;
 }
 
@@ -133,21 +172,86 @@ function clampMergeIntervals(
 }
 
 /**
- * Collapse walk + loading marks into disjoint, clamped, tagged intervals.
+ * Build cut intervals for suites that do not match `keepSuite`.
  *
- * Each kind is paired with its own depth counter (same nesting rules as
- * {@link computeWalkIntervals}). Overlaps resolve with loading winning: a
- * loading wait inside a walking leg is cut, and the walk on either side is
- * sped. Sub-{@link MIN_INTERVAL_MS} walks and sub-{@link MIN_CUT_INTERVAL_MS}
- * loadings are dropped before the overlap pass.
+ * Also cuts `[0, firstKeptSuiteStart)` so harness/smoke startup void never
+ * opens the reel. Does **not** cut after the last suite — celebration frames
+ * often land between the last assertion and `runEnd`.
+ *
+ * @param marks Marks sorted by time (suite:start / suite:end carry `.suite`).
+ * @param durationMs Total video duration.
+ * @param keepSuite Suites to keep (matched against the suite name).
+ * @returns cut intervals (loading-equivalent).
+ */
+export function computeSuiteCutIntervals(
+  marks: WalkMark[],
+  durationMs: number,
+  keepSuite: RegExp,
+): Interval[] {
+  const suiteMarks = marks.filter(
+    (m) =>
+      (m.message === "suite:start" || m.message === "suite:end") &&
+      typeof m.suite === "string" &&
+      m.suite.length > 0,
+  );
+  if (suiteMarks.length === 0) return [];
+
+  type Open = { suite: string; tMs: number };
+  let open: Open | null = null;
+  const spans: Array<{ suite: string; startMs: number; endMs: number }> = [];
+
+  const closeOpen = (endMs: number) => {
+    if (!open) return;
+    if (endMs > open.tMs)
+      spans.push({ suite: open.suite, startMs: open.tMs, endMs });
+    open = null;
+  };
+
+  for (const m of suiteMarks) {
+    if (m.message === "suite:start") {
+      closeOpen(m.tMs);
+      open = { suite: m.suite!, tMs: m.tMs };
+    } else if (m.message === "suite:end") {
+      if (open && (m.suite === open.suite || !m.suite)) closeOpen(m.tMs);
+      else if (open) closeOpen(m.tMs); // mismatched end still closes
+    }
+  }
+  closeOpen(durationMs);
+
+  const cuts: Interval[] = [];
+  let firstKeepStart: number | null = null;
+  for (const span of spans) {
+    if (keepSuite.test(span.suite)) {
+      if (firstKeepStart === null) firstKeepStart = span.startMs;
+      continue;
+    }
+    cuts.push({ startMs: span.startMs, endMs: span.endMs });
+  }
+  if (firstKeepStart !== null && firstKeepStart > 0)
+    cuts.push({ startMs: 0, endMs: firstKeepStart });
+
+  return clampMergeIntervals(cuts, durationMs, MIN_CUT_INTERVAL_MS);
+}
+
+/**
+ * Collapse walk + loading + idle + suite-cut marks into disjoint, clamped,
+ * tagged intervals.
+ *
+ * Priority on overlap: loading/suite-cut > walk > idle. Sub-minimum walks and
+ * idles and sub-{@link MIN_CUT_INTERVAL_MS} loadings are dropped before the
+ * overlap pass. Unmatched `loading:start` is **dropped** (not closed at EOF) so
+ * a lost `loading:end` cannot erase the finale.
  *
  * @param marks Segment marks in any order (sorted internally by time).
  * @param durationMs Total video duration; intervals are clamped to it.
+ * @param keepSuite Suites to keep; `null` disables suite cutting. Default
+ * {@link DEFAULT_KEEP_SUITE}.
  * @returns disjoint tagged intervals sorted by start time.
  */
 export function computeMarkedIntervals(
   marks: WalkMark[],
   durationMs: number,
+  keepSuite: RegExp | null = DEFAULT_KEEP_SUITE,
 ): TaggedInterval[] {
   const sorted = [...marks].sort((a, b) => a.tMs - b.tMs);
   const walk = clampMergeIntervals(
@@ -155,34 +259,53 @@ export function computeMarkedIntervals(
     durationMs,
     MIN_INTERVAL_MS,
   );
+  const idle = clampMergeIntervals(
+    pairMarkIntervals(sorted, "idle:start", "idle:end", durationMs),
+    durationMs,
+    MIN_INTERVAL_MS,
+  );
+  // closeOpen: false — unmatched loading:start must not cut to EOF.
   const loading = clampMergeIntervals(
-    pairMarkIntervals(sorted, "loading:start", "loading:end", durationMs),
+    [
+      ...pairMarkIntervals(sorted, "loading:start", "loading:end", durationMs, {
+        closeOpen: false,
+      }),
+      ...(keepSuite
+        ? computeSuiteCutIntervals(sorted, durationMs, keepSuite)
+        : []),
+    ],
     durationMs,
     MIN_CUT_INTERVAL_MS,
   );
 
-  // Sweep: loading depth beats walk depth → disjoint tagged intervals.
-  type Edge = { t: number; dWalk: number; dLoad: number };
+  // Sweep: loading > walk > idle → disjoint tagged intervals.
+  type Edge = { t: number; dWalk: number; dLoad: number; dIdle: number };
   const edges: Edge[] = [];
   for (const iv of walk) {
-    edges.push({ t: iv.startMs, dWalk: 1, dLoad: 0 });
-    edges.push({ t: iv.endMs, dWalk: -1, dLoad: 0 });
+    edges.push({ t: iv.startMs, dWalk: 1, dLoad: 0, dIdle: 0 });
+    edges.push({ t: iv.endMs, dWalk: -1, dLoad: 0, dIdle: 0 });
+  }
+  for (const iv of idle) {
+    edges.push({ t: iv.startMs, dWalk: 0, dLoad: 0, dIdle: 1 });
+    edges.push({ t: iv.endMs, dWalk: 0, dLoad: 0, dIdle: -1 });
   }
   for (const iv of loading) {
-    edges.push({ t: iv.startMs, dWalk: 0, dLoad: 1 });
-    edges.push({ t: iv.endMs, dWalk: 0, dLoad: -1 });
+    edges.push({ t: iv.startMs, dWalk: 0, dLoad: 1, dIdle: 0 });
+    edges.push({ t: iv.endMs, dWalk: 0, dLoad: -1, dIdle: 0 });
   }
   edges.sort((a, b) => a.t - b.t);
 
   const out: TaggedInterval[] = [];
   let walkDepth = 0;
   let loadDepth = 0;
+  let idleDepth = 0;
   let segStart = 0;
   let segKind: IntervalKind | null = null;
 
   const activeKind = (): IntervalKind | null => {
     if (loadDepth > 0) return "loading";
     if (walkDepth > 0) return "walk";
+    if (idleDepth > 0) return "idle";
     return null;
   };
 
@@ -192,6 +315,7 @@ export function computeMarkedIntervals(
     while (i < edges.length && edges[i].t === t) {
       walkDepth += edges[i].dWalk;
       loadDepth += edges[i].dLoad;
+      idleDepth += edges[i].dIdle;
       i++;
     }
     const next = activeKind();
@@ -219,7 +343,9 @@ export function computeWalkIntervals(
   marks: WalkMark[],
   durationMs: number,
 ): Interval[] {
-  return computeMarkedIntervals(marks, durationMs)
+  // Preserve legacy behaviour for callers that only care about walks: do not
+  // apply the showcase suite filter (no suite marks in unit tests anyway).
+  return computeMarkedIntervals(marks, durationMs, null)
     .filter((iv) => iv.kind === "walk")
     .map(({ startMs, endMs }) => ({ startMs, endMs }));
 }
@@ -227,8 +353,8 @@ export function computeWalkIntervals(
 /**
  * Reduce the interval count to `cap` by merging the pair with the smallest
  * gap, repeatedly. The swallowed gap takes the winning kind (loading over
- * walk) — a graceful degradation when a run somehow produces an absurd
- * number of marked legs.
+ * walk over idle) — a graceful degradation when a run somehow produces an
+ * absurd number of marked legs.
  *
  * @param intervals Disjoint intervals sorted by start time.
  * @param cap Maximum number of intervals to keep.
@@ -253,11 +379,22 @@ export function capIntervals<T extends Interval>(
     const left = out[best - 1];
     const right = out[best];
     left.endMs = right.endMs;
-    if (isTagged(left) && isTagged(right) && right.kind === "loading")
-      left.kind = "loading";
+    if (isTagged(left) && isTagged(right))
+      left.kind = winningKind(left.kind, right.kind);
     out.splice(best, 1);
   }
   return out;
+}
+
+/**
+ * @param a Interval kind.
+ * @param b Interval kind.
+ * @returns the higher-priority kind (loading > walk > idle).
+ */
+function winningKind(a: IntervalKind, b: IntervalKind): IntervalKind {
+  const rank = (k: IntervalKind) =>
+    k === "loading" ? 2 : k === "walk" ? 1 : 0;
+  return rank(b) > rank(a) ? b : a;
 }
 
 /**
@@ -267,12 +404,13 @@ export function capIntervals<T extends Interval>(
 function isTagged(iv: Interval): iv is TaggedInterval {
   return (
     (iv as TaggedInterval).kind === "walk" ||
-    (iv as TaggedInterval).kind === "loading"
+    (iv as TaggedInterval).kind === "loading" ||
+    (iv as TaggedInterval).kind === "idle"
   );
 }
 
 /** Playback mode for one contiguous source slice. */
-export type PlanMode = "normal" | "fast" | "cut";
+export type PlanMode = "walk" | "idle";
 
 /** One contiguous slice of the source video in the segment plan. */
 export interface PlanPiece {
@@ -281,18 +419,19 @@ export interface PlanPiece {
   /** Slice end, or null for "to the end of the file" (the tail piece). */
   endMs: number | null;
   /**
-   * How this slice is handled. `"cut"` pieces are never returned by
-   * {@link buildSegmentPlan} — loading intervals simply omit that range so
-   * nothing is encoded for it and nothing lands in the concat list.
+   * How this slice is handled. Loading / suite-cut ranges are never returned
+   * by {@link buildSegmentPlan} — they simply omit that range so nothing is
+   * encoded for it and nothing lands in the concat list.
    */
-  mode: "normal" | "fast";
+  mode: PlanMode;
 }
 
 /**
  * Turn tagged intervals into a slice plan covering the keep-able parts of
- * the video. Walk slices play at the speed-up factor; loading slices are
- * omitted (cut); gaps between them play real-time. Each kept piece is later
- * encoded by its own ffmpeg invocation and the results are concatenated.
+ * the video. Walk slices play at the walk factor; idle-marked slices and
+ * unmarked gaps play at the idle factor; loading / suite-cut slices are
+ * omitted. Each kept piece is later encoded by its own ffmpeg invocation and
+ * the results are concatenated.
  *
  * A single filter_complex (split/trim/concat) did this in one pass until run
  * 37: ffmpeg feeds every split branch as the input decodes, and frames for
@@ -321,14 +460,16 @@ export function buildSegmentPlan(
   let cursor = 0;
   for (const iv of intervals) {
     if (iv.startMs > cursor)
-      pieces.push({ startMs: cursor, endMs: iv.startMs, mode: "normal" });
+      pieces.push({ startMs: cursor, endMs: iv.startMs, mode: "idle" });
     if (iv.kind === "walk")
-      pieces.push({ startMs: iv.startMs, endMs: iv.endMs, mode: "fast" });
+      pieces.push({ startMs: iv.startMs, endMs: iv.endMs, mode: "walk" });
+    else if (iv.kind === "idle")
+      pieces.push({ startMs: iv.startMs, endMs: iv.endMs, mode: "idle" });
     // loading → cut: advance cursor, emit nothing
     cursor = iv.endMs;
   }
   if (cursor < durationMs)
-    pieces.push({ startMs: cursor, endMs: null, mode: "normal" });
+    pieces.push({ startMs: cursor, endMs: null, mode: "idle" });
   if (pieces.length === 0) return null;
 
   // Open-end only when the last kept piece itself reaches EOF. A trailing
@@ -465,34 +606,56 @@ export interface TimelapseResult {
   outputDurationMs?: number;
 }
 
+/** Options for {@link applyTimelapse}. */
+export interface ApplyTimelapseOptions {
+  /** The finalised run video (e.g. `run.webm`). */
+  videoPath: string;
+  /** Segment marks timed against the video timeline. */
+  marks: WalkMark[];
+  /** Speed-up factor for walk intervals; values <= 1 skip walk speed-up. */
+  factor: number;
+  /**
+   * Speed-up factor for idle gaps and idle:start/end spans. Values <= 1 play
+   * those ranges real-time. Default {@link DEFAULT_IDLE_FACTOR}.
+   */
+  idleFactor?: number;
+  /**
+   * Suites to keep in the output. `null` disables suite cutting. Default
+   * {@link DEFAULT_KEEP_SUITE}.
+   */
+  keepSuite?: RegExp | null;
+  /** Keep the real-time original as `<name>-full.<ext>`. */
+  keepRaw: boolean;
+  /** Harness logger (info/warn). */
+  log: { info(m: string): void; warn(m: string): void };
+}
+
 /**
- * Re-encode `videoPath` in place so walking intervals play at `factor`x and
- * loading intervals are removed.
+ * Re-encode `videoPath` in place so walking intervals play at `factor`x,
+ * idle gaps / idle marks play at `idleFactor`x, loading intervals and
+ * non-kept suites are removed.
  *
  * Never loses the video: any missing prerequisite (marks, ffmpeg, duration)
  * leaves the original untouched with a log line, and an ffmpeg failure
  * restores the original file. The untouched original survives as
  * `<name>-full.<ext>` beside the output when `keepRaw` is set.
  *
- * Loading cuts apply even when `factor <= 1` (speed-up disabled). Walk
- * speed-up requires `factor > 1`.
+ * Loading / suite cuts apply even when `factor <= 1`. Walk speed-up requires
+ * `factor > 1`; idle speed-up requires `idleFactor > 1`.
  *
- * @param opts.videoPath The finalised run video (e.g. `run.webm`).
- * @param opts.marks Segment marks timed against the video timeline.
- * @param opts.factor Speed-up factor for walk intervals; values <= 1 skip
- * speed-up but still cut loading intervals when present.
- * @param opts.keepRaw Keep the real-time original as `<name>-full.<ext>`.
- * @param opts.log Harness logger (info/warn).
+ * @param opts Timelapse inputs and policy knobs.
  * @returns what happened, including piece counts when applied.
  */
-export function applyTimelapse(opts: {
-  videoPath: string;
-  marks: WalkMark[];
-  factor: number;
-  keepRaw: boolean;
-  log: { info(m: string): void; warn(m: string): void };
-}): TimelapseResult {
-  const { videoPath, marks, factor, keepRaw, log } = opts;
+export function applyTimelapse(opts: ApplyTimelapseOptions): TimelapseResult {
+  const {
+    videoPath,
+    marks,
+    factor,
+    keepRaw,
+    log,
+    idleFactor = DEFAULT_IDLE_FACTOR,
+    keepSuite = DEFAULT_KEEP_SUITE,
+  } = opts;
 
   const segmentMarks = marks.filter((m) => SEGMENT_MESSAGES.has(m.message));
   if (segmentMarks.length === 0) {
@@ -517,18 +680,34 @@ export function applyTimelapse(opts: {
     return { applied: false, reason: "no duration" };
   }
 
-  let intervals = computeMarkedIntervals(segmentMarks, durationMs);
-  // Speed-up is opt-in via factor; loading cuts are unconditional.
-  if (factor <= 1) intervals = intervals.filter((iv) => iv.kind === "loading");
+  let intervals = computeMarkedIntervals(segmentMarks, durationMs, keepSuite);
+  // Speed-up is opt-in per factor; loading/suite cuts are unconditional.
+  if (factor <= 1) intervals = intervals.filter((iv) => iv.kind !== "walk");
+  if (idleFactor <= 1) intervals = intervals.filter((iv) => iv.kind !== "idle");
   intervals = capIntervals(intervals, MAX_FAST_INTERVALS);
 
-  const plan = buildSegmentPlan(intervals, durationMs);
-  if (!plan) {
+  const hasCuts = intervals.some((iv) => iv.kind === "loading");
+  const hasWalkSpeed = factor > 1 && intervals.some((iv) => iv.kind === "walk");
+  if (!hasCuts && !hasWalkSpeed && idleFactor <= 1) {
     log.info("timelapse: no usable intervals; leaving the video as-is");
     return { applied: false, reason: "no intervals" };
   }
 
+  // Idle gaps need a plan even when the only tagged intervals are cuts (or
+  // walks): buildSegmentPlan fills unmarked kept ranges as idle pieces. When
+  // idle speed-up is on but every tagged interval was stripped (e.g. factor
+  // 1 with only walk marks), rewrite the whole file as one idle piece.
+  let plan = buildSegmentPlan(intervals, durationMs);
+  if (!plan && idleFactor > 1)
+    plan = [{ startMs: 0, endMs: null, mode: "idle" }];
+  if (!plan) {
+    log.info("timelapse: no usable intervals; leaving the video as-is");
+    return { applied: false, reason: "no intervals" };
+  }
+  const effectivePlan = plan;
+
   const walkIvs = intervals.filter((iv) => iv.kind === "walk");
+  const idleIvs = intervals.filter((iv) => iv.kind === "idle");
   const loadingIvs = intervals.filter((iv) => iv.kind === "loading");
   const cutMs = loadingIvs.reduce(
     (sum, iv) => sum + (iv.endMs - iv.startMs),
@@ -547,7 +726,7 @@ export function applyTimelapse(opts: {
   try {
     mkdirSync(segDir, { recursive: true });
     const segPaths: string[] = [];
-    plan.forEach((p, i) => {
+    effectivePlan.forEach((p, i) => {
       const segPath = join(segDir, `seg_${String(i).padStart(3, "0")}.webm`);
       segPaths.push(segPath);
       // -ss before -i seeks the input; with -t (a duration, unambiguous
@@ -556,10 +735,14 @@ export function applyTimelapse(opts: {
       args.push("-ss", sec(p.startMs));
       if (p.endMs !== null) args.push("-t", sec(p.endMs - p.startMs));
       args.push("-i", videoPath);
+      const speed =
+        p.mode === "walk" && factor > 1
+          ? factor
+          : p.mode === "idle" && idleFactor > 1
+            ? idleFactor
+            : 1;
       const pts =
-        p.mode === "fast" && factor > 1
-          ? `setpts=(PTS-STARTPTS)/${factor}`
-          : "setpts=PTS-STARTPTS";
+        speed > 1 ? `setpts=(PTS-STARTPTS)/${speed}` : "setpts=PTS-STARTPTS";
       // fps=25 (Playwright's recording rate) drops the surplus frames a fast
       // piece would otherwise carry into the output.
       args.push("-filter:v", `${pts},fps=25`, "-an");
@@ -619,19 +802,25 @@ export function applyTimelapse(opts: {
     walkIvs.length > 0
       ? `x${factor} over ${walkIvs.length} walk interval(s), `
       : "";
+  const idlePart =
+    idleFactor > 1
+      ? `x${idleFactor} idle gaps` +
+        (idleIvs.length > 0 ? `+${idleIvs.length} idle mark(s)` : "") +
+        ", "
+      : "";
   const cutPart =
     loadingIvs.length > 0
-      ? `cut ${loadingIvs.length} loading interval(s), ${(cutMs / 1000).toFixed(1)}s; `
+      ? `cut ${loadingIvs.length} loading/suite interval(s), ${(cutMs / 1000).toFixed(1)}s; `
       : "";
   log.info(
-    `timelapse: ${walkPart}${cutPart}` +
-      `${plan.length} piece(s); ${(durationMs / 1000).toFixed(1)}s -> ` +
+    `timelapse: ${walkPart}${idlePart}${cutPart}` +
+      `${effectivePlan.length} piece(s); ${(durationMs / 1000).toFixed(1)}s -> ` +
       `${outputDurationMs ? (outputDurationMs / 1000).toFixed(1) : "?"}s` +
       (keepRaw ? `; raw kept at ${rawPath}` : ""),
   );
   return {
     applied: true,
-    pieces: plan.length,
+    pieces: effectivePlan.length,
     inputDurationMs: durationMs,
     ...(outputDurationMs ? { outputDurationMs } : {}),
   };
@@ -667,4 +856,22 @@ function probeDurationMs(ff: string, path: string): number | null {
     if (stderr) return parseDurationMs(String(stderr));
   }
   return null;
+}
+
+/**
+ * Resolve the keep-suite RegExp from an env string or the default.
+ *
+ * @param envValue Raw `GOTESTBDS_TIMELAPSE_KEEP_SUITES` value.
+ * @returns a RegExp, or `null` when suite cutting is disabled (`""` / `"0"`).
+ */
+export function resolveKeepSuite(
+  envValue: string | undefined = process.env.GOTESTBDS_TIMELAPSE_KEEP_SUITES,
+): RegExp | null {
+  if (envValue === "" || envValue === "0") return null;
+  if (envValue === undefined || envValue === "1") return DEFAULT_KEEP_SUITE;
+  try {
+    return new RegExp(envValue, "i");
+  } catch {
+    return DEFAULT_KEEP_SUITE;
+  }
 }

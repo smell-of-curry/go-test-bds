@@ -12,7 +12,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import type { BrowserContext, Page } from "playwright";
 
-import { applyTimelapse, type WalkMark } from "./timelapse";
+import { applyTimelapse, resolveKeepSuite, type WalkMark } from "./timelapse";
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
 
@@ -27,10 +27,16 @@ export interface HarnessOptions {
   /**
    * Speed-up factor for walking segments (mark phase `segment`,
    * `walk:start`/`walk:end`) applied to the run video after it is written.
-   * Loading segments (`loading:start`/`loading:end`) are cut regardless.
-   * 1 disables walk speed-up only. Only applies with {@link videoOut}.
+   * Loading segments (`loading:start`/`loading:end`) and non-showcase suites
+   * are cut regardless. 1 disables walk speed-up only. Only applies with
+   * {@link videoOut}.
    */
   timelapse: number;
+  /**
+   * Speed-up factor for idle gaps (between walks) and `idle:start`/`idle:end`
+   * marks. Default 24. 1 disables idle speed-up.
+   */
+  idleTimelapse: number;
   /** Keep the untouched real-time recording as `run-full.webm`. */
   keepRaw: boolean;
   /**
@@ -122,6 +128,15 @@ const DEFAULT_CAPTURE_TIMEOUT_MS = 5_000;
  * not cost the still entirely.
  */
 const SETTLE_GRACE_MS = 10_000;
+
+/**
+ * After the SSE stream and mark/capture chain drain, hold the page open this
+ * long so Playwright's recorder muxes the final painted frames before
+ * `page.close()` finalises the webm. Without this the crate-finale seconds
+ * after the last still can be missing from the file even though the stills
+ * themselves uploaded fine (run 45).
+ */
+const TAIL_FLUSH_MS = 2_000;
 const GL_ARGS = [
   "--use-gl=angle",
   "--use-angle=swiftshader",
@@ -258,6 +273,8 @@ export async function runHarness(opts: HarnessOptions): Promise<void> {
           videoPath: opts.videoOut,
           marks: walkMarks,
           factor: opts.timelapse,
+          idleFactor: opts.idleTimelapse,
+          keepSuite: resolveKeepSuite(),
           keepRaw: opts.keepRaw,
           log,
         });
@@ -429,6 +446,8 @@ export async function runHarness(opts: HarnessOptions): Promise<void> {
     await sse.done.catch(() => undefined);
     await chain.catch(() => undefined);
     log.info("capture: stream closed");
+    // Let the recorder mux the last painted frames before page.close().
+    await new Promise<void>((r) => setTimeout(r, TAIL_FLUSH_MS));
   } finally {
     clearTimeout(capTimer);
     setShutdownHandler(null);
@@ -456,13 +475,15 @@ async function handleMark(
   if (frame.suite !== undefined) ctx.mark.suite = frame.suite;
   if (frame.test !== undefined) ctx.mark.test = frame.test;
 
-  // Walk / loading legs, timed against the video for the timelapse pass
-  // after the recording is written. `segment` marks are timeline metadata
-  // only — message strings pass through untouched.
+  // Walk / loading / idle legs, timed against the video for the timelapse
+  // pass after the recording is written. `segment` marks are timeline
+  // metadata only — message strings pass through untouched.
   if (
     frame.phase === "segment" &&
     (frame.message === "walk:start" ||
       frame.message === "walk:end" ||
+      frame.message === "idle:start" ||
+      frame.message === "idle:end" ||
       frame.message === "loading:start" ||
       frame.message === "loading:end")
   ) {
@@ -471,6 +492,20 @@ async function handleMark(
       tMs: atMs - ctx.videoAnchorMs,
     });
     return;
+  }
+
+  // Suite lifecycle → suite:start/end so the timelapse can cut Smoke /
+  // Machines / step-Tutorial void and keep the showcase reel.
+  if (
+    (frame.phase === "suiteStart" || frame.phase === "suiteEnd") &&
+    frame.suite
+  ) {
+    ctx.walkMarks.push({
+      message: frame.phase === "suiteStart" ? "suite:start" : "suite:end",
+      tMs: atMs - ctx.videoAnchorMs,
+      suite: frame.suite,
+    });
+    // Fall through: suite marks also update the burnt-in caption state.
   }
 
   // Video is one continuous recording for the run; marks only update the
