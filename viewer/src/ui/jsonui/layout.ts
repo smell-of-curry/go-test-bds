@@ -423,22 +423,22 @@ function layoutAnchored(
   clampBattleActorPlateToViewport(selfBox, el, viewport);
 
   // Sidebar main is authored `["222.22%y", 192]` ≈ 427gui on every screen.
-  // At capture's 640gui width that is ~67% and the clipped dock.png slab
-  // paints a tall black wall. Cap at 40% of the viewport (≈ large-monitor
-  // Bedrock proportions) and keep right alignment.
+  // At capture's 640gui width that is ~67% — plates + clipped dock.png then
+  // paint a fat black wall. Cap at ~25% viewport (real client plate scale)
+  // and inset so dock offset + ring stay on-screen.
   if (
     el.namespace === "phud_sidebar" &&
     el.name === "main" &&
     ANCHORS[anchorFrom].x >= 0.999
   ) {
-    const maxW = viewport.width * 0.35;
+    const maxW = viewport.width * 0.25;
     if (selfBox.w > maxW + 1) {
       selfBox.w = maxW;
       selfBox.x = parentBox.x + parentBox.w - selfBox.w;
     }
-    // Dock `offset: ["47%",0]` + selected ring hang past main; leave a few
-    // gui-px so the plate/ring are not shaved by the viewport edge.
-    const inset = Math.min(10, viewport.width * 0.015);
+    // Dock `offset: ["47%",0]` + selected ring hang past main; inset enough
+    // that plates stay fully visible after the dock clip below.
+    const inset = Math.max(12, selfBox.w * 0.5);
     const parentRight = parentBox.x + parentBox.w;
     if (selfBox.x + selfBox.w > parentRight - inset) {
       selfBox.x = parentRight - inset - selfBox.w;
@@ -447,18 +447,31 @@ function layoutAnchored(
   }
 
   // Sidebar dock: right-anchored + `offset: ["47%",0]` hangs past main so the
-  // transparent left pad of dock.png sits off-screen. Clip the box to the
-  // on-screen slice (plates/ring layout here) and right-align an oversized
-  // background so the visible strip shows the opaque art — width-only clip
-  // without bg-align stretched the left pad across the plate.
-  if (ANCHORS[anchorFrom].x >= 0.999) {
+  // transparent left pad of dock.png sits off-screen. Clip the layout box to
+  // the on-screen slice (plates still size against full control width via
+  // prior layout), then paint dock.png at native 61×405 aspect — not stretch
+  // the opaque strip to fill the clipped box (that made the fat black column).
+  if (
+    el.namespace === "phud_sidebar" &&
+    el.name === "dock" &&
+    ANCHORS[anchorFrom].x >= 0.999
+  ) {
+    const parentRight = parentBox.x + parentBox.w;
+    const overflow = selfBox.x + selfBox.w - parentRight;
+    if (overflow > 1) {
+      selfBox.w = Math.max(0, parentRight - selfBox.x);
+    }
+    if (selfBox.w > 0) el.props.$viewer_dock_natural = true;
+  } else if (ANCHORS[anchorFrom].x >= 0.999) {
     const parentRight = parentBox.x + parentBox.w;
     const overflow = selfBox.x + selfBox.w - parentRight;
     if (overflow > 1) {
       const fullW = selfBox.w;
       selfBox.w = Math.max(0, parentRight - selfBox.x);
       if (selfBox.w > 0) {
-        el.props.$viewer_bg_align = "right";
+        // Non-dock right overflow: pin left of stretched texture so
+        // transparent pads are not stretched across the visible slice.
+        el.props.$viewer_bg_align = "left";
         el.props.$viewer_bg_scale_x = fullW / selfBox.w;
       }
     }
@@ -1120,9 +1133,17 @@ function resolveSizePair(
   let h = hParsed.eval(e, "h");
 
   // Labels: `default` means text metrics, never parent %.
+  // When width is definite (`100%`) and height is `default`, re-measure with
+  // wrap so long_form `#form_text` grows a body region instead of one clipped line.
   if (intrinsic && el.type === "label") {
     if (wParsed.isDefault) w = intrinsic.w;
-    if (hParsed.isDefault) h = intrinsic.h;
+    if (hParsed.isDefault) {
+      if (!wParsed.isDefault && w > 0) {
+        h = labelWrappedHeight(el, opts, w);
+      } else {
+        h = intrinsic.h;
+      }
+    }
   }
 
   return { w: finite(w), h: finite(h) };
@@ -1141,6 +1162,58 @@ function labelIntrinsic(
   // Strip § codes for measurement; keep `\n` so multiline labels size tall.
   const plain = text.replace(/[§&]./g, "");
   return opts.measureText(plain, fontScale);
+}
+
+/**
+ * Height of a label wrapped to `maxW` gui px (Bedrock wraps body text).
+ *
+ * @param el - Label element.
+ * @param opts - Layout options (measureText).
+ * @param maxW - Available width in gui px.
+ * @returns wrapped height in gui px.
+ */
+function labelWrappedHeight(
+  el: ResolvedElement,
+  opts: LayoutOptions,
+  maxW: number,
+): number {
+  const text = typeof el.props.text === "string" ? el.props.text : "";
+  const fontScale =
+    typeof el.props.font_scale_factor === "number"
+      ? el.props.font_scale_factor
+      : 1;
+  const plain = text.replace(/[§&]./g, "");
+  // Match the caller's measureText metrics (tests use 8gui/line; runtime 9).
+  const sample = opts.measureText("X", fontScale);
+  const charW = Math.max(1, sample.w);
+  const lineH = Math.max(1, sample.h);
+  if (maxW <= 0) return lineH;
+  const maxChars = Math.max(1, Math.floor(maxW / charW));
+  let lines = 0;
+  for (const paragraph of plain.split("\n")) {
+    if (!paragraph) {
+      lines += 1;
+      continue;
+    }
+    const words = paragraph.split(/\s+/);
+    let col = 0;
+    lines += 1;
+    for (const word of words) {
+      if (!word) continue;
+      const need = col === 0 ? word.length : word.length + 1;
+      if (col > 0 && col + need > maxChars) {
+        lines += 1;
+        col = word.length;
+      } else {
+        col += need;
+      }
+      while (col > maxChars) {
+        lines += 1;
+        col -= maxChars;
+      }
+    }
+  }
+  return Math.max(1, lines) * lineH;
 }
 
 function clampSize(

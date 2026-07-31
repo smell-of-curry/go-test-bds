@@ -595,7 +595,7 @@ describe("layoutTree self-axis %x/%y", () => {
     assert.ok(Math.abs(tree.box.w - 2.2222 * 192) < 0.01);
   });
 
-  it("caps right-anchored phud_sidebar.main at 35% viewport width", () => {
+  it("caps right-anchored phud_sidebar.main at 25% viewport width", () => {
     // Capture frames are ~640gui wide; authored 427gui main + dock offset
     // painted the tall black slab. Clamp keeps plate art on-screen.
     const wide = { width: 640, height: 360 };
@@ -613,7 +613,7 @@ describe("layoutTree self-axis %x/%y", () => {
     };
     const tree = layoutTree(main, wide, { measureText: measureStub });
     assert.equal(tree.box.h, 192);
-    assert.ok(tree.box.w <= wide.width * 0.35 + 0.5);
+    assert.ok(tree.box.w <= wide.width * 0.25 + 0.5);
     assert.ok(tree.box.x + tree.box.w <= wide.width - 1);
   });
 
