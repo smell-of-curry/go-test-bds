@@ -16,6 +16,7 @@ import {
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createServer as createViteServer, type ViteDevServer } from "vite";
+import { ensureBaseline } from "./ensureBaseline";
 import { createPushableStream, loadJsonlFrames } from "./fixtureServer";
 import { handleJsonUiPackRequest } from "./jsonuiPackServer";
 import {
@@ -116,14 +117,10 @@ export function resolveGoldenBaselineDir(): string | null {
     return fromEnv;
   }
   try {
-    const tag = readFileSync(join(viewerRoot, "baseline.tag"), "utf8").trim();
-    const pinned = tag.startsWith("v") ? tag : `v${tag}`;
-    const auto = join(viewerRoot, "..", ".cache", "baseline", pinned);
-    if (existsSync(join(auto, "resource_pack", "blocks.json"))) return auto;
+    return ensureBaseline();
   } catch {
-    // no pin / cache
+    return null;
   }
-  return null;
 }
 
 /**
