@@ -672,6 +672,42 @@ test("battle form renders the bottom battle bar and hover follows formHover", as
     expect(moveChrome.columnBuckets).toBeGreaterThanOrEqual(2);
     expect(moveChrome.leftColCount).toBeGreaterThanOrEqual(1);
 
+    // Inner move cards must not overlap (stack-compensated $offset path).
+    const moveCards = await page.evaluate(() => {
+      const battle = document.querySelector(
+        '[data-jsonui-name="battle.main"]',
+      ) as HTMLElement;
+      return [
+        ...battle.querySelectorAll<HTMLElement>(
+          '.jsonui[data-ui-name="grid_button_check_id"] .jsonui[data-ui-name="button"]',
+        ),
+      ]
+        .filter((el) => {
+          if (el.style.display === "none") return false;
+          const r = el.getBoundingClientRect();
+          return r.width > 20 && r.height > 15;
+        })
+        .map((el) => {
+          const r = el.getBoundingClientRect();
+          return { x: r.x, y: r.y, w: r.width, h: r.height };
+        });
+    });
+    // Fixture paints 4 move slots; keep a soft floor in case one card is
+    // clipped by scale, but require a real grid (2+×2+) with zero overlap.
+    expect(moveCards.length).toBeGreaterThanOrEqual(3);
+    for (let i = 0; i < moveCards.length; i++) {
+      for (let j = i + 1; j < moveCards.length; j++) {
+        const a = moveCards[i]!;
+        const b = moveCards[j]!;
+        const hit =
+          a.x < b.x + b.w &&
+          a.x + a.w > b.x &&
+          a.y < b.y + b.h &&
+          a.y + a.h > b.y;
+        expect(hit, `move cards ${i}/${j} overlap`).toBe(false);
+      }
+    }
+
     // Hover the second move button (index 1 on the form).
     h.broadcast({
       v: 1,

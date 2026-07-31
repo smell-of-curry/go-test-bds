@@ -7,15 +7,19 @@ import { fileURLToPath } from "node:url";
 import {
   collectFormButtonTexts,
   countCollectionInstances,
+  normalizeFormButtonText,
 } from "./collections.js";
 import {
   FORM_FLAG_ROUTES,
+  collectBattleMoveRects,
   formBindingState,
+  intersectingBattleMovePairs,
   prepareFormTree,
   routeForm,
   type FormSnapshot,
 } from "./forms.js";
 import { parseLooseJson, parseUiRawFile } from "./load.js";
+import { layoutTree } from "./layout.js";
 import { buildResolver } from "./resolve.js";
 import type { ResolvedElement, UiFileSource } from "./types.js";
 
@@ -138,9 +142,15 @@ describe("formBindingState", () => {
     assert.equal(source.global("#form_text"), form.content);
     assert.equal(source.global("#form_button_length"), form.buttons.length);
     assert.equal(collections.form_buttons!.length, form.buttons.length);
+    // Collection may insert an extra sep so pack `%.36s` lands on `.moveId`.
     assert.equal(
       collections.form_buttons![0]!["#form_button_text"],
-      form.buttons[0],
+      normalizeFormButtonText(form.buttons[0]!),
+    );
+    assert.ok(
+      String(collections.form_buttons![0]!["#form_button_text"]).startsWith(
+        "b:1_",
+      ),
     );
   });
 });
@@ -290,5 +300,49 @@ describe("battle fixture end-to-end", () => {
       }
     });
     assert.equal(formText, form.content);
+  });
+
+  it("lays out four move cards in a non-overlapping 2×2", () => {
+    const attackDoc = parseLooseJson(
+      readFileSync(join(fixtures, "pokebedrock/pokemon/attack.json"), "utf8"),
+      "attack.json",
+    );
+    const resolver = buildResolver([
+      src("pokebedrock", "ui/pokemon/attack.json", attackDoc),
+    ]);
+    const form = battleFormSnapshot();
+    const prepared = prepareFormTree(resolver, form);
+    assert.ok(prepared);
+    const layout = layoutTree(
+      prepared!.tree,
+      { width: 640, height: 360 },
+      {
+        measureText: (text, fontScale) => ({
+          w: Math.max(1, text.length * 6 * fontScale),
+          h: 9 * fontScale,
+        }),
+      },
+    );
+    const moves = collectBattleMoveRects(layout);
+    assert.equal(moves.length, 4, `moves=${JSON.stringify(moves)}`);
+    assert.deepEqual(
+      moves.map((m) => m.id),
+      ["b:1_", "b:2_", "b:3_", "b:4_"],
+    );
+    assert.deepEqual(
+      intersectingBattleMovePairs(moves),
+      [],
+      `overlap ${JSON.stringify(intersectingBattleMovePairs(moves))}`,
+    );
+    const xs = [...new Set(moves.map((m) => Math.round(m.x)))].sort(
+      (a, b) => a - b,
+    );
+    const ys = [...new Set(moves.map((m) => Math.round(m.y)))].sort(
+      (a, b) => a - b,
+    );
+    assert.equal(xs.length, 2, `columns=${xs}`);
+    assert.equal(ys.length, 2, `rows=${ys}`);
+    assert.ok(xs[1]! - xs[0]! > 80, `col gap ${xs[1]! - xs[0]!}`);
+    assert.ok(ys[1]! - ys[0]! > 20, `row gap ${ys[1]! - ys[0]!}`);
   });
 });

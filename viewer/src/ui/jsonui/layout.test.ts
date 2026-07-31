@@ -641,6 +641,93 @@ describe("layoutTree self-axis %x/%y", () => {
   });
 });
 
+describe("layoutTree battle grid_button factory", () => {
+  it("stacks grid_button children so pack $offset compensation forms a 2×2", () => {
+    const offsets: Array<[string, string]> = [
+      ["-19%", "25%"],
+      ["-19%", "80%"],
+      ["21.5%", "-175%"],
+      ["21.5%", "-120%"],
+    ];
+    const kids: ResolvedChild[] = offsets.map((offset, i) =>
+      child(
+        `gb${i}`,
+        el(
+          "panel",
+          {
+            size: ["100%", "100%c"],
+            anchor_from: "top_left",
+            anchor_to: "top_left",
+          },
+          [
+            child(
+              "slot",
+              el(
+                "panel",
+                {
+                  size: [40, 20],
+                  offset,
+                  anchor_from: "top_left",
+                  anchor_to: "top_left",
+                },
+                [],
+                "move_button",
+              ),
+            ),
+          ],
+          "grid_button",
+        ),
+      ),
+    );
+    const root = el(
+      "stack_panel",
+      {
+        size: [200, 200],
+        orientation: "vertical",
+        factory: { name: "buttons", control_name: "battle.grid_button" },
+        collection_name: "form_buttons",
+        anchor_from: "top_left",
+        anchor_to: "top_left",
+      },
+      kids,
+      "button_stack",
+    );
+    const tree = layoutTree(
+      root,
+      { width: 200, height: 200 },
+      {
+        measureText: measureStub,
+      },
+    );
+    const moves: Array<{ x: number; y: number; w: number; h: number }> = [];
+    (function walk(n: LayoutNode): void {
+      if (n.element.name === "move_button") moves.push(boxOf(n));
+      for (const c of n.children) walk(c);
+    })(tree);
+    assert.equal(moves.length, 4);
+    for (let i = 0; i < moves.length; i++) {
+      for (let j = i + 1; j < moves.length; j++) {
+        const a = moves[i]!;
+        const b = moves[j]!;
+        const hit =
+          a.x < b.x + b.w &&
+          a.x + a.w > b.x &&
+          a.y < b.y + b.h &&
+          a.y + a.h > b.y;
+        assert.equal(hit, false, `overlap ${i}/${j}: ${JSON.stringify(moves)}`);
+      }
+    }
+    const xs = [...new Set(moves.map((m) => Math.round(m.x)))].sort(
+      (a, b) => a - b,
+    );
+    const ys = [...new Set(moves.map((m) => Math.round(m.y)))].sort(
+      (a, b) => a - b,
+    );
+    assert.equal(xs.length, 2, `columns=${xs}`);
+    assert.equal(ys.length, 2, `rows=${ys}`);
+  });
+});
+
 describe("layoutTree grid", () => {
   it("sizes 100%c height from rows × item height (starter picker)", () => {
     const items: ResolvedChild[] = [];

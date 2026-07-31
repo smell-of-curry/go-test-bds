@@ -12,7 +12,7 @@ import {
   type CollectionMap,
 } from "./collections.js";
 import { renderTree, type JsonUiAssets } from "./dom.js";
-import { layoutTree, type MeasureText } from "./layout.js";
+import { layoutTree, type LayoutNode, type MeasureText } from "./layout.js";
 import type {
   BindingSource,
   BindingValue,
@@ -21,6 +21,16 @@ import type {
   UiResolver,
   Viewport,
 } from "./types.js";
+
+/** Axis-aligned box for a laid-out battle move card. */
+export interface BattleMoveRect {
+  /** Wire prefix `b:1_` … `b:4_`. */
+  id: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
 
 /** Wire form snapshot (matches `protocol.UI.form`). */
 export interface FormSnapshot {
@@ -189,6 +199,76 @@ export function prepareFormTree(
   };
   const tree = prepareCollectionTree(root, resolver, merged, collections);
   return { tree, route };
+}
+
+/**
+ * Collect visible battle move cards from a laid-out tree.
+ *
+ * Pack `grid_button` hosts four `grid_button_check_id` slots; only the slot
+ * matching the factory item's `b:N_` prefix stays visible. Prefer the inner
+ * `button` panel (name + PP + type badge) over the full-width move host.
+ *
+ * @param root - Layout root from {@link layoutTree}.
+ * @returns one rect per visible `b:1_`…`b:4_` card, sorted by id.
+ */
+export function collectBattleMoveRects(root: LayoutNode): BattleMoveRect[] {
+  const found: BattleMoveRect[] = [];
+  (function walk(n: LayoutNode): void {
+    if (!n.visible) return;
+    const text = n.element.props.form_button_text;
+    if (
+      typeof text === "string" &&
+      /^b:[1-4]_/.test(text) &&
+      (n.element.name === "grid_button_check_id" ||
+        n.element.name === "move_button" ||
+        /^[1-4]$/.test(n.element.name))
+    ) {
+      const card = n.children.find(
+        (c) => c.visible && c.element.name === "button",
+      );
+      const box = card?.box ?? n.box;
+      found.push({
+        id: text.slice(0, 4),
+        x: box.x,
+        y: box.y,
+        w: box.w,
+        h: box.h,
+      });
+    }
+    for (const c of n.children) walk(c);
+  })(root);
+  const byId = new Map<string, BattleMoveRect>();
+  for (const r of found) byId.set(r.id, r);
+  return [...byId.values()].sort((a, b) => a.id.localeCompare(b.id));
+}
+
+/**
+ * @param a - First rect.
+ * @param b - Second rect.
+ * @returns true when the open boxes overlap.
+ */
+export function rectsIntersect(a: BattleMoveRect, b: BattleMoveRect): boolean {
+  return (
+    a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y
+  );
+}
+
+/**
+ * @param rects - Move card boxes.
+ * @returns pairs of ids whose rects intersect.
+ */
+export function intersectingBattleMovePairs(
+  rects: readonly BattleMoveRect[],
+): Array<[string, string]> {
+  const pairs: Array<[string, string]> = [];
+  for (let i = 0; i < rects.length; i++) {
+    for (let j = i + 1; j < rects.length; j++) {
+      const a = rects[i]!;
+      const b = rects[j]!;
+      if (rectsIntersect(a, b)) pairs.push([a.id, b.id]);
+    }
+  }
+  return pairs;
 }
 
 /**
