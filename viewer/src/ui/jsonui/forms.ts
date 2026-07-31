@@ -341,9 +341,35 @@ export function createFormRenderer(deps: FormRendererDeps): FormRenderer {
   host.style.position = host.style.position || "absolute";
   host.style.inset = host.style.inset || "0";
   host.style.pointerEvents = "none";
-  // Above HUD chrome; hollow dialogs still need a scrim so WebGL nametags
-  // cannot read as "on top of" the form through the transparent center.
+  // Isolate so transparent dialog holes composite over the scrim sibling
+  // (not punch through to the WebGL canvas / body nametag overlays).
+  host.style.isolation = host.style.isolation || "isolate";
+  // Nested z-index alone cannot beat body-level nametag divs — `#json-hud`
+  // defaults to z-index:4; raise that root while a dialogue is open.
   host.style.zIndex = host.style.zIndex || "50";
+
+  /** `#json-hud` / `.jsonui-hud-host` that contains this forms host. */
+  const hudRoot =
+    (host.closest("#json-hud, .jsonui-hud-host") as HTMLElement | null) ??
+    null;
+  let hudZBeforeForm: string | null = null;
+
+  function setHudFormStacking(open: boolean): void {
+    if (!hudRoot) return;
+    if (open) {
+      if (hudZBeforeForm === null) hudZBeforeForm = hudRoot.style.zIndex;
+      hudRoot.style.zIndex = "50";
+      hudRoot.dataset.formOpen = "1";
+    } else {
+      if (hudZBeforeForm !== null) {
+        hudRoot.style.zIndex = hudZBeforeForm;
+        hudZBeforeForm = null;
+      } else {
+        hudRoot.style.zIndex = "";
+      }
+      delete hudRoot.dataset.formOpen;
+    }
+  }
 
   function clear(): void {
     host.replaceChildren();
@@ -351,6 +377,7 @@ export function createFormRenderer(deps: FormRendererDeps): FormRenderer {
     plainRoot = null;
     lastTree = null;
     lastRoute = null;
+    setHudFormStacking(false);
   }
 
   /**
@@ -358,6 +385,7 @@ export function createFormRenderer(deps: FormRendererDeps): FormRenderer {
    * transparent — world nametag sprites otherwise show through the hole).
    */
   function mountFormScrim(): void {
+    setHudFormStacking(true);
     const scrim = document.createElement("div");
     scrim.className = "jsonui-form-scrim";
     scrim.dataset.jsonuiName = "jsonui.form_scrim";

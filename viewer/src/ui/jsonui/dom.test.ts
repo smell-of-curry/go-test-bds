@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   lookupTextureInfo,
+  ninesliceCenterIsEmpty,
   paintLayerZIndex,
   resolveImageUv,
   uvBackgroundCss,
@@ -61,6 +62,21 @@ describe("paintLayerZIndex", () => {
     assert.equal(paintLayerZIndex("button_image", 1), 1);
     assert.equal(paintLayerZIndex("button_content", 0), 2);
     assert.equal(paintLayerZIndex("main_label", 0), 0);
+  });
+
+  it("clamps hollow control layer -1 to 0; leaves other negatives", () => {
+    assert.equal(paintLayerZIndex("control", -1), 0);
+    assert.equal(paintLayerZIndex("main_label", -1), -1);
+  });
+});
+
+describe("ninesliceCenterIsEmpty", () => {
+  it("detects 2×2 control.png + nineslice 1", () => {
+    assert.equal(ninesliceCenterIsEmpty({ w: 2, h: 2 }, 1), true);
+  });
+
+  it("keeps real borders with a center", () => {
+    assert.equal(ninesliceCenterIsEmpty({ w: 32, h: 32 }, 4), false);
   });
 });
 

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Visual goldens for the pack-driven JSON UI HUD: sidebar + top bar + ping
  * (and battle / form screens), rendered from fixture stream frames onto a
  * solid background (canvas hidden — the world render has its own goldens;
@@ -444,7 +444,7 @@ test("welcome ActionForm: body, button label, close X, form above nametag", asyn
       tag.id = "probe-nametag";
       tag.textContent = "TestBot";
       tag.style.cssText =
-        "position:absolute;left:50%;top:45%;z-index:3;background:#000;color:#fff;padding:2px 6px;";
+        "position:absolute;left:50%;top:45%;z-index:10;background:#000;color:#fff;padding:2px 6px;";
       document.body.appendChild(tag);
     });
 
@@ -514,7 +514,12 @@ test("welcome ActionForm: body, button label, close X, form above nametag", asyn
       const bodyBox = body?.getBoundingClientRect();
       const titleBox = title?.getBoundingClientRect();
       const contBox = continueLabel?.getBoundingClientRect();
-      const hostZ = Number(formsHost?.style.zIndex || "0");
+      const hud = document.querySelector(
+        "#json-hud, .jsonui-hud-host",
+      ) as HTMLElement | null;
+      const hostZ = Number(
+        getComputedStyle(hud ?? formsHost!).zIndex || "0",
+      );
       const tagZ = Number(nametag ? getComputedStyle(nametag).zIndex : "0");
       return {
         hasBody: !!body,

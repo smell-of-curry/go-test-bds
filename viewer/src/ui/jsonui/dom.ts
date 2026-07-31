@@ -293,6 +293,9 @@ function paintNode(
 export function paintLayerZIndex(name: string, layer: number): number {
   if (name === "button_content") return Math.max(layer, 2);
   if (name === "button_image") return Math.min(layer, 1);
+  // Hollow dialog `control` uses pack layer -1; CSS z-index < 0 under a
+  // composited parent often drops that fill. Clamp only that control.
+  if (name === "control" && layer < 0) return 0;
   return layer;
 }
 
@@ -378,7 +381,23 @@ function applyImage(
       node.element.props.nineslice_size !== null
         ? node.element.props.nineslice_size
         : info?.nineslice;
-    if (nine !== undefined && nine !== null) {
+    // 2×2 `textures/ui/control` + nineslice_size:1 has a 0×0 source center —
+    // CSS border-image `fill` paints nothing in the middle. Real Bedrock
+    // stretches that texel as the dialog hollow dim fill (alpha 0.8). Scope
+    // to `control` only — other empty-center nineslices must keep borders.
+    if (
+      nine !== undefined &&
+      nine !== null &&
+      info &&
+      info.w > 0 &&
+      info.h > 0 &&
+      /(?:^|\/)control$/i.test(texture.replace(/\\/g, "/")) &&
+      ninesliceCenterIsEmpty(info, nine)
+    ) {
+      face.style.backgroundImage = `url("${cssUrl(url)}")`;
+      face.style.backgroundSize = "100% 100%";
+      face.style.backgroundPosition = "0 0";
+    } else if (nine !== undefined && nine !== null) {
       applyNineslice(face, url, nine, opts.guiScale);
     } else {
       face.style.backgroundImage = `url("${cssUrl(url)}")`;
@@ -475,6 +494,21 @@ function svgTintFilter(tint: string): string {
     `<feComposite in="f" in2="SourceAlpha" operator="in"/>` +
     `</filter></svg>`;
   return `url("data:image/svg+xml,${encodeURIComponent(svg)}#t")`;
+}
+
+/**
+ * True when nineslice borders consume the whole texture (no center texels).
+ *
+ * @param info - Natural texture size.
+ * @param nine - Pack / texture-json nineslice.
+ * @returns whether border-image fill would paint an empty center.
+ */
+export function ninesliceCenterIsEmpty(
+  info: { w: number; h: number },
+  nine: unknown,
+): boolean {
+  const [left, top, right, bottom] = parseNineslice(nine);
+  return info.w <= left + right || info.h <= top + bottom;
 }
 
 function applyNineslice(
