@@ -568,6 +568,10 @@ describe("layoutTree layer and visibility", () => {
     assert.equal(icon.box.x, 0);
     assert.equal(btn.box.x, 0);
     assert.equal(btn.box.w, 200);
+    // Gutter keeps intrinsic size and paints above the fill button.
+    assert.equal(icon.box.w, 34);
+    assert.ok(icon.box.h >= 32);
+    assert.ok(icon.layer > btn.layer);
   });
 
   it("keeps visible:false nodes flagged", () => {

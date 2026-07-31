@@ -297,9 +297,18 @@ test("golden: sidebar + top bar + ping", async ({ page }) => {
         const ping = document.querySelector<HTMLElement>(
           '[data-jsonui-name="player_ping.main"]',
         );
+        const wrapper = [
+          ...document.querySelectorAll<HTMLElement>(".jsonui"),
+        ].find(
+          (el) =>
+            el.dataset.uiName === "pokemon_icon_wrapper" &&
+            getComputedStyle(el).display !== "none" &&
+            el.getBoundingClientRect().width > 0,
+        );
         return (
           !!dock &&
           !!ping &&
+          !!wrapper &&
           getComputedStyle(ping).display !== "none" &&
           (dock.textContent ?? "").includes("Bulbasaur") &&
           (dock.textContent ?? "").includes("Fainted")
@@ -491,8 +500,8 @@ test("golden: centered form modal", async ({ page }) => {
           content: "",
           buttons: ["HP/PP Restore", "Poké Balls", "Back"],
           buttonImages: [
-            "textures/items/potion",
-            "textures/items/pokeball",
+            "textures/items/healing_items/potion",
+            "textures/items/ball/poke_ball",
             "",
           ],
         },
@@ -556,7 +565,7 @@ test("welcome ActionForm: body, button label, close X, form above nametag", asyn
           content:
             "It looks like you are new to the server.\nOpen this book for a quick tour of the basics before you head out.",
           buttons: ["Continue"],
-          buttonImages: ["textures/ui/book_notebook_icon"],
+          buttonImages: ["textures/ui/phud/oak_start"],
         },
       },
     } as unknown as JsonlFrame);

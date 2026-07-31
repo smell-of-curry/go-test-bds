@@ -103,10 +103,9 @@ test("ActionForm hollow fill dims center; form stacks above body nametag", async
 }) => {
   const h = await startHarness();
   try {
-    await page.goto(
-      `${h.base}?stream=${encodeURIComponent(h.streamUrl)}`,
-      { waitUntil: "domcontentloaded" },
-    );
+    await page.goto(`${h.base}?stream=${encodeURIComponent(h.streamUrl)}`, {
+      waitUntil: "domcontentloaded",
+    });
     await page.waitForFunction(
       () => {
         const v = window.__viewer;
@@ -152,7 +151,7 @@ test("ActionForm hollow fill dims center; form stacks above body nametag", async
           content:
             "It looks like you are new to the server.\nOpen this book for a quick tour.",
           buttons: ["Continue"],
-          buttonImages: ["textures/ui/book_notebook_icon"],
+          buttonImages: ["textures/ui/phud/oak_start"],
         },
       },
     } as unknown as JsonlFrame);
@@ -161,8 +160,7 @@ test("ActionForm hollow fill dims center; form stacks above body nametag", async
       () =>
         !!document.querySelector(
           '[data-jsonui-name="server_form.long_form"]',
-        ) &&
-        !!document.querySelector('[data-jsonui-name="jsonui.form_scrim"]'),
+        ) && !!document.querySelector('[data-jsonui-name="jsonui.form_scrim"]'),
       undefined,
       { timeout: 15_000 },
     );
@@ -232,9 +230,7 @@ test("ActionForm hollow fill dims center; form stacks above body nametag", async
             getComputedStyle(controlFace).backgroundImage.includes("control") ||
             controlFace.style.borderImageSource.includes("control")),
         controlZ: control ? Number(getComputedStyle(control).zIndex || "0") : 0,
-        hollowIsolation: hollow
-          ? getComputedStyle(hollow).isolation
-          : "auto",
+        hollowIsolation: hollow ? getComputedStyle(hollow).isolation : "auto",
         controlBox: control
           ? {
               w: control.getBoundingClientRect().width,
@@ -281,6 +277,51 @@ test("ActionForm hollow fill dims center; form stacks above body nametag", async
     expect(info.tagOverlapsForm).toBe(true);
     // Body nametag at z=10 must sit under raised HUD root (not nested host z).
     expect(info.hudZ).toBeGreaterThanOrEqual(info.tagZ);
+
+    // Textured ActionForm button: icon gutter paints ON the button (not under
+    // the opaque fill), non-empty face, inside button bounds.
+    const iconInfo = await page.evaluate(() => {
+      const form = document.querySelector(
+        '[data-jsonui-name="server_form.long_form"]',
+      ) as HTMLElement;
+      const btn = form.querySelector(
+        '.jsonui[data-ui-name="form_button"], .jsonui[data-ui-name="light_text_button"]',
+      ) as HTMLElement | null;
+      const panel = form.querySelector(
+        '.jsonui[data-ui-name="panel_name"]',
+      ) as HTMLElement | null;
+      const face = panel?.querySelector(
+        ":scope .jsonui-image-face",
+      ) as HTMLElement | null;
+      const btnBox = btn?.getBoundingClientRect();
+      const faceBox = face?.getBoundingClientRect();
+      const bg =
+        face?.style.backgroundImage ||
+        (face ? getComputedStyle(face).backgroundImage : "");
+      return {
+        hasFace: !!face,
+        bg,
+        faceW: faceBox?.width ?? 0,
+        faceH: faceBox?.height ?? 0,
+        inButton:
+          !!btnBox &&
+          !!faceBox &&
+          faceBox.width > 4 &&
+          faceBox.height > 4 &&
+          faceBox.left >= btnBox.left - 2 &&
+          faceBox.right <= btnBox.right + 2 &&
+          faceBox.top >= btnBox.top - 2 &&
+          faceBox.bottom <= btnBox.bottom + 2,
+        panelZ: panel ? Number(getComputedStyle(panel).zIndex || "0") : -1,
+        btnZ: btn ? Number(getComputedStyle(btn).zIndex || "0") : -1,
+      };
+    });
+    expect(iconInfo.hasFace).toBe(true);
+    expect(iconInfo.bg).toMatch(/oak_start/);
+    expect(iconInfo.faceW).toBeGreaterThan(8);
+    expect(iconInfo.faceH).toBeGreaterThan(8);
+    expect(iconInfo.inButton).toBe(true);
+    expect(iconInfo.panelZ).toBeGreaterThan(iconInfo.btnZ);
 
     // Pixel proof: bright lime world under scrim outside; hollow center must
     // not read brighter (full-bright world punch-through).

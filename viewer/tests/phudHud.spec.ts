@@ -781,8 +781,8 @@ test("ordinary server form renders the centered vanilla modal with icons", async
           content: "",
           buttons: ["HP/PP Restore", "Poké Balls", "Back"],
           buttonImages: [
-            "textures/items/potion",
-            "textures/items/pokeball",
+            "textures/items/healing_items/potion",
+            "textures/items/ball/poke_ball",
             "",
           ],
         },
@@ -1012,7 +1012,7 @@ test("ordinary server form long_form still paints image buttons", async ({
           title: "Choose Your Starter!",
           content: "Pick a Pokemon to begin your journey.",
           buttons: starters,
-          buttonImages: starters.map(() => "textures/items/poke_ball"),
+          buttonImages: starters.map(() => "textures/items/ball/poke_ball"),
         },
       },
     } as unknown as JsonlFrame);
