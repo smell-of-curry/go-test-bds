@@ -5,10 +5,9 @@
  * these lock the DOM overlay's layout).
  *
  * Packs come from testdata/jsonui; chrome resolves from the live extract +
- * vanilla baseline. Sidebar *sprite* PNGs are forced 404 so species faces
- * stay deterministic; ball textures ARE served (live RES `…/balls/poke.png`)
- * and the golden asserts the icon paints. Capture still waits for fonts +
- * URL-set plateau + CSS decode (jsonUiPaintReady).
+ * vanilla baseline. Sidebar ball + species sprite textures are both served
+ * (ball under sprite per pack layers). Capture waits for fonts + URL-set
+ * plateau + CSS decode (jsonUiPaintReady).
  * Same env knobs as golden.spec (GOLDEN_UPDATE=1 / GOLDEN_SOFT=1).
  */
 import { expect, test, type Page } from "@playwright/test";
@@ -88,18 +87,6 @@ async function startHarness(): Promise<Harness> {
       if (url.pathname === "/stream") {
         stream.handle(req, res);
         return;
-      }
-      // Live extract has 3k+ sprites; binding them a frame late flakes goldens.
-      // 404 keeps species faces empty; ball textures stay servable (asserted).
-      if (url.pathname.startsWith("/asset/")) {
-        const rel = decodeURIComponent(
-          url.pathname.slice("/asset/".length),
-        ).replace(/\\/g, "/");
-        if (rel.startsWith("textures/sprites/")) {
-          res.writeHead(404, { "access-control-allow-origin": "*" });
-          res.end("golden: omit sprites");
-          return;
-        }
       }
       if (handleJsonUiPackRequest(req, res)) return;
       res.writeHead(404);
@@ -263,25 +250,16 @@ test("golden: sidebar + top bar + ping", async ({ page }) => {
             clipPercent: "37",
           }),
           behOccupiedSlot({
-            // BEH sidebar.ts: health<=0 → `§7Fainted` + `§r§f Lv. N`
-            stats: "§7Fainted§r§f Lv. 5",
+            stats: "HP: 11/23§r§f Lv. 5",
             nickname: "Quaxly",
             species: "quaxly",
             active: false,
             ballType: "poke",
             icon: "default/quaxly",
-            // clip 100 → #clip_ratio 1 → fully hidden (empty) bar
-            clipPercent: "100",
+            // Partial XP bar (matches ece283b sidebar golden composition).
+            clipPercent: "48",
           }),
-          behOccupiedSlot({
-            stats: "???",
-            nickname: "???",
-            species: "egg",
-            active: false,
-            ballType: "poke",
-            icon: "default/egg",
-            clipPercent: "100",
-          }),
+          [...BEH_EMPTY_SLOT],
           [...BEH_EMPTY_SLOT],
           [...BEH_EMPTY_SLOT],
           [...BEH_EMPTY_SLOT],
@@ -305,13 +283,24 @@ test("golden: sidebar + top bar + ping", async ({ page }) => {
             getComputedStyle(el).display !== "none" &&
             el.getBoundingClientRect().width > 0,
         );
+        const sprite = [
+          ...document.querySelectorAll<HTMLElement>(".jsonui-image-face"),
+        ].find((f) =>
+          (f.style.backgroundImage ?? "").includes(
+            "/sprites/default/bulbasaur",
+          ),
+        );
+        const text = dock?.textContent ?? "";
         return (
           !!dock &&
           !!ping &&
           !!wrapper &&
+          !!sprite &&
+          (sprite.getBoundingClientRect().width ?? 0) > 8 &&
           getComputedStyle(ping).display !== "none" &&
-          (dock.textContent ?? "").includes("Bulbasaur") &&
-          (dock.textContent ?? "").includes("Fainted")
+          text.includes("Bulbasaur") &&
+          text.includes("Quaxly") &&
+          !text.includes("???")
         );
       },
       undefined,
@@ -386,31 +375,44 @@ test("golden: sidebar + top bar + ping", async ({ page }) => {
     expect(geom.fill0!.x + geom.fill0!.w).toBeLessThanOrEqual(
       geom.plate!.x + geom.plate!.w + 0.5,
     );
-    expect(geom.fill1!.clip).toContain("inset(100%)");
+    expect(geom.fill1!.clip).toContain("48%");
     expect(geom.ring).not.toBeNull();
     expect(geom.wrapper0).not.toBeNull();
     expect(geom.wrapper0!.x).toBeLessThanOrEqual(geom.plate!.x + 4);
     expect(geom.ring!.x).toBeLessThanOrEqual(geom.plate!.x + 4);
     expect(geom.ping).toMatch(/Current Ping:\s/);
 
-    const ballFace = await page.evaluate(() => {
-      const faces = [
+    const faces = await page.evaluate(() => {
+      const all = [
         ...document.querySelectorAll<HTMLElement>(".jsonui-image-face"),
       ];
-      const ball = faces.find((f) =>
+      const ball = all.find((f) =>
         (f.style.backgroundImage ?? "").includes("/sidebar/balls/poke"),
       );
-      if (!ball) return { bg: "", w: 0, h: 0 };
-      const r = ball.getBoundingClientRect();
-      return {
-        bg: ball.style.backgroundImage ?? "",
-        w: r.width,
-        h: r.height,
+      const sprite = all.find((f) =>
+        (f.style.backgroundImage ?? "").includes("/sprites/default/bulbasaur"),
+      );
+      const box = (el: HTMLElement | undefined) => {
+        if (!el) return { bg: "", w: 0, h: 0, z: 0 };
+        const r = el.getBoundingClientRect();
+        const host = el.closest(".jsonui") as HTMLElement | null;
+        return {
+          bg: el.style.backgroundImage ?? "",
+          w: r.width,
+          h: r.height,
+          z: host ? Number(getComputedStyle(host).zIndex || "0") : 0,
+        };
       };
+      return { ball: box(ball), sprite: box(sprite) };
     });
-    expect(ballFace.bg).toMatch(/sidebar\/balls\/poke\.png/);
-    expect(ballFace.w).toBeGreaterThan(8);
-    expect(ballFace.h).toBeGreaterThan(8);
+    expect(faces.ball.bg).toMatch(/sidebar\/balls\/poke\.png/);
+    expect(faces.ball.w).toBeGreaterThan(8);
+    expect(faces.ball.h).toBeGreaterThan(8);
+    expect(faces.sprite.bg).toMatch(/sprites\/default\/bulbasaur/);
+    expect(faces.sprite.w).toBeGreaterThan(8);
+    expect(faces.sprite.h).toBeGreaterThan(8);
+    // Pack: pokemon_icon layer 4 over ball_icon layer 3.
+    expect(faces.sprite.z).toBeGreaterThan(faces.ball.z);
 
     await shoot(page, "sidebar");
   } finally {

@@ -787,14 +787,16 @@ function layoutStack(
         selfBox.x - stacked.box.x,
         selfBox.y - stacked.box.y,
       );
-      // Same pack layer as the fill button → stable paint order follows
-      // controls order and the opaque button covers the icon. Raise so the
-      // gutter paints ON the button (real client: icon in the left gutter).
-      const flowLayer = Math.max(
-        0,
-        ...measured.filter((x) => !x.overlayGutter).map((x) => x.node.layer),
-      );
-      stacked.layer = Math.max(stacked.layer, flowLayer + 1);
+      // Only raise when a fill sibling would paint over the gutter
+      // (ActionForm `panel_name` beside `fill` button chrome). Blanket layer
+      // bumps reorder unrelated px×%c stacks (PHUD sidebar icon hosts).
+      if (fillCount > 0) {
+        const flowLayer = Math.max(
+          0,
+          ...measured.filter((x) => !x.overlayGutter).map((x) => x.node.layer),
+        );
+        stacked.layer = Math.max(stacked.layer, flowLayer + 1);
+      }
     } else {
       const w = m.mainFill ? perFill : stacked.box.w;
       if (m.mainFill) stacked.box.w = w;

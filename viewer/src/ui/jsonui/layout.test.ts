@@ -574,6 +574,51 @@ describe("layoutTree layer and visibility", () => {
     assert.ok(icon.layer > btn.layer);
   });
 
+  it("does not raise overlay gutter layer without a fill sibling", () => {
+    // Sidebar-like: px×%c host beside a fixed (non-fill) sibling — keep pack layers.
+    const root = el(
+      "stack_panel",
+      {
+        size: [200, 32],
+        orientation: "horizontal",
+        anchor_from: "top_left",
+        anchor_to: "top_left",
+      },
+      [
+        child(
+          "icon_host",
+          el("panel", { size: [34, "100%c"], layer: 0 }, [
+            child(
+              "image",
+              el("image", {
+                size: [32, 32],
+                layer: 4,
+                anchor_from: "top_left",
+                anchor_to: "top_left",
+              }),
+            ),
+          ]),
+        ),
+        child(
+          "plate",
+          el("panel", {
+            size: [160, 32],
+            layer: 2,
+            anchor_from: "top_left",
+            anchor_to: "top_left",
+          }),
+        ),
+      ],
+    );
+    const tree = layoutTree(root, VP, { measureText: measureStub });
+    const icon = tree.children[0]!;
+    const plate = tree.children[1]!;
+    // Overlay still pins to origin (no main-axis consume) but layer stays pack.
+    assert.equal(icon.box.x, 0);
+    assert.equal(icon.layer, 0);
+    assert.equal(plate.layer, 2);
+  });
+
   it("keeps visible:false nodes flagged", () => {
     const root = el(
       "panel",
