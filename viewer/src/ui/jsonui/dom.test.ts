@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   lookupTextureInfo,
+  paintLayerZIndex,
   resolveImageUv,
   uvBackgroundCss,
   type JsonUiAssets,
@@ -52,6 +53,14 @@ describe("uvBackgroundCss", () => {
     });
     assert.equal(css.size, "256px 32px");
     assert.equal(css.position, "-64px 0px");
+  });
+});
+
+describe("paintLayerZIndex", () => {
+  it("keeps button_content above button_image chrome", () => {
+    assert.equal(paintLayerZIndex("button_image", 1), 1);
+    assert.equal(paintLayerZIndex("button_content", 0), 2);
+    assert.equal(paintLayerZIndex("main_label", 0), 0);
   });
 });
 

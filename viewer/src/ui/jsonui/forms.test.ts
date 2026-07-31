@@ -9,6 +9,7 @@ import {
   countCollectionInstances,
   normalizeFormButtonText,
 } from "./collections.js";
+import { createFixtureUiClient } from "./fixtureClient.js";
 import {
   FORM_FLAG_ROUTES,
   collectBattleMoveRects,
@@ -20,13 +21,25 @@ import {
 } from "./forms.js";
 import { evalExpr, parseExpr } from "./expr.js";
 import type { LayoutNode } from "./layout.js";
-import { parseLooseJson, parseUiRawFile } from "./load.js";
+import { loadUiFileSet, parseLooseJson, parseUiRawFile } from "./load.js";
 import { layoutTree } from "./layout.js";
 import { buildResolver } from "./resolve.js";
 import type { ResolvedElement, UiFileSource } from "./types.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fixtures = join(here, "../../../testdata/jsonui");
+
+/** Welcome / showRequiredMessageForm shape (title + body + one icon button). */
+function welcomeFormSnapshot(): FormSnapshot {
+  return {
+    type: "action",
+    title: "Welcome to PokeBedrock",
+    content:
+      "It looks like you are new to the server.\nOpen this book for a quick tour of the basics before you head out.",
+    buttons: ["Continue"],
+    buttonImages: ["textures/ui/book_notebook_icon"],
+  };
+}
 
 function src(packId: string, path: string, doc: unknown): UiFileSource {
   const raw = parseUiRawFile(doc);
@@ -507,5 +520,76 @@ describe("BATTLE_PLATE_HP_BAG_ICONS", () => {
       });
       assert.equal(got, path);
     }
+  });
+});
+
+describe("welcome ActionForm dialogue chrome", () => {
+  it("pins close X top-right, keeps body below title, binds Continue", async () => {
+    const { files, globals } = await loadUiFileSet(
+      createFixtureUiClient(fixtures),
+    );
+    const resolver = buildResolver(files, globals);
+    const prepared = prepareFormTree(resolver, welcomeFormSnapshot());
+    assert.ok(prepared);
+    assert.equal(prepared!.route.kind, "long_form");
+
+    let closeHolder: ResolvedElement | undefined;
+    walk(prepared!.tree, (el) => {
+      if (el.name === "close_button_holder") closeHolder = el;
+    });
+    assert.ok(closeHolder, "close_button_holder");
+    assert.equal(closeHolder!.props.anchor_from, "top_right");
+    assert.equal(closeHolder!.props.anchor_to, "top_right");
+    assert.deepEqual(closeHolder!.props.size, ["100%", "100%"]);
+
+    const layout = layoutTree(
+      prepared!.tree,
+      { width: 640, height: 360 },
+      {
+        measureText: (text, fontScale) => ({
+          w: Math.max(1, text.length * 6 * fontScale),
+          h: 9 * fontScale,
+        }),
+      },
+    );
+
+    let longForm: ReturnType<typeof layoutTree> | undefined;
+    let closeBtn: ReturnType<typeof layoutTree> | undefined;
+    let title: ReturnType<typeof layoutTree> | undefined;
+    let body: ReturnType<typeof layoutTree> | undefined;
+    let continueLabel: ReturnType<typeof layoutTree> | undefined;
+    (function find(n: ReturnType<typeof layoutTree>): void {
+      if (n.element.name === "long_form") longForm = n;
+      if (n.element.name === "close_button") closeBtn = n;
+      if (n.element.name === "standard_title_label") title = n;
+      if (n.element.name === "main_label") body = n;
+      if (
+        typeof n.element.props.text === "string" &&
+        n.element.props.text === "Continue"
+      ) {
+        continueLabel = n;
+      }
+      for (const c of n.children) find(c);
+    })(layout);
+
+    assert.ok(longForm && closeBtn && title && body && continueLabel);
+    const formRight = longForm!.box.x + longForm!.box.w;
+    const formTop = longForm!.box.y;
+    assert.ok(
+      closeBtn!.box.x + closeBtn!.box.w >= formRight - 30,
+      `close x=${closeBtn!.box.x} formRight=${formRight}`,
+    );
+    assert.ok(
+      closeBtn!.box.y <= formTop + 30,
+      `close y=${closeBtn!.box.y} formTop=${formTop}`,
+    );
+    assert.ok(
+      body!.box.y >= title!.box.y + title!.box.h,
+      `body y=${body!.box.y} title bottom=${title!.box.y + title!.box.h}`,
+    );
+    assert.ok(
+      continueLabel!.box.w > 0 && continueLabel!.box.h > 0,
+      "Continue label laid out",
+    );
   });
 });

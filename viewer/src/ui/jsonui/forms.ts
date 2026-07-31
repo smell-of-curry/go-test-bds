@@ -203,7 +203,47 @@ export function prepareFormTree(
     },
   };
   const tree = prepareCollectionTree(root, resolver, merged, collections);
+  if (route.kind === "long_form" || route.kind === "custom_form") {
+    patchDialogueChrome(tree);
+  }
   return { tree, route };
+}
+
+/**
+ * Fix dialogue chrome that vanilla authors leave underspecified for our layout.
+ *
+ * - `close_button_holder` has no anchors/size → layout defaults to a centered
+ *   21×21 box, so the close X floats mid-panel instead of the dialog corner.
+ * - `panel_indent` offset 23 leaves the body under the hollow title band.
+ *
+ * @param tree - Bound long_form / custom_form tree (mutated in place).
+ */
+export function patchDialogueChrome(tree: ResolvedElement): void {
+  const walk = (el: ResolvedElement): void => {
+    if (el.name === "close_button_holder") {
+      // Match form_fitting `common_close_button_holder`: fill + top-right so
+      // child `close_button` top_right lands on the dialog corner.
+      if (el.props.anchor_from == null) el.props.anchor_from = "top_right";
+      if (el.props.anchor_to == null) el.props.anchor_to = "top_right";
+      if (el.props.size == null) el.props.size = ["100%", "100%"];
+    }
+    if (el.name === "panel_indent") {
+      const off = el.props.offset;
+      if (
+        Array.isArray(off) &&
+        off.length >= 2 &&
+        Number(off[1]) === 23
+      ) {
+        el.props.offset = [off[0], 28];
+        const sz = el.props.size;
+        if (Array.isArray(sz) && sz[1] === "100% - 31px") {
+          el.props.size = [sz[0], "100% - 36px"];
+        }
+      }
+    }
+    for (const c of el.controls) walk(c.element);
+  };
+  walk(tree);
 }
 
 /**
@@ -301,6 +341,9 @@ export function createFormRenderer(deps: FormRendererDeps): FormRenderer {
   host.style.position = host.style.position || "absolute";
   host.style.inset = host.style.inset || "0";
   host.style.pointerEvents = "none";
+  // Above HUD chrome; hollow dialogs still need a scrim so WebGL nametags
+  // cannot read as "on top of" the form through the transparent center.
+  host.style.zIndex = host.style.zIndex || "50";
 
   function clear(): void {
     host.replaceChildren();
@@ -308,6 +351,19 @@ export function createFormRenderer(deps: FormRendererDeps): FormRenderer {
     plainRoot = null;
     lastTree = null;
     lastRoute = null;
+  }
+
+  /**
+   * Opaque modal backdrop behind dialogue content (hollow panel centers are
+   * transparent — world nametag sprites otherwise show through the hole).
+   */
+  function mountFormScrim(): void {
+    const scrim = document.createElement("div");
+    scrim.className = "jsonui-form-scrim";
+    scrim.dataset.jsonuiName = "jsonui.form_scrim";
+    scrim.style.cssText =
+      "position:absolute;inset:0;background:rgba(0,0,0,0.55);z-index:0;pointer-events:none;";
+    host.appendChild(scrim);
   }
 
   function applyHover(): void {
@@ -381,12 +437,17 @@ export function createFormRenderer(deps: FormRendererDeps): FormRenderer {
       height: Math.max(180, host.clientHeight / guiScale || 360),
     };
     const layout = layoutTree(prepared.tree, viewport, { measureText });
+    if (dialogue) mountFormScrim();
     engineRoot = renderTree(layout, host, {
       guiScale,
       assets: deps.assets,
       lang: deps.lang,
       textureInfo: deps.textureInfo,
     });
+    if (dialogue) {
+      engineRoot.style.zIndex = "1";
+      engineRoot.dataset.formLayer = "top";
+    }
     tagCollectionIndices(layout, engineRoot);
     applyHover();
     return true;
@@ -465,7 +526,15 @@ function tagCollectionIndices(
     // Must match paintNode: invisible subtrees are not emitted.
     if (!n.visible) return;
     order.push(n);
-    const kids = [...n.children].sort((a, b) => a.layer - b.layer);
+    // Keep in sync with dom.ts paintSiblingRank (button_content above chrome).
+    const kids = [...n.children].sort((a, b) => {
+      const rank = (x: import("./layout.js").LayoutNode): number => {
+        if (x.element.name === "button_image") return -1000 + x.layer;
+        if (x.element.name === "button_content") return 1000 + x.layer;
+        return x.layer;
+      };
+      return rank(a) - rank(b);
+    });
     for (const k of kids) walk(k);
   })(node);
 

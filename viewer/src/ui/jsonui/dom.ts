@@ -213,7 +213,10 @@ function paintNode(
   el.style.width = `${Math.max(0, box.w * s)}px`;
   el.style.height = `${Math.max(0, box.h * s)}px`;
   el.style.boxSizing = "border-box";
-  el.style.zIndex = String(node.layer);
+  // `new_ui_button_panel` authors button_image at layer 1 and button_content at
+  // 0 — Bedrock still paints the label on top of the chrome. CSS z-index from
+  // raw `layer` would hide the label under the opaque button face.
+  el.style.zIndex = String(paintLayerZIndex(node.element.name, node.layer));
   el.style.overflow =
     node.element.props.clips_children === true ? "hidden" : "visible";
 
@@ -251,10 +254,38 @@ function paintNode(
   parentEl.appendChild(el);
 
   // Paint siblings in layer order for stable stacking within this parent.
-  const kids = [...node.children].sort((a, b) => a.layer - b.layer);
+  const kids = [...node.children].sort(
+    (a, b) => paintSiblingRank(a) - paintSiblingRank(b),
+  );
   for (const child of kids) {
     paintNode(child, el, opts, { x: box.x, y: box.y });
   }
+}
+
+/**
+ * CSS z-index for a laid-out control. Button chrome stays under label content.
+ *
+ * @param name - Resolved element name.
+ * @param layer - Pack `layer` value.
+ * @returns z-index used on the DOM node.
+ */
+export function paintLayerZIndex(name: string, layer: number): number {
+  if (name === "button_content") return Math.max(layer, 2);
+  if (name === "button_image") return Math.min(layer, 1);
+  return layer;
+}
+
+/**
+ * Sibling paint order rank (lower first). Button chrome before label content.
+ *
+ * @param node - Layout child.
+ * @returns sort key.
+ */
+function paintSiblingRank(node: LayoutNode): number {
+  const name = node.element.name;
+  if (name === "button_image") return -1000 + node.layer;
+  if (name === "button_content") return 1000 + node.layer;
+  return node.layer;
 }
 
 function applyImage(
@@ -523,12 +554,20 @@ function applyLabel(
   const basePx = 8 * opts.guiScale * fontScale;
   el.style.fontSize = `${basePx}px`;
   // Match layout measureText line box (9gui ≈ font) so `\n` lines aren't clipped.
-  el.style.lineHeight = `${basePx}px`;
+  el.style.lineHeight = `${Math.ceil(basePx * 1.125)}px`;
   // Form body labels use size ["100%","default"] — wrap inside the box rather
   // than one clipped line (`pre` never wraps → cramped title/body).
   el.style.whiteSpace = "pre-wrap";
   el.style.overflowWrap = "anywhere";
-  el.style.overflow = "hidden";
+  // Dialogue body (`main_label`) sits under a hollow title band; keep glyphs
+  // visible when the measured box is a hair short (avoid first-line clip).
+  el.style.overflow =
+    node.element.name === "main_label" ? "visible" : "hidden";
+
+  const align = node.element.props.text_alignment;
+  if (align === "center" || align === "left" || align === "right") {
+    el.style.textAlign = align;
+  }
 
   const color = asColor(node.element.props.color);
   if (color) el.style.color = color;

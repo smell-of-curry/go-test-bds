@@ -420,3 +420,136 @@ test("golden: centered form modal", async ({ page }) => {
     await closeHarness(page, h);
   }
 });
+
+test("welcome ActionForm: body, button label, close X, form above nametag", async ({
+  page,
+}) => {
+  const h = await startHarness();
+  try {
+    await openHudOnly(
+      page,
+      `${h.base}?stream=${encodeURIComponent(h.streamUrl)}`,
+    );
+
+    // Fake world nametag layer (real client uses WebGL sprites; HTML stand-in
+    // for z-order). Forms host must sit above it.
+    await page.evaluate(() => {
+      const tag = document.createElement("div");
+      tag.id = "probe-nametag";
+      tag.textContent = "TestBot";
+      tag.style.cssText =
+        "position:absolute;left:50%;top:45%;z-index:3;background:#000;color:#fff;padding:2px 6px;";
+      document.body.appendChild(tag);
+    });
+
+    h.broadcast({
+      v: 1,
+      type: "delta",
+      bot: "TestBot",
+      tick: 150,
+      ui: {
+        form: {
+          type: "action",
+          title: "Welcome to PokeBedrock",
+          content:
+            "It looks like you are new to the server.\nOpen this book for a quick tour of the basics before you head out.",
+          buttons: ["Continue"],
+          buttonImages: ["textures/ui/book_notebook_icon"],
+        },
+      },
+    } as unknown as JsonlFrame);
+
+    await page.waitForFunction(
+      () =>
+        !!document.querySelector(
+          '[data-jsonui-name="server_form.long_form"]',
+        ) &&
+        (
+          document.querySelector('[data-jsonui-name="server_form.long_form"]')
+            ?.textContent ?? ""
+        ).includes("Continue"),
+      undefined,
+      { timeout: 15_000 },
+    );
+
+    const got = await page.evaluate(() => {
+      const form = document.querySelector(
+        '[data-jsonui-name="server_form.long_form"]',
+      ) as HTMLElement;
+      const formBox = form.getBoundingClientRect();
+      const body = [
+        ...form.querySelectorAll<HTMLElement>(
+          '.jsonui[data-ui-name="main_label"]',
+        ),
+      ].find((el) => (el.textContent ?? "").includes("new to the server"));
+      const title = form.querySelector(
+        '.jsonui[data-ui-name="standard_title_label"]',
+      ) as HTMLElement | null;
+      const continueLabel = [
+        ...form.querySelectorAll<HTMLElement>(".jsonui-label"),
+      ].find((el) => (el.textContent ?? "").trim() === "Continue");
+      const closeBtn = form.querySelector(
+        '.jsonui[data-ui-name="close_button"]',
+      ) as HTMLElement | null;
+      const buttonContent = form.querySelector(
+        '.jsonui[data-ui-name="button_content"]',
+      ) as HTMLElement | null;
+      const buttonImage = form.querySelector(
+        '.jsonui[data-ui-name="button_image"]',
+      ) as HTMLElement | null;
+      const scrim = document.querySelector(
+        '[data-jsonui-name="jsonui.form_scrim"]',
+      ) as HTMLElement | null;
+      const formsHost = document.querySelector(
+        ".jsonui-forms-host",
+      ) as HTMLElement | null;
+      const nametag = document.getElementById("probe-nametag");
+      const closeBox = closeBtn?.getBoundingClientRect();
+      const bodyBox = body?.getBoundingClientRect();
+      const titleBox = title?.getBoundingClientRect();
+      const contBox = continueLabel?.getBoundingClientRect();
+      const hostZ = Number(formsHost?.style.zIndex || "0");
+      const tagZ = Number(nametag ? getComputedStyle(nametag).zIndex : "0");
+      return {
+        hasBody: !!body,
+        bodyBelowTitle:
+          !!bodyBox && !!titleBox && bodyBox.top >= titleBox.bottom - 1,
+        continueVisible: !!contBox && contBox.width > 4 && contBox.height > 4,
+        continueInButton:
+          !!contBox &&
+          !!buttonContent &&
+          (() => {
+            const b = buttonContent.getBoundingClientRect();
+            return (
+              contBox.left >= b.left - 2 &&
+              contBox.right <= b.right + 2 &&
+              contBox.top >= b.top - 2 &&
+              contBox.bottom <= b.bottom + 2
+            );
+          })(),
+        contentAboveChrome:
+          !!buttonContent &&
+          !!buttonImage &&
+          Number(buttonContent.style.zIndex || "0") >
+            Number(buttonImage.style.zIndex || "0"),
+        closeTopRight:
+          !!closeBox &&
+          closeBox.right >= formBox.right - 40 &&
+          closeBox.top <= formBox.top + 40,
+        hasScrim: !!scrim,
+        formHostAboveNametag: hostZ > tagZ,
+      };
+    });
+
+    expect(got.hasBody).toBe(true);
+    expect(got.bodyBelowTitle).toBe(true);
+    expect(got.continueVisible).toBe(true);
+    expect(got.continueInButton).toBe(true);
+    expect(got.contentAboveChrome).toBe(true);
+    expect(got.closeTopRight).toBe(true);
+    expect(got.hasScrim).toBe(true);
+    expect(got.formHostAboveNametag).toBe(true);
+  } finally {
+    await closeHarness(page, h);
+  }
+});
