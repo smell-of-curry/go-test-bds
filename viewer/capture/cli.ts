@@ -245,7 +245,7 @@ async function main(): Promise<void> {
     timelapse,
     idleTimelapse,
     highlightTimelapse,
-    keepRaw: parsed.options.keepRaw ?? false,
+    keepRaw: parsed.options.keepRaw ?? process.env.GOTESTBDS_KEEP_RAW === "1",
     ...(parsed.options.videoOut ? { videoOut: parsed.options.videoOut } : {}),
   };
 

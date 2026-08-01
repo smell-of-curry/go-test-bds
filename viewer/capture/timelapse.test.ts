@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  buildPieceFfmpegArgs,
   buildSegmentPlan,
   capIntervals,
   computeMarkedIntervals,
@@ -498,19 +499,71 @@ test("parseDurationMs: N/A or garbage is null", () => {
 
 test("hasAllFilters: full build passes, Playwright's stripped build fails", () => {
   const full = [
-    " ... trim              V->V       Pick one continuous section",
     " ... setpts            V->V       Set PTS for the output video frame.",
     " ... concat            N->N       Concatenate audio and video streams.",
     " ... fps               V->V       Force constant framerate.",
   ].join("\n");
+  // REQUIRED_FILTERS is setpts/fps — both present in `full`.
   assert.equal(hasAllFilters(full, REQUIRED_FILTERS), true);
 
-  // What the bundled -filters listing actually contains (no setpts/concat/fps).
+  // What the bundled -filters listing actually contains (no setpts/fps).
   const stripped = [
     " ..C scale             V->V       Scale the input video size.",
     " ... trim              V->V       Pick one continuous section",
   ].join("\n");
   assert.equal(hasAllFilters(stripped, REQUIRED_FILTERS), false);
+});
+
+test("buildPieceFfmpegArgs: realtime uses input -t, no trim filter", () => {
+  const args = buildPieceFfmpegArgs({
+    videoPath: "/tmp/run.webm",
+    segPath: "/tmp/seg.webm",
+    startMs: 204_600,
+    srcMs: 40_600,
+    speed: 1,
+    openEnded: false,
+  });
+  assert.deepEqual(args.slice(0, 8), [
+    "-nostdin",
+    "-y",
+    "-loglevel",
+    "error",
+    "-ss",
+    "204.600",
+    "-t",
+    "40.600",
+  ]);
+  assert.equal(args[8], "-i");
+  assert.equal(args[9], "/tmp/run.webm");
+  const vf = args[args.indexOf("-filter:v") + 1];
+  assert.equal(vf, "setpts=PTS-STARTPTS,fps=25");
+  assert.ok(!vf.includes("trim"));
+});
+
+test("buildPieceFfmpegArgs: walk speed-up adds setpts/N", () => {
+  const args = buildPieceFfmpegArgs({
+    videoPath: "/tmp/run.webm",
+    segPath: "/tmp/seg.webm",
+    startMs: 0,
+    srcMs: 8_000,
+    speed: 8,
+    openEnded: false,
+  });
+  const vf = args[args.indexOf("-filter:v") + 1];
+  assert.equal(vf, "setpts=PTS-STARTPTS,setpts=PTS/8,fps=25");
+});
+
+test("buildPieceFfmpegArgs: open-ended omits -t", () => {
+  const args = buildPieceFfmpegArgs({
+    videoPath: "/tmp/run.webm",
+    segPath: "/tmp/seg.webm",
+    startMs: 90_000,
+    srcMs: 10_000,
+    speed: 24,
+    openEnded: true,
+  });
+  assert.ok(!args.includes("-t"));
+  assert.equal(args[args.indexOf("-ss") + 1], "90.000");
 });
 
 test("resolveKeepSuite: default / empty / custom", () => {

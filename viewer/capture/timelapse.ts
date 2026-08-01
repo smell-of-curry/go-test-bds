@@ -672,7 +672,43 @@ export function parseDurationMs(text: string): number | null {
  * demuxer is not a filter and cannot be probed here; if a candidate lacks
  * it the join step fails and the raw video is kept.)
  */
-export const REQUIRED_FILTERS = ["setpts", "fps", "trim"] as const;
+export const REQUIRED_FILTERS = ["setpts", "fps"] as const;
+
+/**
+ * Build one per-piece ffmpeg argv (no binary path). Input `-ss`/`-t` bound the
+ * source slice; speed-up uses setpts. Realtime pieces still re-encode so every
+ * segment shares codec params for the concat demuxer — but they must NOT go
+ * through `trim=duration` after `-ss`, which was collapsing Playwright webm
+ * highlight spans (plan ~100s → output ~12s) without reliable piece warnings.
+ *
+ * @param opts Piece slice and speed.
+ * @returns ffmpeg arguments ending in `segPath`.
+ */
+export function buildPieceFfmpegArgs(opts: {
+  videoPath: string;
+  segPath: string;
+  startMs: number;
+  /** Source slice length; ignored when `openEnded`. */
+  srcMs: number;
+  speed: number;
+  /** When true, read from startMs to EOF (no `-t`). */
+  openEnded: boolean;
+}): string[] {
+  const sec = (ms: number) => (ms / 1000).toFixed(3);
+  const speed = Math.max(1, opts.speed);
+  const args = ["-nostdin", "-y", "-loglevel", "error"];
+  args.push("-ss", sec(opts.startMs));
+  if (!opts.openEnded && opts.srcMs > 0) args.push("-t", sec(opts.srcMs));
+  args.push("-i", opts.videoPath);
+  let vf = "setpts=PTS-STARTPTS";
+  if (speed > 1) vf += `,setpts=PTS/${speed}`;
+  vf += ",fps=25";
+  args.push("-filter:v", vf, "-an");
+  args.push("-c:v", "libvpx", "-qmin", "0", "-qmax", "50");
+  args.push("-crf", "8", "-b:v", "1M");
+  args.push("-deadline", "realtime", "-cpu-used", "8", opts.segPath);
+  return args;
+}
 
 /**
  * @param filtersText Output of `ffmpeg -filters`.
@@ -950,13 +986,11 @@ export function applyTimelapse(opts: ApplyTimelapseOptions): TimelapseResult {
   const rawPath = rawSiblingPath(videoPath);
   const tmpPath = `${videoPath}.tmp.webm`;
   const segDir = `${videoPath}.tlseg`;
-  const sec = (ms: number) => (ms / 1000).toFixed(3);
+  let estOutMs = 0;
   try {
     mkdirSync(segDir, { recursive: true });
     const segPaths: string[] = [];
     effectivePlan.forEach((p, i) => {
-      const segPath = join(segDir, `seg_${String(i).padStart(3, "0")}.webm`);
-      segPaths.push(segPath);
       const speed =
         p.mode === "highlight"
           ? Math.max(1, highlightFactor)
@@ -965,27 +999,24 @@ export function applyTimelapse(opts: ApplyTimelapseOptions): TimelapseResult {
             : p.mode === "idle"
               ? Math.max(1, idleFactor)
               : 1;
-      const srcMs =
-        p.endMs !== null
-          ? p.endMs - p.startMs
-          : Math.max(0, durationMs - p.startMs);
+      const openEnded = p.endMs === null;
+      const srcMs = openEnded
+        ? Math.max(0, durationMs - p.startMs)
+        : p.endMs! - p.startMs;
+      // Sub-frame crumbs only cost concat risk; they never move the reel.
+      if (!openEnded && srcMs < 50) return;
       const expectMs = Math.round(srcMs / speed);
-      // Coarse -ss before -i, then trim=duration in the filter graph so slice
-      // length is enforced even when Playwright webm timestamps make bare -t
-      // unreliable (highlight realtime pieces were collapsing to crumbs).
-      const args = ["-nostdin", "-y", "-loglevel", "error"];
-      args.push("-ss", sec(p.startMs));
-      args.push("-i", videoPath);
-      let vf = `trim=duration=${sec(srcMs)},setpts=PTS-STARTPTS`;
-      if (speed > 1) vf += `,setpts=PTS/${speed}`;
-      vf += `,fps=25`;
-      args.push("-filter:v", vf, "-an");
-      // Mirrors Playwright's own vp8 recording settings so quality/size match
-      // the recording; realtime deadline keeps the pass well under the
-      // recording's own length.
-      args.push("-c:v", "libvpx", "-qmin", "0", "-qmax", "50");
-      args.push("-crf", "8", "-b:v", "1M");
-      args.push("-deadline", "realtime", "-cpu-used", "8", segPath);
+      estOutMs += expectMs;
+      const segPath = join(segDir, `seg_${String(i).padStart(3, "0")}.webm`);
+      segPaths.push(segPath);
+      const args = buildPieceFfmpegArgs({
+        videoPath,
+        segPath,
+        startMs: p.startMs,
+        srcMs,
+        speed,
+        openEnded,
+      });
       execFileSync(ff, args, { stdio: ["ignore", "ignore", "pipe"] });
       const gotMs = probeDurationMs(ff, segPath);
       if (gotMs === null || (expectMs >= 1000 && gotMs < expectMs * 0.5)) {
@@ -997,6 +1028,13 @@ export function applyTimelapse(opts: ApplyTimelapseOptions): TimelapseResult {
         );
       }
     });
+
+    if (segPaths.length === 0) {
+      log.warn(
+        "timelapse: every plan piece was empty; leaving the video as-is",
+      );
+      return { applied: false, reason: "no pieces" };
+    }
 
     // concat demuxer + stream copy: every segment shares codec/params, so the
     // join is a cheap remux. Quoted-and-escaped paths per the demuxer's rules.
@@ -1038,9 +1076,29 @@ export function applyTimelapse(opts: ApplyTimelapseOptions): TimelapseResult {
     rmSync(segDir, { recursive: true, force: true });
   }
 
+  const outputDurationMs = probeDurationMs(ff, tmpPath);
+  // Safety net: a collapsed encode used to overwrite a good raw recording
+  // (highlight×1 plan ~100s landing as ~12s). Prefer the original.
+  if (
+    outputDurationMs !== null &&
+    estOutMs >= 5_000 &&
+    outputDurationMs < estOutMs * 0.5
+  ) {
+    try {
+      unlinkSync(tmpPath);
+    } catch {
+      /* ignore */
+    }
+    log.warn(
+      `timelapse: output too short (${(outputDurationMs / 1000).toFixed(1)}s vs ` +
+        `plan ~${(estOutMs / 1000).toFixed(1)}s); keeping the real-time video`,
+    );
+    return { applied: false, reason: "output too short" };
+  }
+
   if (keepRaw) renameSync(videoPath, rawPath);
   renameSync(tmpPath, videoPath);
-  const outputDurationMs = probeDurationMs(ff, videoPath);
+  const finalDurationMs = probeDurationMs(ff, videoPath);
   const walkPart =
     walkIvs.length > 0
       ? `x${factor} over ${walkIvs.length} walk interval(s), `
@@ -1062,14 +1120,14 @@ export function applyTimelapse(opts: ApplyTimelapseOptions): TimelapseResult {
   log.info(
     `timelapse: ${walkPart}${highlightPart}${idlePart}${cutPart}` +
       `${effectivePlan.length} piece(s); ${(durationMs / 1000).toFixed(1)}s -> ` +
-      `${outputDurationMs ? (outputDurationMs / 1000).toFixed(1) : "?"}s` +
+      `${finalDurationMs ? (finalDurationMs / 1000).toFixed(1) : "?"}s` +
       (keepRaw ? `; raw kept at ${rawPath}` : ""),
   );
   return {
     applied: true,
     pieces: effectivePlan.length,
     inputDurationMs: durationMs,
-    ...(outputDurationMs ? { outputDurationMs } : {}),
+    ...(finalDurationMs ? { outputDurationMs: finalDurationMs } : {}),
   };
 }
 
