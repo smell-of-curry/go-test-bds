@@ -46,6 +46,11 @@ export interface HarnessOptions {
    * marks. Default 24. 1 disables idle speed-up.
    */
   idleTimelapse: number;
+  /**
+   * Playback factor for `highlight:start`/`highlight:end` marks. Default 1
+   * (real-time). Unlike walk, 1 still keeps those spans out of idle speed-up.
+   */
+  highlightTimelapse: number;
   /** Keep the untouched real-time recording as `run-full.webm`. */
   keepRaw: boolean;
   /**
@@ -444,6 +449,7 @@ export async function runHarness(opts: HarnessOptions): Promise<void> {
           marks: walkMarks,
           factor: opts.timelapse,
           idleFactor: opts.idleTimelapse,
+          highlightFactor: opts.highlightTimelapse,
           keepSuite: resolveKeepSuite(),
           keepRaw: opts.keepRaw,
           log,
@@ -718,8 +724,8 @@ async function handleMark(
     }
   }
 
-  // Walk / loading / idle / suite legs, timed against the video for the
-  // timelapse pass after the recording is written.
+  // Walk / highlight / loading / idle / suite legs, timed against the video
+  // for the timelapse pass after the recording is written.
   if (
     frame.phase === "segment" &&
     (frame.message === "walk:start" ||
@@ -728,6 +734,8 @@ async function handleMark(
       frame.message === "idle:end" ||
       frame.message === "loading:start" ||
       frame.message === "loading:end" ||
+      frame.message === "highlight:start" ||
+      frame.message === "highlight:end" ||
       frame.message === "suite:start" ||
       frame.message === "suite:end")
   ) {

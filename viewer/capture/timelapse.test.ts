@@ -24,6 +24,8 @@ const loadStart = (tMs: number) => ({ message: "loading:start", tMs });
 const loadEnd = (tMs: number) => ({ message: "loading:end", tMs });
 const idleStart = (tMs: number) => ({ message: "idle:start", tMs });
 const idleEnd = (tMs: number) => ({ message: "idle:end", tMs });
+const highlightStart = (tMs: number) => ({ message: "highlight:start", tMs });
+const highlightEnd = (tMs: number) => ({ message: "highlight:end", tMs });
 const suiteStart = (tMs: number, suite: string) => ({
   message: "suite:start",
   tMs,
@@ -196,6 +198,76 @@ test("computeMarkedIntervals: walk wins over idle on overlap", () => {
       { startMs: 7000, endMs: 10000, kind: "idle" },
     ],
   );
+});
+
+test("computeMarkedIntervals: highlight beats walk beats idle", () => {
+  assert.deepEqual(
+    computeMarkedIntervals(
+      [
+        idleStart(0),
+        start(2000),
+        highlightStart(4000),
+        highlightEnd(6000),
+        end(8000),
+        idleEnd(10000),
+      ],
+      10000,
+      null,
+    ),
+    [
+      { startMs: 0, endMs: 2000, kind: "idle" },
+      { startMs: 2000, endMs: 4000, kind: "walk" },
+      { startMs: 4000, endMs: 6000, kind: "highlight" },
+      { startMs: 6000, endMs: 8000, kind: "walk" },
+      { startMs: 8000, endMs: 10000, kind: "idle" },
+    ],
+  );
+});
+
+test("computeMarkedIntervals: loading still beats highlight", () => {
+  assert.deepEqual(
+    computeMarkedIntervals(
+      [highlightStart(0), loadStart(3000), loadEnd(7000), highlightEnd(10000)],
+      10000,
+      null,
+    ),
+    [
+      { startMs: 0, endMs: 3000, kind: "highlight" },
+      { startMs: 3000, endMs: 7000, kind: "loading" },
+      { startMs: 7000, endMs: 10000, kind: "highlight" },
+    ],
+  );
+});
+
+test("buildSegmentPlan: highlight pieces play as highlight mode", () => {
+  assert.deepEqual(
+    buildSegmentPlan(
+      [
+        { startMs: 1000, endMs: 3000, kind: "walk" },
+        { startMs: 5000, endMs: 9000, kind: "highlight" },
+      ],
+      10000,
+    ),
+    [
+      { startMs: 0, endMs: 1000, mode: "idle" },
+      { startMs: 1000, endMs: 3000, mode: "walk" },
+      { startMs: 3000, endMs: 5000, mode: "idle" },
+      { startMs: 5000, endMs: 9000, mode: "highlight" },
+      { startMs: 9000, endMs: null, mode: "idle" },
+    ],
+  );
+});
+
+test("capIntervals: highlight wins over walk when merging", () => {
+  const ivs = [
+    { startMs: 0, endMs: 1000, kind: "walk" as const },
+    { startMs: 1200, endMs: 2000, kind: "highlight" as const },
+    { startMs: 9000, endMs: 9500, kind: "walk" as const },
+  ];
+  assert.deepEqual(capIntervals(ivs, 2), [
+    { startMs: 0, endMs: 2000, kind: "highlight" },
+    { startMs: 9000, endMs: 9500, kind: "walk" },
+  ]);
 });
 
 test("computeSuiteCutIntervals: cuts non-showcase and prefix before first keep", () => {

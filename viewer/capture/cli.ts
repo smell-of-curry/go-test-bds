@@ -24,6 +24,9 @@ Options:
                                  walk speed-up; loading:start/end cuts still apply)
   --idle-timelapse <factor>      Speed-up for idle gaps + idle:start/end
                                  (default GOTESTBDS_IDLE_TIMELAPSE or 24; 1 = realtime)
+  --highlight-timelapse <factor> Playback factor for highlight:start/end
+                                 (default GOTESTBDS_HIGHLIGHT_TIMELAPSE or 1;
+                                 1 = realtime showcase moments)
   --keep-raw                     Keep the real-time original as run-full.webm
   --log-level <level>            debug | info | warn | error (default info)
   --help                         Show this help
@@ -50,6 +53,7 @@ interface ParsedArgs {
     videoOut?: string;
     timelapse?: number;
     idleTimelapse?: number;
+    highlightTimelapse?: number;
     keepRaw?: boolean;
     logLevel?: LogLevel;
   };
@@ -115,6 +119,10 @@ export function parseArgs(argv: string[]): ParsedArgs {
     }
     if (a === "--idle-timelapse") {
       options.idleTimelapse = Number(next());
+      continue;
+    }
+    if (a === "--highlight-timelapse") {
+      options.highlightTimelapse = Number(next());
       continue;
     }
     if (a === "--keep-raw") {
@@ -214,6 +222,17 @@ async function main(): Promise<void> {
     process.exitCode = 1;
     return;
   }
+  const envHighlight = Number(process.env.GOTESTBDS_HIGHLIGHT_TIMELAPSE ?? "");
+  const highlightTimelapse =
+    parsed.options.highlightTimelapse ??
+    (Number.isFinite(envHighlight) && envHighlight > 0 ? envHighlight : 1);
+  if (!Number.isFinite(highlightTimelapse) || highlightTimelapse < 1) {
+    console.error(
+      `invalid --highlight-timelapse factor: ${String(highlightTimelapse)}`,
+    );
+    process.exitCode = 1;
+    return;
+  }
 
   const opts: HarnessOptions = {
     stream: stream.replace(/\/+$/, ""),
@@ -225,6 +244,7 @@ async function main(): Promise<void> {
     logLevel: parsed.options.logLevel ?? "info",
     timelapse,
     idleTimelapse,
+    highlightTimelapse,
     keepRaw: parsed.options.keepRaw ?? false,
     ...(parsed.options.videoOut ? { videoOut: parsed.options.videoOut } : {}),
   };

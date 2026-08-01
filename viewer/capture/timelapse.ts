@@ -1,8 +1,10 @@
 // Timelapse post-processing for the run video. Test suites mark spans on the
 // SSE stream (mark phase "segment"):
-//   walk:start / walk:end       → play at walk speed-up factor
-//   idle:start / idle:end       → play at idle speed-up factor (high)
-//   loading:start / loading:end → cut from the output entirely
+//   highlight:start / highlight:end → play at highlight factor (default ×1)
+//   walk:start / walk:end           → play at walk speed-up factor
+//   idle:start / idle:end           → play at idle speed-up factor (high)
+//   loading:start / loading:end     → cut from the output entirely
+// Overlap precedence: loading > highlight > walk > idle.
 // The harness also synthesises suite:start / suite:end from suiteStart/suiteEnd
 // lifecycle marks so non-showcase suites (Smoke / Machines / Tutorial void)
 // can be cut without pixel analysis. Unmarked gaps inside kept ranges play at
@@ -38,7 +40,7 @@ export interface WalkMark {
 }
 
 /** Kind of a tagged timeline interval. */
-export type IntervalKind = "walk" | "loading" | "idle";
+export type IntervalKind = "walk" | "loading" | "idle" | "highlight";
 
 /** A half-open time range of the video. */
 export interface Interval {
@@ -73,6 +75,9 @@ export const MIN_CUT_INTERVAL_MS = 1000;
 /** Default speed-up for unmarked gaps and idle:start/end spans. */
 export const DEFAULT_IDLE_FACTOR = 24;
 
+/** Default playback factor for highlight:start/end spans (real-time). */
+export const DEFAULT_HIGHLIGHT_FACTOR = 1;
+
 /**
  * Suites whose names match are kept in the timelapse. Everything else with a
  * suite:start/suite:end bracket is cut (Smoke / Machines / step Tutorial void).
@@ -98,6 +103,8 @@ const SEGMENT_MESSAGES = new Set([
   "idle:end",
   "loading:start",
   "loading:end",
+  "highlight:start",
+  "highlight:end",
   "suite:start",
   "suite:end",
 ]);
@@ -322,10 +329,11 @@ export function suiteKeepBoundsUnreliable(
  * Collapse walk + loading + idle + suite-cut marks into disjoint, clamped,
  * tagged intervals.
  *
- * Priority on overlap: loading/suite-cut > walk > idle. Sub-minimum walks and
- * idles and sub-{@link MIN_CUT_INTERVAL_MS} loadings are dropped before the
- * overlap pass. Unmatched `loading:start` is **dropped** (not closed at EOF) so
- * a lost `loading:end` cannot erase the finale.
+ * Priority on overlap: loading/suite-cut > highlight > walk > idle.
+ * Sub-minimum walks/idles/highlights and sub-{@link MIN_CUT_INTERVAL_MS}
+ * loadings are dropped before the overlap pass. Unmatched `loading:start` is
+ * **dropped** (not closed at EOF) so a lost `loading:end` cannot erase the
+ * finale.
  *
  * @param marks Segment marks in any order (sorted internally by time).
  * @param durationMs Total video duration; intervals are clamped to it.
@@ -349,6 +357,11 @@ export function computeMarkedIntervals(
     durationMs,
     MIN_INTERVAL_MS,
   );
+  const highlight = clampMergeIntervals(
+    pairMarkIntervals(sorted, "highlight:start", "highlight:end", durationMs),
+    durationMs,
+    MIN_INTERVAL_MS,
+  );
   // closeOpen: false — unmatched loading:start must not cut to EOF.
   const loading = clampMergeIntervals(
     [
@@ -363,20 +376,30 @@ export function computeMarkedIntervals(
     MIN_CUT_INTERVAL_MS,
   );
 
-  // Sweep: loading > walk > idle → disjoint tagged intervals.
-  type Edge = { t: number; dWalk: number; dLoad: number; dIdle: number };
+  // Sweep: loading > highlight > walk > idle → disjoint tagged intervals.
+  type Edge = {
+    t: number;
+    dWalk: number;
+    dLoad: number;
+    dIdle: number;
+    dHighlight: number;
+  };
   const edges: Edge[] = [];
   for (const iv of walk) {
-    edges.push({ t: iv.startMs, dWalk: 1, dLoad: 0, dIdle: 0 });
-    edges.push({ t: iv.endMs, dWalk: -1, dLoad: 0, dIdle: 0 });
+    edges.push({ t: iv.startMs, dWalk: 1, dLoad: 0, dIdle: 0, dHighlight: 0 });
+    edges.push({ t: iv.endMs, dWalk: -1, dLoad: 0, dIdle: 0, dHighlight: 0 });
   }
   for (const iv of idle) {
-    edges.push({ t: iv.startMs, dWalk: 0, dLoad: 0, dIdle: 1 });
-    edges.push({ t: iv.endMs, dWalk: 0, dLoad: 0, dIdle: -1 });
+    edges.push({ t: iv.startMs, dWalk: 0, dLoad: 0, dIdle: 1, dHighlight: 0 });
+    edges.push({ t: iv.endMs, dWalk: 0, dLoad: 0, dIdle: -1, dHighlight: 0 });
+  }
+  for (const iv of highlight) {
+    edges.push({ t: iv.startMs, dWalk: 0, dLoad: 0, dIdle: 0, dHighlight: 1 });
+    edges.push({ t: iv.endMs, dWalk: 0, dLoad: 0, dIdle: 0, dHighlight: -1 });
   }
   for (const iv of loading) {
-    edges.push({ t: iv.startMs, dWalk: 0, dLoad: 1, dIdle: 0 });
-    edges.push({ t: iv.endMs, dWalk: 0, dLoad: -1, dIdle: 0 });
+    edges.push({ t: iv.startMs, dWalk: 0, dLoad: 1, dIdle: 0, dHighlight: 0 });
+    edges.push({ t: iv.endMs, dWalk: 0, dLoad: -1, dIdle: 0, dHighlight: 0 });
   }
   edges.sort((a, b) => a.t - b.t);
 
@@ -384,11 +407,13 @@ export function computeMarkedIntervals(
   let walkDepth = 0;
   let loadDepth = 0;
   let idleDepth = 0;
+  let highlightDepth = 0;
   let segStart = 0;
   let segKind: IntervalKind | null = null;
 
   const activeKind = (): IntervalKind | null => {
     if (loadDepth > 0) return "loading";
+    if (highlightDepth > 0) return "highlight";
     if (walkDepth > 0) return "walk";
     if (idleDepth > 0) return "idle";
     return null;
@@ -401,6 +426,7 @@ export function computeMarkedIntervals(
       walkDepth += edges[i].dWalk;
       loadDepth += edges[i].dLoad;
       idleDepth += edges[i].dIdle;
+      highlightDepth += edges[i].dHighlight;
       i++;
     }
     const next = activeKind();
@@ -438,8 +464,8 @@ export function computeWalkIntervals(
 /**
  * Reduce the interval count to `cap` by merging the pair with the smallest
  * gap, repeatedly. The swallowed gap takes the winning kind (loading over
- * walk over idle) — a graceful degradation when a run somehow produces an
- * absurd number of marked legs.
+ * highlight over walk over idle) — a graceful degradation when a run somehow
+ * produces an absurd number of marked legs.
  *
  * @param intervals Disjoint intervals sorted by start time.
  * @param cap Maximum number of intervals to keep.
@@ -474,11 +500,11 @@ export function capIntervals<T extends Interval>(
 /**
  * @param a Interval kind.
  * @param b Interval kind.
- * @returns the higher-priority kind (loading > walk > idle).
+ * @returns the higher-priority kind (loading > highlight > walk > idle).
  */
 function winningKind(a: IntervalKind, b: IntervalKind): IntervalKind {
   const rank = (k: IntervalKind) =>
-    k === "loading" ? 2 : k === "walk" ? 1 : 0;
+    k === "loading" ? 3 : k === "highlight" ? 2 : k === "walk" ? 1 : 0;
   return rank(b) > rank(a) ? b : a;
 }
 
@@ -490,12 +516,13 @@ function isTagged(iv: Interval): iv is TaggedInterval {
   return (
     (iv as TaggedInterval).kind === "walk" ||
     (iv as TaggedInterval).kind === "loading" ||
-    (iv as TaggedInterval).kind === "idle"
+    (iv as TaggedInterval).kind === "idle" ||
+    (iv as TaggedInterval).kind === "highlight"
   );
 }
 
 /** Playback mode for one contiguous source slice. */
-export type PlanMode = "walk" | "idle";
+export type PlanMode = "walk" | "idle" | "highlight";
 
 /** One contiguous slice of the source video in the segment plan. */
 export interface PlanPiece {
@@ -513,10 +540,10 @@ export interface PlanPiece {
 
 /**
  * Turn tagged intervals into a slice plan covering the keep-able parts of
- * the video. Walk slices play at the walk factor; idle-marked slices and
- * unmarked gaps play at the idle factor; loading / suite-cut slices are
- * omitted. Each kept piece is later encoded by its own ffmpeg invocation and
- * the results are concatenated.
+ * the video. Highlight slices play at the highlight factor; walk slices at
+ * the walk factor; idle-marked slices and unmarked gaps at the idle factor;
+ * loading / suite-cut slices are omitted. Each kept piece is later encoded
+ * by its own ffmpeg invocation and the results are concatenated.
  *
  * A single filter_complex (split/trim/concat) did this in one pass until run
  * 37: ffmpeg feeds every split branch as the input decodes, and frames for
@@ -570,6 +597,12 @@ export function buildSegmentPlan(
       pieces.push({ startMs: cursor, endMs: iv.startMs, mode: "idle" });
     if (iv.kind === "walk")
       pieces.push({ startMs: iv.startMs, endMs: iv.endMs, mode: "walk" });
+    else if (iv.kind === "highlight")
+      pieces.push({
+        startMs: iv.startMs,
+        endMs: iv.endMs,
+        mode: "highlight",
+      });
     else if (iv.kind === "idle")
       pieces.push({ startMs: iv.startMs, endMs: iv.endMs, mode: "idle" });
     // loading → cut: advance cursor, emit nothing
@@ -727,6 +760,13 @@ export interface ApplyTimelapseOptions {
    */
   idleFactor?: number;
   /**
+   * Playback factor for highlight:start/end spans. Default
+   * {@link DEFAULT_HIGHLIGHT_FACTOR} (real-time). Unlike walk, factor `1`
+   * still keeps highlight intervals in the plan so they are not swallowed by
+   * idle speed-up.
+   */
+  highlightFactor?: number;
+  /**
    * Suites to keep in the output. `null` disables suite cutting. Default
    * {@link DEFAULT_KEEP_SUITE}.
    */
@@ -738,9 +778,9 @@ export interface ApplyTimelapseOptions {
 }
 
 /**
- * Re-encode `videoPath` in place so walking intervals play at `factor`x,
- * idle gaps / idle marks play at `idleFactor`x, loading intervals and
- * non-kept suites are removed.
+ * Re-encode `videoPath` in place so highlight intervals play at
+ * `highlightFactor`x, walking intervals at `factor`x, idle gaps / idle marks
+ * at `idleFactor`x, and loading intervals / non-kept suites are removed.
  *
  * Never loses the video: any missing prerequisite (marks, ffmpeg, duration)
  * leaves the original untouched with a log line, and an ffmpeg failure
@@ -748,7 +788,8 @@ export interface ApplyTimelapseOptions {
  * `<name>-full.<ext>` beside the output when `keepRaw` is set.
  *
  * Loading / suite cuts apply even when `factor <= 1`. Walk speed-up requires
- * `factor > 1`; idle speed-up requires `idleFactor > 1`.
+ * `factor > 1`; idle speed-up requires `idleFactor > 1`. Highlight spans stay
+ * in the plan at any positive `highlightFactor` (default 1 = real-time).
  *
  * @param opts Timelapse inputs and policy knobs.
  * @returns what happened, including piece counts when applied.
@@ -761,6 +802,7 @@ export function applyTimelapse(opts: ApplyTimelapseOptions): TimelapseResult {
     keepRaw,
     log,
     idleFactor = DEFAULT_IDLE_FACTOR,
+    highlightFactor = DEFAULT_HIGHLIGHT_FACTOR,
     keepSuite = DEFAULT_KEEP_SUITE,
   } = opts;
 
@@ -814,7 +856,7 @@ export function applyTimelapse(opts: ApplyTimelapseOptions): TimelapseResult {
   log.info(
     `timelapse: marks=${segmentMarks.length} suiteBounds=${suiteMarkCount} ` +
       `keepSuite=${effectiveKeep ? effectiveKeep.source : "off"} ` +
-      `walkFactor=${factor} idleFactor=${idleFactor}`,
+      `walkFactor=${factor} idleFactor=${idleFactor} highlightFactor=${highlightFactor}`,
   );
 
   let intervals = computeMarkedIntervals(
@@ -824,11 +866,16 @@ export function applyTimelapse(opts: ApplyTimelapseOptions): TimelapseResult {
   );
   if (factor <= 1) intervals = intervals.filter((iv) => iv.kind !== "walk");
   if (idleFactor <= 1) intervals = intervals.filter((iv) => iv.kind !== "idle");
+  // Keep highlight intervals even at factor 1 — they must play real-time,
+  // not collapse into idle ×N gaps.
+  if (highlightFactor <= 0)
+    intervals = intervals.filter((iv) => iv.kind !== "highlight");
   intervals = capIntervals(intervals, MAX_FAST_INTERVALS);
 
   const hasCuts = intervals.some((iv) => iv.kind === "loading");
   const hasWalkSpeed = factor > 1 && intervals.some((iv) => iv.kind === "walk");
-  if (!hasCuts && !hasWalkSpeed && idleFactor <= 1) {
+  const hasHighlight = intervals.some((iv) => iv.kind === "highlight");
+  if (!hasCuts && !hasWalkSpeed && !hasHighlight && idleFactor <= 1) {
     log.info("timelapse: no usable intervals; leaving the video as-is");
     return { applied: false, reason: "no intervals" };
   }
@@ -857,6 +904,7 @@ export function applyTimelapse(opts: ApplyTimelapseOptions): TimelapseResult {
 
   const walkIvs = intervals.filter((iv) => iv.kind === "walk");
   const idleIvs = intervals.filter((iv) => iv.kind === "idle");
+  const highlightIvs = intervals.filter((iv) => iv.kind === "highlight");
   const loadingIvs = intervals.filter((iv) => iv.kind === "loading");
   const cutMs = loadingIvs.reduce(
     (sum, iv) => sum + (iv.endMs - iv.startMs),
@@ -887,9 +935,11 @@ export function applyTimelapse(opts: ApplyTimelapseOptions): TimelapseResult {
       const speed =
         p.mode === "walk" && factor > 1
           ? factor
-          : p.mode === "idle" && idleFactor > 1
-            ? idleFactor
-            : 1;
+          : p.mode === "highlight" && highlightFactor > 1
+            ? highlightFactor
+            : p.mode === "idle" && idleFactor > 1
+              ? idleFactor
+              : 1;
       const pts =
         speed > 1 ? `setpts=(PTS-STARTPTS)/${speed}` : "setpts=PTS-STARTPTS";
       // fps=25 (Playwright's recording rate) drops the surplus frames a fast
@@ -951,6 +1001,10 @@ export function applyTimelapse(opts: ApplyTimelapseOptions): TimelapseResult {
     walkIvs.length > 0
       ? `x${factor} over ${walkIvs.length} walk interval(s), `
       : "";
+  const highlightPart =
+    highlightIvs.length > 0
+      ? `x${highlightFactor} over ${highlightIvs.length} highlight interval(s), `
+      : "";
   const idlePart =
     idleFactor > 1
       ? `x${idleFactor} idle gaps` +
@@ -962,7 +1016,7 @@ export function applyTimelapse(opts: ApplyTimelapseOptions): TimelapseResult {
       ? `cut ${loadingIvs.length} loading/suite interval(s), ${(cutMs / 1000).toFixed(1)}s; `
       : "";
   log.info(
-    `timelapse: ${walkPart}${idlePart}${cutPart}` +
+    `timelapse: ${walkPart}${highlightPart}${idlePart}${cutPart}` +
       `${effectivePlan.length} piece(s); ${(durationMs / 1000).toFixed(1)}s -> ` +
       `${outputDurationMs ? (outputDurationMs / 1000).toFixed(1) : "?"}s` +
       (keepRaw ? `; raw kept at ${rawPath}` : ""),
