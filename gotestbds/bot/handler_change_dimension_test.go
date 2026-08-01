@@ -7,7 +7,9 @@ import (
 	"github.com/df-mc/dragonfly/server/block/cube"
 	"github.com/df-mc/dragonfly/server/world"
 	"github.com/df-mc/dragonfly/server/world/chunk"
+	"github.com/go-gl/mathgl/mgl32"
 	"github.com/sandertv/gophertunnel/minecraft"
+	"github.com/sandertv/gophertunnel/minecraft/protocol"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/login"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/actor"
@@ -47,18 +49,24 @@ func (h *recordingHandler) HandleChangeDimension(_ *actor.Actor, from, to int32)
 func TestChangeDimensionHandlerFlushesAndSwitches(t *testing.T) {
 	world.DefaultBlockRegistry.Finalize()
 
+	conn := &recordingConn{stubConn: stubConn{game: minecraft.GameData{
+		EntityRuntimeID: 1,
+		EntityUniqueID:  1,
+		Dimension:       0,
+		ChunkRadius:     8,
+		PlayerPosition:  mgl32.Vec3{5.5, -63 + eyeOffset, 13.5},
+	}}}
 	a := actor.Config{
-		Conn: stubConn{game: minecraft.GameData{
-			EntityRuntimeID: 1,
-			EntityUniqueID:  1,
-			Dimension:       0,
-			ChunkRadius:     8,
-		}},
+		Conn:      conn,
 		Inventory: inventory.NewHandle(36, 0, nil),
 		Offhand:   inventory.NewHandle(1, 0, nil),
 		Armour:    inventory.NewArmour(nil),
 		Ui:        inventory.NewHandle(54, 0, nil),
 	}.New()
+	// Arena-return hang: bot stood at leaving-dimension feet until MovePlayer.
+	a.Move(cube.Pos{5, -63, 13}.Vec3Centre(), a.Rotation())
+	a.SetChunkLoadCenter(cube.Pos{5, -63, 13})
+	conn.written = nil
 
 	w := a.World()
 	w.AddChunk(
@@ -76,12 +84,24 @@ func TestChangeDimensionHandlerFlushesAndSwitches(t *testing.T) {
 	h := &recordingHandler{}
 	a.Handle(h)
 
-	err := (&ChangeDimensionHandler{}).Handle(&packet.ChangeDimension{Dimension: 1}, nil, a)
+	destEye := mgl32.Vec3{96.5, 70 + eyeOffset, 80.5}
+	err := (&ChangeDimensionHandler{}).Handle(&packet.ChangeDimension{
+		Dimension: 1,
+		Position:  destEye,
+	}, nil, a)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if a.Dimension() != 1 {
 		t.Fatalf("actor dimension=%d, want 1", a.Dimension())
+	}
+	got := a.Position()
+	if got.X() != 96.5 || got.Z() != 80.5 || got.Y() < 69.999 || got.Y() > 70.001 {
+		t.Fatalf("feet after ChangeDimension=%v, want (96.5,70,80.5)", got)
+	}
+	center := a.ChunkLoadCenter()
+	if center.X() != 96 || center.Z() != 80 {
+		t.Fatalf("chunk load centre=%v, want x=96 z=80", center)
 	}
 	if _, ok := w.Chunk(world.ChunkPos{0, 0}); ok {
 		t.Fatal("leaving dimension columns should be flushed")
@@ -100,5 +120,23 @@ func TestChangeDimensionHandlerFlushesAndSwitches(t *testing.T) {
 	}
 	if _, ok := w.Entity(a.RuntimeID()); !ok {
 		t.Fatal("the bot's own entity must survive a dimension change")
+	}
+
+	var sawDone, sawAuth bool
+	for _, pk := range conn.written {
+		switch p := pk.(type) {
+		case *packet.PlayerAction:
+			if p.ActionType == protocol.PlayerActionDimensionChangeDone {
+				sawDone = true
+			}
+		case *packet.PlayerAuthInput:
+			sawAuth = true
+		}
+	}
+	if !sawDone {
+		t.Fatal("missing PlayerActionDimensionChangeDone ack")
+	}
+	if !sawAuth {
+		t.Fatal("missing immediate PlayerAuthInput after dimension change")
 	}
 }

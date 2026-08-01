@@ -707,6 +707,17 @@ func (a *Actor) RunCommand(cmd string) {
 	})
 }
 
+// AckDimensionChange tells the server the client finished the dimension
+// loading screen so chunk streaming / post-transfer teleports can proceed.
+//
+// @returns any WritePacket error from the connection.
+func (a *Actor) AckDimensionChange() error {
+	return a.conn.WritePacket(&packet.PlayerAction{
+		EntityRuntimeID: a.RuntimeID(),
+		ActionType:      protocol.PlayerActionDimensionChangeDone,
+	})
+}
+
 // SetChunkLoadCenter sets chunk loading center.
 func (a *Actor) SetChunkLoadCenter(pos cube.Pos) {
 	a.loadingCenter = pos
