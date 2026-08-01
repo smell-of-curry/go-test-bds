@@ -2,6 +2,7 @@ package actor
 
 import (
 	"fmt"
+	"math"
 
 	pathfind "github.com/FDUTCH/Pathfinder"
 	"github.com/FDUTCH/Pathfinder/evaluator"
@@ -45,8 +46,9 @@ const (
 
 	// emptyPathWaitTicks: when FindPath returns empty because the start
 	// column or its Moore neighbourhood is still requested/partial, keep
-	// retrying this long before failing (15s at 20 Hz).
-	emptyPathWaitTicks = 300
+	// retrying this long before failing (3s at 20 Hz — hop fallback is
+	// cheaper than a 15s hang that timed out the showcase suite).
+	emptyPathWaitTicks = 60
 
 	// pathNeighborhoodChunks: columns in a (2r+1)² around the start must be
 	// ColumnComplete before an empty FindPath is treated as a real failure.
@@ -342,6 +344,30 @@ func distToNavTarget(pos mgl64.Vec3, target cube.Pos) float64 {
 	return pos.Sub(target.Vec3Centre()).Len()
 }
 
+// distToNavTargetXZ returns horizontal distance from pos to the block centre
+// of target (ignores Y — feet vs block-centre Y alone can exceed navArriveBlocks
+// on a 1-block stride and falsely fail empty+Reached).
+//
+// @param pos Feet position.
+// @param target Block position.
+// @returns XZ distance in blocks.
+func distToNavTargetXZ(pos mgl64.Vec3, target cube.Pos) float64 {
+	c := target.Vec3Centre()
+	dx := pos.X() - c.X()
+	dz := pos.Z() - c.Z()
+	return math.Sqrt(dx*dx + dz*dz)
+}
+
+// arrivedAtNavTarget reports whether the actor is close enough to stop.
+//
+// @param pos Feet position.
+// @param target True navigation target.
+// @returns true when within arrival tolerance.
+func arrivedAtNavTarget(pos mgl64.Vec3, target cube.Pos) bool {
+	return distToNavTargetXZ(pos, target) <= navArriveBlocks &&
+		math.Abs(pos.Y()-target.Vec3Centre().Y()) <= navArriveBlocks+1
+}
+
 // NavFailureDetail is the one-line diagnostic attached to "unable to reach
 // destination" so live showcase runs show why FindPath/fail-fast stopped.
 //
@@ -465,7 +491,7 @@ func (a *Actor) tickNavigating() {
 		// when the TRUE navigation target is close — otherwise we are sitting
 		// on a clamped intermediate (missing goal column) and must wait/repath.
 		// Live 18e00ad: empty_path pathNodes=0 reached=true on 1-block strides.
-		if a.path.Reached() && distToNavTarget(a.Position(), a.navigationTarget) <= navArriveBlocks {
+		if a.path.Reached() && arrivedAtNavTarget(a.Position(), a.navigationTarget) {
 			a.path = nil
 			a.fruitlessRepaths = 0
 			a.emptyPathWaits = 0
@@ -512,7 +538,7 @@ func (a *Actor) tickNavigating() {
 	}
 
 	if path.IsDone() {
-		if distToNavTarget(a.Position(), a.navigationTarget) <= navArriveBlocks {
+		if arrivedAtNavTarget(a.Position(), a.navigationTarget) {
 			a.path = nil
 			a.fruitlessRepaths = 0
 			a.emptyPathWaits = 0
@@ -567,6 +593,14 @@ func (a *Actor) repathTowardTarget(forceFruitless bool) {
 	if forceFruitless || !useful {
 		a.fruitlessRepaths++
 		if a.fruitlessRepaths >= fruitlessRepathLimit {
+			if arrivedAtNavTarget(a.Position(), a.navigationTarget) {
+				a.path = nil
+				a.fruitlessRepaths = 0
+				a.emptyPathWaits = 0
+				a.navFailDetail = ""
+				a.Handler().HandleReachTarget(a)
+				return
+			}
 			reason := "fruitless_no_closer_path"
 			if forceFruitless {
 				reason = "fruitless_stuck"
