@@ -92,6 +92,37 @@ func TestEnqueueChatDoesNotBlockWhenWriterStuck(t *testing.T) {
 	}
 }
 
+// TestWriteChatTimedClosesBotOnStuckWrite: a WritePacket that never returns
+// must not leave BEH waiting on a dropped [STATUS] until manager timedOut.
+func TestWriteChatTimedClosesBotOnStuckWrite(t *testing.T) {
+	unblock := make(chan struct{})
+	closed := make(chan struct{})
+	conn := &blockingConn{
+		stubConn: stubConn{game: minecraft.GameData{
+			EntityRuntimeID: 1,
+			EntityUniqueID:  1,
+			PlayerPosition:  mgl32.Vec3{0, 70, 0},
+			ChunkRadius:     4,
+		}},
+		unblock: unblock,
+		closed:  closed,
+	}
+	b := NewBot(conn, nil)
+	b.startChatWriter()
+	defer func() {
+		_ = b.Close()
+		_ = conn.Close()
+		close(unblock)
+	}()
+
+	b.EnqueueChat("[STATUS]{\"status\":\"success\"}")
+	select {
+	case <-b.Closed():
+	case <-time.After(chatWriteTimeout + 2*time.Second):
+		t.Fatal("bot should Close after status chat WritePacket timeout")
+	}
+}
+
 // TestTryExecuteDropsWhenSaturated: a full task queue must not deadlock a
 // producer the way bare Execute←tasks used to when Chat flooded the queue.
 func TestTryExecuteDropsWhenSaturated(t *testing.T) {

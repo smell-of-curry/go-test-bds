@@ -466,7 +466,8 @@ func (a *Actor) failNavigation(reason string) {
 //
 // @returns true when the leg was failed (caller must return).
 func (a *Actor) noteNavProgress() bool {
-	dist := distToNavTarget(a.Position(), a.navigationTarget)
+	// XZ only: void falls change Y forever and would reset a 3D best-dist.
+	dist := distToNavTargetXZ(a.Position(), a.navigationTarget)
 	if a.navBestDist == 0 || dist < a.navBestDist-navProgressEps {
 		a.navBestDist = dist
 		a.navNoProgressTicks = 0
