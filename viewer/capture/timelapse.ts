@@ -672,7 +672,7 @@ export function parseDurationMs(text: string): number | null {
  * demuxer is not a filter and cannot be probed here; if a candidate lacks
  * it the join step fails and the raw video is kept.)
  */
-export const REQUIRED_FILTERS = ["setpts", "fps"] as const;
+export const REQUIRED_FILTERS = ["setpts", "fps", "trim"] as const;
 
 /**
  * @param filtersText Output of `ffmpeg -filters`.
@@ -970,24 +970,16 @@ export function applyTimelapse(opts: ApplyTimelapseOptions): TimelapseResult {
           ? p.endMs - p.startMs
           : Math.max(0, durationMs - p.startMs);
       const expectMs = Math.round(srcMs / speed);
-      // Realtime (highlight / factor-1) pieces: decode-accurate -ss AFTER -i
-      // and no setpts/fps chain. Input-seek + setpts=PTS-STARTPTS,fps=25 on
-      // Playwright webm was collapsing ~128s of highlight into idle-length
-      // crumbs (plan estimated ~155s, output landed ~34s ≈ highlight÷24).
+      // Coarse -ss before -i, then trim=duration in the filter graph so slice
+      // length is enforced even when Playwright webm timestamps make bare -t
+      // unreliable (highlight realtime pieces were collapsing to crumbs).
       const args = ["-nostdin", "-y", "-loglevel", "error"];
-      if (speed <= 1) {
-        args.push("-i", videoPath);
-        args.push("-ss", sec(p.startMs));
-        if (p.endMs !== null) args.push("-t", sec(srcMs));
-      } else {
-        // -ss before -i seeks the input; with -t the invocation decodes only
-        // its slice (keeps walk/idle encodes cheap on long recordings).
-        args.push("-ss", sec(p.startMs));
-        if (p.endMs !== null) args.push("-t", sec(srcMs));
-        args.push("-i", videoPath);
-        args.push("-filter:v", `setpts=(PTS-STARTPTS)/${speed},fps=25`);
-      }
-      args.push("-an");
+      args.push("-ss", sec(p.startMs));
+      args.push("-i", videoPath);
+      let vf = `trim=duration=${sec(srcMs)},setpts=PTS-STARTPTS`;
+      if (speed > 1) vf += `,setpts=PTS/${speed}`;
+      vf += `,fps=25`;
+      args.push("-filter:v", vf, "-an");
       // Mirrors Playwright's own vp8 recording settings so quality/size match
       // the recording; realtime deadline keeps the pass well under the
       // recording's own length.
@@ -996,14 +988,12 @@ export function applyTimelapse(opts: ApplyTimelapseOptions): TimelapseResult {
       args.push("-deadline", "realtime", "-cpu-used", "8", segPath);
       execFileSync(ff, args, { stdio: ["ignore", "ignore", "pipe"] });
       const gotMs = probeDurationMs(ff, segPath);
-      if (
-        gotMs !== null &&
-        expectMs >= 1000 &&
-        (gotMs < expectMs * 0.5 || gotMs > expectMs * 1.5)
-      ) {
+      if (gotMs === null || (expectMs >= 1000 && gotMs < expectMs * 0.5)) {
         log.warn(
           `timelapse: piece ${i} mode=${p.mode} speed=${speed} ` +
-            `expected ~${(expectMs / 1000).toFixed(1)}s got ${(gotMs / 1000).toFixed(1)}s`,
+            `expected ~${(expectMs / 1000).toFixed(1)}s got ${
+              gotMs !== null ? `${(gotMs / 1000).toFixed(1)}s` : "unreadable"
+            }`,
         );
       }
     });
