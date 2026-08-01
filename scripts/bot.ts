@@ -760,6 +760,7 @@ export class Bot {
         status: mark.status ?? "",
         message: mark.message ?? "",
         elapsedMs: mark.elapsedMs ?? 0,
+        issuedAtMs: mark.issuedAtMs ?? 0,
       },
       this.opts(options),
     );

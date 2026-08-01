@@ -15,6 +15,7 @@ import {
   REQUIRED_FILTERS,
   resolveKeepSuite,
   resolveTimelapsePlan,
+  suiteKeepBoundsUnreliable,
 } from "./timelapse";
 
 const start = (tMs: number) => ({ message: "walk:start", tMs });
@@ -556,4 +557,48 @@ test("resolveTimelapsePlan: idle whole-file only when there are no cuts", () => 
   const resolved = resolveTimelapsePlan([], 10_000, 24);
   assert.equal(resolved.entireCut, false);
   assert.deepEqual(resolved.plan, [{ startMs: 0, endMs: null, mode: "idle" }]);
+});
+
+test("suiteKeepBoundsUnreliable: tiny keep window at EOF with outer marks", () => {
+  // run-pr-704-1785551849011 shape: walk/loading across the run, suite
+  // bounds stamped only in the last 1.3s.
+  const durationMs = 431_700;
+  const marks = [
+    { message: "loading:start", tMs: 4_287 },
+    { message: "walk:start", tMs: 17_602 },
+    { message: "walk:end", tMs: 413_602 },
+    suiteStart(424_754, "Tutorial Showcase"),
+    suiteEnd(426_102, "Tutorial Showcase"),
+  ];
+  assert.equal(suiteKeepBoundsUnreliable(marks, durationMs, /showcase/i), true);
+});
+
+test("suiteKeepBoundsUnreliable: healthy showcase span is trusted", () => {
+  const durationMs = 431_700;
+  const marks = [
+    { message: "walk:start", tMs: 17_602 },
+    { message: "walk:end", tMs: 400_000 },
+    suiteStart(5_000, "Tutorial Showcase"),
+    suiteEnd(420_000, "Tutorial Showcase"),
+  ];
+  assert.equal(
+    suiteKeepBoundsUnreliable(marks, durationMs, /showcase/i),
+    false,
+  );
+});
+
+test("suiteKeepBoundsUnreliable: short suite alone (no outer marks) is fine", () => {
+  // A genuinely short keep suite with no other timeline marks should not
+  // trip the guard — otherwise we can never cut a brief showcase.
+  assert.equal(
+    suiteKeepBoundsUnreliable(
+      [
+        suiteStart(1_000, "Tutorial Showcase"),
+        suiteEnd(5_000, "Tutorial Showcase"),
+      ],
+      10_000,
+      /showcase/i,
+    ),
+    false,
+  );
 });

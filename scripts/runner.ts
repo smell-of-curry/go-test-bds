@@ -266,12 +266,23 @@ async function runSuite(
 ): Promise<SuiteResult> {
   const bot = env.bots[0];
   env.reporter.onSuiteStart?.(suite.name);
+  const suiteIssuedAtMs = Date.now();
+  // Segment suite:start is the timelapse authority (same real-time path as
+  // walk/loading). Lifecycle suiteStart stays for overlays / reporters.
+  await emitViewerMark(bot, {
+    phase: "segment",
+    message: "suite:start",
+    runId: env.runId,
+    suite: suite.name,
+    issuedAtMs: suiteIssuedAtMs,
+  });
   await emitViewerMark(bot, {
     phase: "suiteStart",
     runId: env.runId,
     suite: suite.name,
+    issuedAtMs: suiteIssuedAtMs,
   });
-  const startedAt = Date.now();
+  const startedAt = suiteIssuedAtMs;
   const results: TestResult[] = [];
 
   const { ctx, cleanups } = createContext(env.runId, env.bots);
@@ -332,10 +343,19 @@ async function runSuite(
     tests: results,
     error: setupError ?? teardownError ?? cleanupError,
   };
+  const suiteEndIssuedAtMs = Date.now();
+  await emitViewerMark(bot, {
+    phase: "segment",
+    message: "suite:end",
+    runId: env.runId,
+    suite: suite.name,
+    issuedAtMs: suiteEndIssuedAtMs,
+  });
   await emitViewerMark(bot, {
     phase: "suiteEnd",
     runId: env.runId,
     suite: suite.name,
+    issuedAtMs: suiteEndIssuedAtMs,
   });
   env.reporter.onSuiteEnd?.(suiteResult);
   return suiteResult;
@@ -567,7 +587,10 @@ function describeError(error: unknown): string {
  */
 async function emitViewerMark(bot: Bot, mark: ViewerMarkParams): Promise<void> {
   try {
-    await bot.viewerMark(mark);
+    await bot.viewerMark({
+      ...mark,
+      issuedAtMs: mark.issuedAtMs ?? Date.now(),
+    });
   } catch {
     // No viewer, unregistered instruction, or harness blip — ignore.
   }

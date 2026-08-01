@@ -376,6 +376,8 @@ export interface MarkFrame {
   status?: string;
   message?: string;
   elapsedMs?: number;
+  /** Emitter wall clock (`Date.now()`); preferred for suite-bound stamping. */
+  issuedAtMs?: number;
 }
 
 export interface CaptureFrame {

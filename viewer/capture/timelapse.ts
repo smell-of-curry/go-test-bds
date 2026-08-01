@@ -81,6 +81,16 @@ export const DEFAULT_IDLE_FACTOR = 24;
  */
 export const DEFAULT_KEEP_SUITE = /showcase/i;
 
+/**
+ * Kept-suite footage shorter than this (or under
+ * {@link MIN_KEEP_SUITE_FRACTION} of the recording) is treated as a bad
+ * suite-bound stamp — fall back to keeping the whole recording.
+ */
+export const MIN_KEEP_SUITE_MS = 30_000;
+
+/** See {@link MIN_KEEP_SUITE_MS}. */
+export const MIN_KEEP_SUITE_FRACTION = 0.1;
+
 const SEGMENT_MESSAGES = new Set([
   "walk:start",
   "walk:end",
@@ -215,6 +225,9 @@ export function computeSuiteCutIntervals(
 
   for (const m of suiteMarks) {
     if (m.message === "suite:start") {
+      // Keep the earliest start when the runner emits both segment + lifecycle
+      // suite:start (or replays on harness attach).
+      if (open && open.suite === m.suite) continue;
       closeOpen(m.tMs);
       open = { suite: m.suite!, tMs: m.tMs };
     } else if (m.message === "suite:end") {
@@ -237,6 +250,72 @@ export function computeSuiteCutIntervals(
     cuts.push({ startMs: 0, endMs: firstKeepStart });
 
   return clampMergeIntervals(cuts, durationMs, MIN_CUT_INTERVAL_MS);
+}
+
+/**
+ * True when keep-suite bounds look like a receipt-time stamp collapse (tiny
+ * window at EOF) rather than real suite coverage. Callers should disable suite
+ * cutting and keep the whole recording.
+ *
+ * @param marks Segment marks (incl. suite:start/end).
+ * @param durationMs Video duration.
+ * @param keepSuite Suites to keep.
+ * @returns true when suite cuts must be ignored.
+ */
+export function suiteKeepBoundsUnreliable(
+  marks: WalkMark[],
+  durationMs: number,
+  keepSuite: RegExp,
+): boolean {
+  if (durationMs <= 0) return false;
+  const suiteMarks = marks
+    .filter(
+      (m) =>
+        (m.message === "suite:start" || m.message === "suite:end") &&
+        typeof m.suite === "string" &&
+        m.suite.length > 0,
+    )
+    .sort((a, b) => a.tMs - b.tMs);
+  if (suiteMarks.length === 0) return false;
+
+  type Open = { suite: string; tMs: number };
+  let open: Open | null = null;
+  const keepSpans: Interval[] = [];
+  const closeOpen = (endMs: number) => {
+    if (!open) return;
+    if (keepSuite.test(open.suite) && endMs > open.tMs)
+      keepSpans.push({ startMs: open.tMs, endMs });
+    open = null;
+  };
+  for (const m of suiteMarks) {
+    if (m.message === "suite:start") {
+      if (open && open.suite === m.suite) continue;
+      closeOpen(m.tMs);
+      open = { suite: m.suite!, tMs: m.tMs };
+    } else if (m.message === "suite:end") {
+      closeOpen(m.tMs);
+    }
+  }
+  closeOpen(durationMs);
+
+  const keptMs = keepSpans.reduce((sum, iv) => {
+    const start = Math.max(0, iv.startMs);
+    const end = Math.min(durationMs, iv.endMs);
+    return sum + Math.max(0, end - start);
+  }, 0);
+  if (
+    keptMs >= MIN_KEEP_SUITE_MS &&
+    keptMs >= durationMs * MIN_KEEP_SUITE_FRACTION
+  )
+    return false;
+
+  // Degenerate keep window — only distrust it when other timeline marks exist
+  // outside that window (otherwise a genuinely short suite is fine).
+  const outside = marks.some((m) => {
+    if (m.message === "suite:start" || m.message === "suite:end") return false;
+    return !keepSpans.some((iv) => m.tMs >= iv.startMs && m.tMs <= iv.endMs);
+  });
+  return outside;
 }
 
 /**
@@ -719,13 +798,30 @@ export function applyTimelapse(opts: ApplyTimelapseOptions): TimelapseResult {
         `(capture likely stalled mid-run; suite cuts still applied to what exists)`,
     );
   }
+  let effectiveKeep = keepSuite;
+  if (
+    keepSuite &&
+    suiteKeepBoundsUnreliable(segmentMarks, durationMs, keepSuite)
+  ) {
+    log.warn(
+      "timelapse: keep-suite bounds look degenerate " +
+        `(<${MIN_KEEP_SUITE_MS / 1000}s or <${MIN_KEEP_SUITE_FRACTION * 100}% of video ` +
+        "with marks outside); ignoring suite cuts — keeping whole recording",
+    );
+    effectiveKeep = null;
+  }
+
   log.info(
     `timelapse: marks=${segmentMarks.length} suiteBounds=${suiteMarkCount} ` +
-      `keepSuite=${keepSuite ? keepSuite.source : "off"} ` +
+      `keepSuite=${effectiveKeep ? effectiveKeep.source : "off"} ` +
       `walkFactor=${factor} idleFactor=${idleFactor}`,
   );
 
-  let intervals = computeMarkedIntervals(segmentMarks, durationMs, keepSuite);
+  let intervals = computeMarkedIntervals(
+    segmentMarks,
+    durationMs,
+    effectiveKeep,
+  );
   if (factor <= 1) intervals = intervals.filter((iv) => iv.kind !== "walk");
   if (idleFactor <= 1) intervals = intervals.filter((iv) => iv.kind !== "idle");
   intervals = capIntervals(intervals, MAX_FAST_INTERVALS);

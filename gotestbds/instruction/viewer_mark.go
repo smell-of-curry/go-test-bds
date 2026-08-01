@@ -12,14 +12,15 @@ import (
 // With no viewer configured this succeeds and does nothing — marks must never
 // fail a test.
 type ViewerMark struct {
-	Phase     string `json:"phase"`
-	RunID     string `json:"runId"`
-	Suite     string `json:"suite"`
-	Test      string `json:"test"`
-	Status    string `json:"status"`
-	Message   string `json:"message"`
-	ElapsedMs int64  `json:"elapsedMs"`
-	hub       *viewer.Hub
+	Phase      string `json:"phase"`
+	RunID      string `json:"runId"`
+	Suite      string `json:"suite"`
+	Test       string `json:"test"`
+	Status     string `json:"status"`
+	Message    string `json:"message"`
+	ElapsedMs  int64  `json:"elapsedMs"`
+	IssuedAtMs int64  `json:"issuedAtMs"`
+	hub        *viewer.Hub
 }
 
 // Name returns the instruction name.
@@ -33,13 +34,14 @@ func (v *ViewerMark) Run(_ context.Context, _ *bot.Bot) error {
 		return nil
 	}
 	v.hub.Mark(viewer.Mark{
-		Phase:     v.Phase,
-		RunID:     v.RunID,
-		Suite:     v.Suite,
-		Test:      v.Test,
-		Status:    v.Status,
-		Message:   v.Message,
-		ElapsedMs: v.ElapsedMs,
+		Phase:      v.Phase,
+		RunID:      v.RunID,
+		Suite:      v.Suite,
+		Test:       v.Test,
+		Status:     v.Status,
+		Message:    v.Message,
+		ElapsedMs:  v.ElapsedMs,
+		IssuedAtMs: v.IssuedAtMs,
 	})
 	return nil
 }

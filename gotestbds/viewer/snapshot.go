@@ -100,21 +100,25 @@ type Mark struct {
 	Status    string `json:"status,omitempty"`
 	Message   string `json:"message,omitempty"`
 	ElapsedMs int64  `json:"elapsedMs,omitempty"`
+	// IssuedAtMs is Date.now() at the emitter. Capture harnesses prefer this
+	// over SSE receipt time so suite bounds survive delayed delivery.
+	IssuedAtMs int64 `json:"issuedAtMs,omitempty"`
 }
 
 // markFrame is the on-wire mark envelope.
 type markFrame struct {
-	V         int    `json:"v"`
-	Type      string `json:"type"`
-	Bot       string `json:"bot"`
-	Tick      uint64 `json:"tick"`
-	Phase     string `json:"phase"`
-	RunID     string `json:"runId,omitempty"`
-	Suite     string `json:"suite,omitempty"`
-	Test      string `json:"test,omitempty"`
-	Status    string `json:"status,omitempty"`
-	Message   string `json:"message,omitempty"`
-	ElapsedMs int64  `json:"elapsedMs,omitempty"`
+	V          int    `json:"v"`
+	Type       string `json:"type"`
+	Bot        string `json:"bot"`
+	Tick       uint64 `json:"tick"`
+	Phase      string `json:"phase"`
+	RunID      string `json:"runId,omitempty"`
+	Suite      string `json:"suite,omitempty"`
+	Test       string `json:"test,omitempty"`
+	Status     string `json:"status,omitempty"`
+	Message    string `json:"message,omitempty"`
+	ElapsedMs  int64  `json:"elapsedMs,omitempty"`
+	IssuedAtMs int64  `json:"issuedAtMs,omitempty"`
 }
 
 // Capture is a request for a still from the harness.

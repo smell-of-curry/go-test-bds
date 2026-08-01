@@ -66,6 +66,12 @@ type Stream struct {
 	// encodeInterval is worldEncodeInterval in production; tests zero it to
 	// drive Tick faster than wall time.
 	encodeInterval time.Duration
+
+	// openSuiteMark is the latest suite:start / suiteStart payload, replayed
+	// when a harness attaches mid-suite so suite bounds are not lost when the
+	// original emit raced ahead of the SSE subscriber. Cleared on suite end.
+	// Protected by mu.
+	openSuiteMark []byte
 }
 
 // vitalsEmitInterval is the minimum gap between vitals frames. Survival stats
@@ -733,8 +739,14 @@ func (s *Stream) attach() *subscriber {
 	}
 	s.mu.Lock()
 	s.subs[sub] = struct{}{}
+	suiteReplay := s.openSuiteMark
 	s.mu.Unlock()
 	s.hub.setAttached(s.name, s.Attached())
+	// Replay open suite bounds with the original issuedAtMs so a harness that
+	// subscribed after suiteStart still gets a correct keep window.
+	if len(suiteReplay) > 0 {
+		_ = sub.pushEvent(encodedFrame{event: "mark", data: suiteReplay})
+	}
 	return sub
 }
 
@@ -813,20 +825,39 @@ func (s *Stream) emitFormHover(index int) {
 // emitMark encodes and fans a mark frame for this bot.
 func (s *Stream) emitMark(m Mark) {
 	mf := markFrame{
-		V:         SchemaVersion,
-		Type:      "mark",
-		Bot:       s.name,
-		Tick:      s.lastTick.Load(),
-		Phase:     m.Phase,
-		RunID:     m.RunID,
-		Suite:     m.Suite,
-		Test:      m.Test,
-		Status:    m.Status,
-		Message:   m.Message,
-		ElapsedMs: m.ElapsedMs,
+		V:          SchemaVersion,
+		Type:       "mark",
+		Bot:        s.name,
+		Tick:       s.lastTick.Load(),
+		Phase:      m.Phase,
+		RunID:      m.RunID,
+		Suite:      m.Suite,
+		Test:       m.Test,
+		Status:     m.Status,
+		Message:    m.Message,
+		ElapsedMs:  m.ElapsedMs,
+		IssuedAtMs: m.IssuedAtMs,
 	}
 	data, _ := json.Marshal(mf)
+	// Remember suite open/close so a late-attaching harness can replay bounds.
+	if isSuiteStartMark(m.Phase, m.Message) {
+		s.mu.Lock()
+		s.openSuiteMark = data
+		s.mu.Unlock()
+	} else if isSuiteEndMark(m.Phase, m.Message) {
+		s.mu.Lock()
+		s.openSuiteMark = nil
+		s.mu.Unlock()
+	}
 	s.emitRaw("mark", data)
+}
+
+func isSuiteStartMark(phase, message string) bool {
+	return phase == "suiteStart" || (phase == "segment" && message == "suite:start")
+}
+
+func isSuiteEndMark(phase, message string) bool {
+	return phase == "suiteEnd" || (phase == "segment" && message == "suite:end")
 }
 
 // emitHudEvents fans chat/title/particle changes on the event lane (never

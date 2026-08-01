@@ -143,6 +143,11 @@ export interface ViewerMarkParams {
   status?: string;
   message?: string;
   elapsedMs?: number;
+  /**
+   * Emitter wall clock (`Date.now()`). Capture harnesses prefer this over SSE
+   * receipt time when stamping suite bounds for the timelapse cutter.
+   */
+  issuedAtMs?: number;
 }
 
 /**

@@ -117,6 +117,8 @@ interface MarkFrame {
   test?: string;
   message?: string;
   tick?: number;
+  /** Emitter wall clock; preferred over SSE receipt time for suite bounds. */
+  issuedAtMs?: number;
 }
 
 const LEVEL_RANK: Record<LogLevel, number> = {
@@ -692,26 +694,32 @@ async function handleMark(
   if (frame.suite !== undefined) ctx.mark.suite = frame.suite;
   if (frame.test !== undefined) ctx.mark.test = frame.test;
 
-  const tMs = atMs - ctx.videoAnchorMs;
+  // Prefer emitter wall clock for suite bounds: lifecycle suiteStart used to
+  // land at harness receipt time (often after a long suite when the mark was
+  // replayed/delayed), collapsing the keep window to ~1s at EOF.
+  const tMs =
+    typeof frame.issuedAtMs === "number" && frame.issuedAtMs > 0
+      ? frame.issuedAtMs - ctx.videoAnchorMs
+      : atMs - ctx.videoAnchorMs;
 
-  // Synthesise suite:start/end from ANY mark that carries a suite name —
-  // not only suiteStart/suiteEnd. Probe-r2 kept Smoke/UI Probe in the
-  // timelapse because suite lifecycle events were missing from walkMarks
-  // while testStart overlays still showed the suite; testStart/segment
-  // marks are enough to bound each suite for cutting.
-  if (frame.suite) {
-    noteSuiteBoundary(
-      ctx.walkMarks,
-      ctx.suiteGate,
-      frame.suite,
-      tMs,
-      frame.phase === "suiteEnd",
-    );
+  // Suite bounds: real-time segment suite:start/end win; lifecycle
+  // suiteStart/suiteEnd are the fallback. Do NOT synthesise from testStart/
+  // testEnd — that stamped a tiny window at EOF when the early suiteStart
+  // was dropped (run-pr-704-1785551849011 → 0.28s webm).
+  if (frame.phase === "suiteStart" || frame.phase === "suiteEnd") {
+    if (frame.suite) {
+      noteSuiteBoundary(
+        ctx.walkMarks,
+        ctx.suiteGate,
+        frame.suite,
+        tMs,
+        frame.phase === "suiteEnd",
+      );
+    }
   }
 
-  // Walk / loading / idle legs, timed against the video for the timelapse
-  // pass after the recording is written. `segment` marks are timeline
-  // metadata only — message strings pass through untouched.
+  // Walk / loading / idle / suite legs, timed against the video for the
+  // timelapse pass after the recording is written.
   if (
     frame.phase === "segment" &&
     (frame.message === "walk:start" ||
@@ -719,8 +727,23 @@ async function handleMark(
       frame.message === "idle:start" ||
       frame.message === "idle:end" ||
       frame.message === "loading:start" ||
-      frame.message === "loading:end")
+      frame.message === "loading:end" ||
+      frame.message === "suite:start" ||
+      frame.message === "suite:end")
   ) {
+    if (frame.message === "suite:start" || frame.message === "suite:end") {
+      const suite = frame.suite ?? ctx.mark.suite;
+      if (suite) {
+        noteSuiteBoundary(
+          ctx.walkMarks,
+          ctx.suiteGate,
+          suite,
+          tMs,
+          frame.message === "suite:end",
+        );
+      }
+      return;
+    }
     ctx.walkMarks.push({
       message: frame.message,
       tMs,

@@ -221,6 +221,7 @@ export interface ViewerMark {
   status: string;
   message: string;
   elapsedMs: number;
+  issuedAtMs: number;
 }
 
 /** WaitForForm blocks until a form is open, then returns the same shape as getForm. */
