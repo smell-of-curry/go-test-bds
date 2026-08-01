@@ -99,6 +99,20 @@ func containsAll(s string, parts ...string) bool {
 	return true
 }
 
+// TestAtPathNodeAllowsYSlack: path Advance must accept ±1 Y (feet block vs
+// standable node Y), or navigation never leaves the first node.
+func TestAtPathNodeAllowsYSlack(t *testing.T) {
+	if !atPathNode(cube.Pos{3, 84, 5}, cube.Pos{3, 83, 5}) {
+		t.Fatal("Y off by 1 should still count as at path node")
+	}
+	if atPathNode(cube.Pos{3, 84, 5}, cube.Pos{3, 83, 6}) {
+		t.Fatal("different Z must not match")
+	}
+	if atPathNode(cube.Pos{3, 86, 5}, cube.Pos{3, 83, 5}) {
+		t.Fatal("Y off by 3 must not match")
+	}
+}
+
 // TestNavigateEmptyReachedIsSuccess: FindPath empty+Reached (start already in
 // reachRange) must fire HandleReachTarget, not empty_path fail — otherwise
 // every 1-block stride after resolveStandable hop-teleports (live 18e00ad).

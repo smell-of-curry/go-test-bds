@@ -368,6 +368,16 @@ func arrivedAtNavTarget(pos mgl64.Vec3, target cube.Pos) bool {
 		math.Abs(pos.Y()-target.Vec3Centre().Y()) <= navArriveBlocks+1
 }
 
+// atPathNode reports whether the actor's block pos has reached a path node
+// (XZ exact, Y within 1).
+//
+// @param pos Actor block position from PosFromVec3.
+// @param node Path node block position.
+// @returns true when the node should be advanced past.
+func atPathNode(pos, node cube.Pos) bool {
+	return pos.X() == node.X() && pos.Z() == node.Z() && absInt(pos.Y()-node.Y()) <= 1
+}
+
 // NavFailureDetail is the one-line diagnostic attached to "unable to reach
 // destination" so live showcase runs show why FindPath/fail-fast stopped.
 //
@@ -487,11 +497,12 @@ func (a *Actor) tickNavigating() {
 
 	if a.path.Count() == 0 {
 		// FindPath returns empty+Reached when start is already within
-		// reachRange of its (possibly clamped) goal. Only treat as arrival
-		// when the TRUE navigation target is close — otherwise we are sitting
-		// on a clamped intermediate (missing goal column) and must wait/repath.
-		// Live 18e00ad: empty_path pathNodes=0 reached=true on 1-block strides.
-		if a.path.Reached() && arrivedAtNavTarget(a.Position(), a.navigationTarget) {
+		// reachRange of its (possibly clamped) goal.
+		// Live 982dddc: goal==target (105,83,43)→(105,83,42) still failed
+		// arrivedAtNavTarget geometry and logged empty_path reached=true —
+		// if FindPath's goal was the TRUE target, trust Reached as arrival.
+		if a.path.Reached() &&
+			(a.navLastGoal == a.navigationTarget || arrivedAtNavTarget(a.Position(), a.navigationTarget)) {
 			a.path = nil
 			a.fruitlessRepaths = 0
 			a.emptyPathWaits = 0
@@ -531,9 +542,12 @@ func (a *Actor) tickNavigating() {
 	path := a.path
 	pos := cube.PosFromVec3(a.Position())
 
-	// Check done before NextNode: a continuation can leave the path already
-	// exhausted at tick start (manual Advance in tests, or last tick's Advance).
-	if !path.IsDone() && pos == path.NextNode().Pos {
+	// Advance when XZ matches and Y is within 1: path nodes are often at the
+	// standable foot block while PosFromVec3 after physics is one Y off
+	// (feet at 84.0 → block 84 vs node Y=83). Exact == never matched → look
+	// into the floor, collide, fruitless_stuck with pathNodes>0 and 0 progress
+	// (live 982dddc lab door).
+	if !path.IsDone() && atPathNode(pos, path.NextNode().Pos) {
 		path.Advance()
 	}
 
@@ -553,11 +567,16 @@ func (a *Actor) tickNavigating() {
 	destination := path.NextNode().Pos
 
 	input := movement.Input{Forward: true}
-	if destination.Y() > pos.Y() {
+	if destination.Y() > pos.Y()+1 {
 		input.Jump = true
 	}
+	// Look at same-Y XZ so a 1-off path node does not pitch the bot into the floor.
+	look := destination
+	if absInt(destination.Y()-pos.Y()) <= 1 {
+		look[1] = pos.Y()
+	}
 	pitch := a.Rotation().Pitch()
-	a.LookAtBlock(destination)
+	a.LookAtBlock(look)
 	previousPosition := a.Position()
 	if !a.MoveRawInput(input, cube.Rotation{0, pitch - a.Rotation().Pitch()}) {
 		return
