@@ -9,15 +9,12 @@ package main
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
 	"path/filepath"
-	"runtime"
 	"sync"
 	"syscall"
-	"time"
 
 	"github.com/FDUTCH/dummy_item_blocks/dummy"
 	"github.com/google/uuid"
