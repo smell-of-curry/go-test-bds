@@ -584,7 +584,8 @@ test("battle form renders the bottom battle bar and hover follows formHover", as
     expect(plates.plateClipped).toBe(false);
     expect(plates.whiteTinted).toBe(0);
 
-    // HP label: lang `%%` → `%`; glyphs must fit inside health_text box.
+    // HP label: lang `%%` → `%`; glyph ink (+ shadow) must sit inside the box
+    // — not just getClientRects bottom (old check missed top overflow / 1px clip).
     const hpLabel = await page.evaluate(() => {
       const labels = [
         ...document.querySelectorAll<HTMLElement>(
@@ -598,29 +599,112 @@ test("battle form renders the bottom battle bar and hover follows formHover", as
       return labels.map((el) => {
         const box = el.getBoundingClientRect();
         const text = (el.textContent ?? "").trim();
+        let inkTop = Infinity;
+        let inkBottom = 0;
         const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
-        let lastBottom = 0;
         let node: Node | null;
         while ((node = walker.nextNode())) {
           const range = document.createRange();
           range.selectNodeContents(node);
           for (const r of range.getClientRects()) {
-            lastBottom = Math.max(lastBottom, r.bottom);
+            inkTop = Math.min(inkTop, r.top);
+            inkBottom = Math.max(inkBottom, r.bottom);
           }
         }
+        const padTop = inkTop - box.top;
+        const padBottom = box.bottom - inkBottom;
         return {
           text,
           doublePercent: text.includes("%%"),
           hasPercent: text.includes("%"),
-          clipped: lastBottom > box.bottom + 1,
+          // Ink must not spill past the overflow:hidden edge (½px AA slack).
+          // getClientRects is the line box (≈ line-height), not glyph ink —
+          // with line-height filling the box, pad≈0 is expected and fine.
+          clippedTop: padTop < -0.5,
+          clippedBottom: padBottom < -0.5,
+          padTop,
+          padBottom,
           boxH: box.height,
+          fontSize: getComputedStyle(el).fontSize,
+          lineHeight: getComputedStyle(el).lineHeight,
         };
       });
     });
     expect(hpLabel.length).toBeGreaterThanOrEqual(1);
     expect(hpLabel.every((h) => !h.doublePercent)).toBe(true);
     expect(hpLabel.some((h) => /100%/.test(h.text))).toBe(true);
-    expect(hpLabel.every((h) => !h.clipped)).toBe(true);
+    expect(hpLabel.every((h) => !h.clippedTop)).toBe(true);
+    expect(hpLabel.every((h) => !h.clippedBottom)).toBe(true);
+    // Tight-box fix: line-height fills the painted box (centers ink).
+    expect(
+      hpLabel.every(
+        (h) => Math.abs(parseFloat(h.lineHeight) - h.boxH) < 0.6,
+      ),
+    ).toBe(true);
+
+    // Clone onto a clean fixed plate — absolute battle chrome composites into
+    // in-place element screenshots and fakes "clip". Live bug: last glyph row.
+    await page.evaluate(() => {
+      document.getElementById("hp-ink-probe")?.remove();
+      const el = [
+        ...document.querySelectorAll<HTMLElement>(
+          '[data-jsonui-name="battle.main"] .jsonui[data-ui-name="health_text"]',
+        ),
+      ].find((e) => {
+        if (e.style.display === "none") return false;
+        const r = e.getBoundingClientRect();
+        return r.width > 8 && r.height > 2 && (e.textContent ?? "").includes("%");
+      });
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      const cs = getComputedStyle(el);
+      const probe = el.cloneNode(true) as HTMLElement;
+      probe.id = "hp-ink-probe";
+      probe.style.position = "fixed";
+      probe.style.left = "8px";
+      probe.style.top = "8px";
+      probe.style.width = `${r.width}px`;
+      probe.style.height = `${r.height}px`;
+      probe.style.margin = "0";
+      probe.style.zIndex = "2147483647";
+      probe.style.backgroundColor = "#000";
+      probe.style.color = "#fff";
+      probe.style.textShadow = "none";
+      probe.style.overflow = cs.overflow;
+      probe.style.font = cs.font;
+      probe.style.fontSize = cs.fontSize;
+      probe.style.lineHeight = cs.lineHeight;
+      probe.style.textAlign = cs.textAlign;
+      probe.style.whiteSpace = cs.whiteSpace;
+      document.body.appendChild(probe);
+    });
+    const pngBuf = await page.locator("#hp-ink-probe").screenshot({
+      scale: "css",
+      path: "test-results/hp-label-after.png",
+    });
+    const { PNG } = await import("pngjs");
+    const png = PNG.sync.read(pngBuf);
+    let inkFirst = -1;
+    let inkLast = -1;
+    for (let y = 0; y < png.height; y++) {
+      let ink = 0;
+      for (let x = 0; x < png.width; x++) {
+        const i = (png.width * y + x) << 2;
+        if (png.data[i] + png.data[i + 1] + png.data[i + 2] > 40) ink++;
+      }
+      if (ink > 0) {
+        if (inkFirst < 0) inkFirst = y;
+        inkLast = y;
+      }
+    }
+    expect(inkFirst).toBeGreaterThanOrEqual(0);
+    expect(inkLast).toBeGreaterThan(inkFirst);
+    expect(inkFirst).toBeGreaterThanOrEqual(1);
+    expect(inkLast).toBeLessThan(png.height - 1);
+    expect(inkLast - inkFirst + 1).toBeGreaterThanOrEqual(
+      Math.floor(png.height * 0.35),
+    );
+    expect(hpLabel[0].boxH).toBeGreaterThanOrEqual(18);
 
     // Default button faces (not hover/locked) must paint; a lone white
     // focus/White slab was the live-pack regression.

@@ -8,12 +8,46 @@ import {
   LABEL_FONT_SIZE_GUI,
   LABEL_LINE_HEIGHT_GUI,
   collapseLangPercentEscapes,
+  fitLabelPaintMetrics,
   resolveLabelFontScale,
 } from "./labelMetrics";
 import { localizeLabelText } from "./load";
 import type { LayoutNode } from "./layout";
 
 export { resolveLabelFontScale } from "./labelMetrics";
+
+const LABEL_FONT_STACK =
+  '"Minecraft", ui-sans-serif, system-ui, "Segoe UI", sans-serif';
+
+let inkMeasureCtx: CanvasRenderingContext2D | null | undefined;
+
+/**
+ * Measure CSS font ink height (ascent+descent) at `fontPx`.
+ *
+ * @param fontPx - CSS font-size in px.
+ * @param sample - Representative label text (plain).
+ * @returns ink height in CSS px.
+ */
+function measureCssInkHeight(fontPx: number, sample: string): number {
+  if (!(fontPx > 0)) return 0;
+  if (typeof document === "undefined") {
+    // Node layout tests: Bedrock 8/9 ratio is a lower bound; CSS fonts run taller.
+    return fontPx * 1.25;
+  }
+  if (inkMeasureCtx === undefined) {
+    inkMeasureCtx = document.createElement("canvas").getContext("2d");
+  }
+  if (!inkMeasureCtx) return fontPx * 1.25;
+  inkMeasureCtx.font = `${fontPx}px ${LABEL_FONT_STACK}`;
+  const plain = sample.replace(/[§&]./g, "") || "Hg";
+  const m = inkMeasureCtx.measureText(plain);
+  const ascent = m.actualBoundingBoxAscent;
+  const descent = m.actualBoundingBoxDescent;
+  if (!Number.isFinite(ascent) || !Number.isFinite(descent)) {
+    return fontPx * 1.25;
+  }
+  return Math.max(fontPx, ascent + descent);
+}
 
 /** Natural pixel size + optional texture-json nineslice for a pack texture. */
 export interface TextureInfo {
@@ -658,12 +692,30 @@ function applyLabel(
   let fontPx = LABEL_FONT_SIZE_GUI * opts.guiScale * fontScale;
   let linePx = LABEL_LINE_HEIGHT_GUI * opts.guiScale * fontScale;
   const boxH = Math.max(0, node.box.h * opts.guiScale);
-  // Short authored boxes (battle HP bar ~8.4gui) must shrink glyphs to fit.
-  if (boxH > 0 && linePx > boxH) {
-    const fit = boxH / linePx;
-    fontPx *= fit;
-    linePx = boxH;
-  }
+  const multiline = text.includes("\n");
+  // Subpixel boxes (e.g. 8.4gui×2 = 16.8) floor the overflow clip edge —
+  // ceil so the last ink/shadow row isn't cut.
+  let paintH = boxH > 0 ? Math.ceil(boxH - 1e-6) : 0;
+  // Tight single-line: CSS Minecraft ink paints ~1px past the ceiled layout
+  // box (descenders / last glyph row). Grow the paint box — not a per-label
+  // hack; any short single-line overflow:hidden label hits this.
+  if (paintH > 0 && !multiline && linePx >= paintH * 0.8) paintH += 1;
+  if (paintH > boxH) el.style.height = `${paintH}px`;
+  // Root `.jsonui-root` inherits `text-shadow: 1px 1px`; explicit shadow uses
+  // guiScale. Budget that into the fit so overflow:hidden keeps the outline.
+  const shadowPx =
+    node.element.props.shadow === true ? opts.guiScale : paintH > 0 ? 1 : 0;
+  const inkHeight = measureCssInkHeight(fontPx, text);
+  const fitted = fitLabelPaintMetrics({
+    fontPx,
+    linePx,
+    boxH: paintH || boxH,
+    shadowPx,
+    multiline,
+    inkHeight,
+  });
+  fontPx = fitted.fontPx;
+  linePx = fitted.linePx;
   el.style.fontSize = `${fontPx}px`;
   el.style.lineHeight = `${linePx}px`;
   el.style.whiteSpace = "pre-wrap";

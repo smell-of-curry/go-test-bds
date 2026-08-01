@@ -216,12 +216,13 @@ test("block highlights appear on delta and expire after fade", async ({
       ],
     });
 
-    await page.waitForFunction(
-      () => (window.__viewer?.highlightCount ?? 0) > 0,
+    // Read count inside the wait predicate — a separate evaluate can race the
+    // 1s fade + RAF tickHighlights and see 0 after a true wait.
+    const live = await page.waitForFunction(
+      () => window.__viewer?.highlightCount ?? 0,
       undefined,
       { timeout: 10_000 },
-    );
-    const live = await page.evaluate(() => window.__viewer!.highlightCount);
+    ).then((h) => h.jsonValue());
     expect(live).toBeGreaterThan(0);
 
     await page.evaluate(() => {
