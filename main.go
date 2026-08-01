@@ -9,12 +9,15 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/FDUTCH/dummy_item_blocks/dummy"
 	"github.com/google/uuid"
@@ -50,6 +53,7 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	go watchStackDump(logger)
 
 	var hub *viewer.Hub
 	if config.Viewer.Enabled {

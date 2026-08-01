@@ -45,7 +45,7 @@ func NewBot(conn Conn, logger *slog.Logger) *Bot {
 		handlers:                  make(map[uint32]packetHandler),
 		tasks:                     make(chan task, 256),
 		pendingItemStackResponses: make(map[int32]*inventory.History),
-		packets:                   make(chan packet.Packet, 256),
+		packets:                   make(chan packet.Packet, packetBuf),
 		chatOut:                   make(chan string, chatOutBuf),
 		logger:                    logger,
 	}
@@ -183,7 +183,18 @@ func (b *Bot) Conn() Conn {
 	return b.conn
 }
 
-// handlePackets ...
+// packetBuf bounds inbound packets waiting for the tick loop. When full,
+// enqueuePacket drops the oldest rather than blocking ReadPacket — a blocked
+// read stops RakNet ACK processing, which then stalls every WritePacket
+// (AuthInput / SubChunkRequest / status chat) and freezes StartTickLoop.
+// Live: post-arena silence after "ticking below the client rate" with
+// slowestPacket=*packet.Text or *packet.NetworkChunkPublisherUpdate.
+const packetBuf = 1024
+
+// handlePackets reads the connection forever and hands packets to the tick loop.
+//
+// Must never block on b.packets: the tick loop itself calls WritePacket, and
+// gophertunnel needs ReadPacket to keep running for those writes to complete.
 func (b *Bot) handlePackets() {
 	for {
 		pk, err := b.conn.ReadPacket()
@@ -191,7 +202,51 @@ func (b *Bot) handlePackets() {
 			_ = b.Close()
 			return
 		}
-		b.packets <- pk
+		if !b.enqueuePacket(pk) {
+			return
+		}
+	}
+}
+
+// enqueuePacket queues pk for the tick loop without blocking ReadPacket.
+//
+// When the buffer is full the oldest packet is dropped so fresher state
+// (movement, chunks) still arrives. Returns false when the bot is closed.
+//
+// @param pk Inbound packet from Conn.ReadPacket.
+// @returns false when the bot is shutting down.
+func (b *Bot) enqueuePacket(pk packet.Packet) bool {
+	select {
+	case <-b.closed:
+		return false
+	case b.packets <- pk:
+		return true
+	default:
+	}
+	// Drop oldest to make room.
+	select {
+	case <-b.packets:
+	default:
+	}
+	select {
+	case <-b.closed:
+		return false
+	case b.packets <- pk:
+		if b.logger != nil {
+			b.logger.Warn("inbound packet dropped; tick loop behind",
+				slog.String("packet", fmt.Sprintf("%T", pk)),
+				slog.Int("buf", packetBuf),
+			)
+		}
+		return true
+	default:
+		if b.logger != nil {
+			b.logger.Warn("inbound packet dropped; tick loop behind",
+				slog.String("packet", fmt.Sprintf("%T", pk)),
+				slog.Int("buf", packetBuf),
+			)
+		}
+		return true
 	}
 }
 
