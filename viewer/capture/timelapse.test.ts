@@ -343,15 +343,30 @@ test("capIntervals: merges the pair with the smallest gap", () => {
   ]);
 });
 
-test("capIntervals: loading wins when merging mixed kinds", () => {
+test("capIntervals: does not merge loading into walk (drops short cut)", () => {
+  // Mixing loading with walk used to expand the cut over the walk beat.
   const ivs = [
     { startMs: 0, endMs: 1000, kind: "walk" as const },
     { startMs: 1200, endMs: 2000, kind: "loading" as const },
     { startMs: 9000, endMs: 9500, kind: "walk" as const },
   ];
   assert.deepEqual(capIntervals(ivs, 2), [
-    { startMs: 0, endMs: 2000, kind: "loading" },
+    { startMs: 0, endMs: 1000, kind: "walk" },
     { startMs: 9000, endMs: 9500, kind: "walk" },
+  ]);
+});
+
+test("capIntervals: same-kind loading merges before touching walk", () => {
+  const ivs = [
+    { startMs: 0, endMs: 1000, kind: "loading" as const },
+    { startMs: 1100, endMs: 2000, kind: "loading" as const },
+    { startMs: 5000, endMs: 8000, kind: "walk" as const },
+    { startMs: 9000, endMs: 9500, kind: "highlight" as const },
+  ];
+  assert.deepEqual(capIntervals(ivs, 3), [
+    { startMs: 0, endMs: 2000, kind: "loading" },
+    { startMs: 5000, endMs: 8000, kind: "walk" },
+    { startMs: 9000, endMs: 9500, kind: "highlight" },
   ]);
 });
 

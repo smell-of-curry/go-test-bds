@@ -54,11 +54,12 @@ export interface TaggedInterval extends Interval {
 }
 
 /**
- * Hard cap on walk+loading+idle intervals. Each interval costs a couple of
- * per-piece encodes; 32 keeps the ffmpeg argument far below the ~32k Windows
- * command-line limit while covering any sane run.
+ * Hard cap on walk+loading+idle+highlight intervals. Each interval costs a
+ * couple of per-piece encodes; the concat demuxer uses a list file (not a
+ * giant argv), so this can be generous. Too low and {@link capIntervals}
+ * merges loading into walk/highlight and silently cuts showcase beats.
  */
-export const MAX_FAST_INTERVALS = 32;
+export const MAX_FAST_INTERVALS = 128;
 
 /**
  * Walk/idle intervals shorter than this are dropped: at high speed-up they
@@ -463,9 +464,12 @@ export function computeWalkIntervals(
 
 /**
  * Reduce the interval count to `cap` by merging the pair with the smallest
- * gap, repeatedly. The swallowed gap takes the winning kind (loading over
- * highlight over walk over idle) — a graceful degradation when a run somehow
- * produces an absurd number of marked legs.
+ * gap, repeatedly. Prefer same-kind merges; never merge a loading/cut interval
+ * with a non-loading neighbour — that used to expand the cut over walk /
+ * highlight beats and collapse a 100s reel to a few seconds.
+ *
+ * When two non-loading kinds merge, the higher-priority kind wins (highlight >
+ * walk > idle).
  *
  * @param intervals Disjoint intervals sorted by start time.
  * @param cap Maximum number of intervals to keep.
@@ -478,14 +482,41 @@ export function capIntervals<T extends Interval>(
   const out = intervals.map((iv) => ({ ...iv }));
   // ponytail: O(n^2) nearest-gap merge; n is tiny (marks are per walking leg).
   while (out.length > cap) {
-    let best = 1;
-    let gap = Infinity;
+    let best = -1;
+    let bestScore = Infinity;
     for (let i = 1; i < out.length; i++) {
-      const g = out[i].startMs - out[i - 1].endMs;
-      if (g < gap) {
-        gap = g;
+      const left = out[i - 1];
+      const right = out[i];
+      const leftLoad = isTagged(left) && left.kind === "loading";
+      const rightLoad = isTagged(right) && right.kind === "loading";
+      // Mixing loading with keep-able footage expands a cut — skip.
+      if (leftLoad !== rightLoad) continue;
+      const g = right.startMs - left.endMs;
+      const sameKind =
+        isTagged(left) && isTagged(right) && left.kind === right.kind;
+      // Prefer same-kind; among those, smallest gap.
+      const score = (sameKind ? 0 : 1_000_000_000) + g;
+      if (score < bestScore) {
+        bestScore = score;
         best = i;
       }
+    }
+    if (best < 0) {
+      // Only loading↔non-loading pairs left; drop the shortest loading cut.
+      let drop = -1;
+      let dropLen = Infinity;
+      for (let i = 0; i < out.length; i++) {
+        const iv = out[i];
+        if (!isTagged(iv) || iv.kind !== "loading") continue;
+        const len = iv.endMs - iv.startMs;
+        if (len < dropLen) {
+          dropLen = len;
+          drop = i;
+        }
+      }
+      if (drop < 0) break;
+      out.splice(drop, 1);
+      continue;
     }
     const left = out[best - 1];
     const right = out[best];
