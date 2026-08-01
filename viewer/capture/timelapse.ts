@@ -693,13 +693,24 @@ export function buildPieceFfmpegArgs(opts: {
   speed: number;
   /** When true, read from startMs to EOF (no `-t`). */
   openEnded: boolean;
+  /**
+   * When true, put `-ss` after `-i` (slower, keyframe-accurate). Used as a
+   * retry when the fast input-seek pass undershoots.
+   */
+  accurateSeek?: boolean;
 }): string[] {
   const sec = (ms: number) => (ms / 1000).toFixed(3);
   const speed = Math.max(1, opts.speed);
   const args = ["-nostdin", "-y", "-loglevel", "error"];
-  args.push("-ss", sec(opts.startMs));
-  if (!opts.openEnded && opts.srcMs > 0) args.push("-t", sec(opts.srcMs));
-  args.push("-i", opts.videoPath);
+  if (!opts.accurateSeek) {
+    args.push("-ss", sec(opts.startMs));
+    if (!opts.openEnded && opts.srcMs > 0) args.push("-t", sec(opts.srcMs));
+    args.push("-i", opts.videoPath);
+  } else {
+    args.push("-i", opts.videoPath);
+    args.push("-ss", sec(opts.startMs));
+    if (!opts.openEnded && opts.srcMs > 0) args.push("-t", sec(opts.srcMs));
+  }
   let vf = "setpts=PTS-STARTPTS";
   if (speed > 1) vf += `,setpts=PTS/${speed}`;
   vf += ",fps=25";
@@ -1003,12 +1014,12 @@ export function applyTimelapse(opts: ApplyTimelapseOptions): TimelapseResult {
       const srcMs = openEnded
         ? Math.max(0, durationMs - p.startMs)
         : p.endMs! - p.startMs;
-      // Sub-frame crumbs only cost concat risk; they never move the reel.
-      if (!openEnded && srcMs < 50) return;
       const expectMs = Math.round(srcMs / speed);
+      // Crumb idle/walk pieces encode to broken tiny webms that poison
+      // concat demuxer `-c copy` (plan ~126s → ~31s). Skip them.
+      if (!openEnded && (srcMs < MIN_INTERVAL_MS || expectMs < 100)) return;
       estOutMs += expectMs;
       const segPath = join(segDir, `seg_${String(i).padStart(3, "0")}.webm`);
-      segPaths.push(segPath);
       const args = buildPieceFfmpegArgs({
         videoPath,
         segPath,
@@ -1018,15 +1029,49 @@ export function applyTimelapse(opts: ApplyTimelapseOptions): TimelapseResult {
         openEnded,
       });
       execFileSync(ff, args, { stdio: ["ignore", "ignore", "pipe"] });
-      const gotMs = probeDurationMs(ff, segPath);
-      if (gotMs === null || (expectMs >= 1000 && gotMs < expectMs * 0.5)) {
+      let gotMs = probeDurationMs(ff, segPath);
+      // Accurate retry: input -ss can miss on some Playwright webm keyframes.
+      if (
+        expectMs >= 1000 &&
+        (gotMs === null || gotMs < expectMs * 0.5) &&
+        !openEnded
+      ) {
+        const retry = buildPieceFfmpegArgs({
+          videoPath,
+          segPath,
+          startMs: p.startMs,
+          srcMs,
+          speed,
+          openEnded,
+          accurateSeek: true,
+        });
+        try {
+          execFileSync(ff, retry, { stdio: ["ignore", "ignore", "pipe"] });
+          gotMs = probeDurationMs(ff, segPath);
+        } catch {
+          /* keep first attempt */
+        }
+      }
+      if (gotMs === null || gotMs < 40) {
+        log.warn(
+          `timelapse: skipping unreadable piece ${i} mode=${p.mode} ` +
+            `expected ~${(expectMs / 1000).toFixed(1)}s`,
+        );
+        try {
+          unlinkSync(segPath);
+        } catch {
+          /* ignore */
+        }
+        estOutMs -= expectMs;
+        return;
+      }
+      if (expectMs >= 1000 && gotMs < expectMs * 0.5) {
         log.warn(
           `timelapse: piece ${i} mode=${p.mode} speed=${speed} ` +
-            `expected ~${(expectMs / 1000).toFixed(1)}s got ${
-              gotMs !== null ? `${(gotMs / 1000).toFixed(1)}s` : "unreadable"
-            }`,
+            `expected ~${(expectMs / 1000).toFixed(1)}s got ${(gotMs / 1000).toFixed(1)}s`,
         );
       }
+      segPaths.push(segPath);
     });
 
     if (segPaths.length === 0) {
@@ -1036,8 +1081,9 @@ export function applyTimelapse(opts: ApplyTimelapseOptions): TimelapseResult {
       return { applied: false, reason: "no pieces" };
     }
 
-    // concat demuxer + stream copy: every segment shares codec/params, so the
-    // join is a cheap remux. Quoted-and-escaped paths per the demuxer's rules.
+    // Concat demuxer. Re-encode (not `-c copy`): mixed/short VP8 segments from
+    // Playwright-sourced slices were poisoning stream-copy joins into a ~30s
+    // file while individual highlight pieces were already ~60s+.
     const listPath = join(segDir, "list.txt");
     writeFileSync(
       listPath,
@@ -1056,8 +1102,21 @@ export function applyTimelapse(opts: ApplyTimelapseOptions): TimelapseResult {
         "0",
         "-i",
         listPath,
-        "-c",
-        "copy",
+        "-an",
+        "-c:v",
+        "libvpx",
+        "-qmin",
+        "0",
+        "-qmax",
+        "50",
+        "-crf",
+        "8",
+        "-b:v",
+        "1M",
+        "-deadline",
+        "realtime",
+        "-cpu-used",
+        "8",
         tmpPath,
       ],
       { stdio: ["ignore", "ignore", "pipe"] },

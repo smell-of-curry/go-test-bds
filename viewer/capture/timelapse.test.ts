@@ -566,6 +566,24 @@ test("buildPieceFfmpegArgs: open-ended omits -t", () => {
   assert.equal(args[args.indexOf("-ss") + 1], "90.000");
 });
 
+test("buildPieceFfmpegArgs: accurateSeek puts -ss after -i", () => {
+  const args = buildPieceFfmpegArgs({
+    videoPath: "/tmp/run.webm",
+    segPath: "/tmp/seg.webm",
+    startMs: 10_000,
+    srcMs: 5_000,
+    speed: 1,
+    openEnded: false,
+    accurateSeek: true,
+  });
+  assert.equal(args[4], "-i");
+  assert.equal(args[5], "/tmp/run.webm");
+  assert.equal(args[6], "-ss");
+  assert.equal(args[7], "10.000");
+  assert.equal(args[8], "-t");
+  assert.equal(args[9], "5.000");
+});
+
 test("resolveKeepSuite: default / empty / custom", () => {
   assert.equal(resolveKeepSuite(undefined)!.source, "showcase");
   assert.equal(resolveKeepSuite("1")!.source, "showcase");
