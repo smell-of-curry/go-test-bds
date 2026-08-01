@@ -1,6 +1,7 @@
 package actor
 
 import (
+	"math"
 	"time"
 
 	"github.com/FDUTCH/Pathfinder"
@@ -53,6 +54,15 @@ type movementData struct {
 	navLastGoalState      string
 	navLastUnknownNear    int
 	navLastIncompleteNear int
+
+	// Navigation-window diagnostics for zero-displacement failures.
+	navStartedAt       time.Time
+	navStartTick       uint64
+	navPhysicsSkipped  int // ticks physics gated on missing/incomplete column
+	navMoveAttempts    int
+	navMoveZero        int // MoveRawInput ran but position unchanged
+	navMoveRejected    int // MoveRawInput returned false
+	physicsSkipStreak  int // consecutive ticks physics was skipped (any time)
 
 	mc *physics.Computer
 }
@@ -177,7 +187,9 @@ func (a *Actor) Speed() float64 {
 	mPerTick := mPerSecond / 20
 	// TODO swimming speed.
 	attr := a.Attributes().Speed()
-	if attr <= 0 {
+	// NaN/Inf fail `attr <= 0` in Go, then poison walk → clampVel zeroes move
+	// → fruitless_stuck with a path. Treat non-finite like missing.
+	if attr <= 0 || math.IsNaN(attr) || math.IsInf(attr, 0) {
 		attr = defaultMovementAttribute
 	}
 	multiplier := attr * 10
@@ -229,13 +241,20 @@ func (a *Actor) fillMovementBitset() {
 
 // SendMovement sends movement to the server.
 func (a *Actor) SendMovement() {
-	vel := a.Velocity()
 	var moveVector mgl32.Vec2
 	pitch := float32(a.Rotation().Pitch())
 	yaw := float32(a.Rotation().Yaw())
 
 	if a.moving {
-		rotated := mcmath.RotateVec2(mgl64.Vec2{vel.X(), vel.Z()}, -a.Rotation().Yaw())
+		// Prefer this-tick walk delta. Velocity alone is usually friction-
+		// decayed horizontal ~0 after physics, so encoding it made every
+		// PlayerAuthInput look idle while Navigate thought it was walking
+		// (server Correct then fought the local sim).
+		src := a.delta
+		if src.LenSqr() < 1e-12 {
+			src = a.Velocity()
+		}
+		rotated := mcmath.RotateVec2(mgl64.Vec2{src.X(), src.Z()}, -a.Rotation().Yaw())
 		moveVector = mgl32.Vec2{float32(rotated.X()), float32(rotated.Y())}
 	}
 
@@ -265,15 +284,21 @@ func (a *Actor) tickMovement() {
 
 	a.SendMovement()
 
-	// Simulating against a chunk that has not arrived reads the world as air, so
-	// gravity walks the bot straight down out of the world in the second or so
-	// between spawning and the first chunk. It never comes back: everything
-	// below is air too, and from then on the bot reports a position in the void.
+	// Simulating against a missing OR incomplete column reads air (World.Block),
+	// so gravity walks the bot into the void / into solids that appear later.
+	// Pathfinding already treats incomplete as bedrock (pathSource) — physics
+	// must use the same completeness gate or it freezes/falls while FindPath
+	// happily plans.
 	if !a.chunkLoaded() {
+		a.physicsSkipStreak++
+		if a.Navigating() {
+			a.navPhysicsSkipped++
+		}
 		a.SetVelocity(mgl64.Vec3{})
 		a.tick++
 		return
 	}
+	a.physicsSkipStreak = 0
 
 	physicsTick := a.tickPhysics()
 	a.Move(physicsTick.Position(), a.Rotation())
@@ -285,22 +310,26 @@ func (a *Actor) tickMovement() {
 	a.tick++
 }
 
-// chunkLoaded reports whether the chunk the Actor stands in is known.
+// chunkLoaded reports whether the chunk the Actor stands in is ready for physics.
 //
-// @returns true when the bot's own column has been received.
+// @returns true when the bot's own column is present and ColumnComplete.
 func (a *Actor) chunkLoaded() bool {
 	return chunkLoadedAt(a.world, a.Position())
 }
 
-// chunkLoadedAt reports whether the column containing a position is known.
+// chunkLoadedAt reports whether the column containing a position is complete.
+//
+// Presence alone is not enough: LevelChunk in sub-chunk request mode inserts a
+// column that still reads as air until SubChunk responses land. Physics on that
+// air voids the bot; pathfinding already refuses incomplete columns.
 //
 // @param wr The world to look in.
 // @param pos The position whose column matters.
-// @returns true when that column has been received.
+// @returns true when that column is ColumnComplete.
 func chunkLoadedAt(wr *world.World, pos mgl64.Vec3) bool {
 	block := cube.PosFromVec3(pos)
-	_, ok := wr.Chunk(w.ChunkPos{int32(block[0] >> 4), int32(block[2] >> 4)})
-	return ok
+	c, ok := wr.Chunk(w.ChunkPos{int32(block[0] >> 4), int32(block[2] >> 4)})
+	return ok && c.State == world.ColumnComplete
 }
 
 // blockActions ...
@@ -361,8 +390,12 @@ func (a *Actor) Move(pos mgl64.Vec3, rot cube.Rotation) {
 		return
 	}
 
+	// Accumulate delta BEFORE updating position. Doing it after made
+	// pos.Sub(Position()) always zero, so SendMovement/resolveVelocity never
+	// saw walk displacement (PlayerAuthInput looked idle every tick).
+	before := a.Position()
 	a.Player.Move(pos, rot)
-	a.delta = a.delta.Add(pos.Sub(a.Position()))
+	a.delta = a.delta.Add(pos.Sub(before))
 }
 
 // MoveRawInput moves Actor according to Input

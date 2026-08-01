@@ -3,11 +3,17 @@ package instruction
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/df-mc/dragonfly/server/block/cube"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/actor"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/bot"
 )
+
+// navDetailWait bounds how long we wait for the tick loop to hand back
+// NavFailureDetail after a failed navigate. An unbounded Execute await hung
+// showcase legs when the tick loop was saturated (viewer + dense world).
+const navDetailWait = 5 * time.Second
 
 // NavigateToBlock navigates the Actor to a target block position.
 type NavigateToBlock struct {
@@ -35,20 +41,31 @@ func (n *NavigateToBlock) Run(ctx context.Context, b *bot.Bot) error {
 
 	select {
 	case <-ctx.Done():
-		b.Execute(func(a *actor.Actor) {
+		done := b.Execute(func(a *actor.Actor) {
 			a.StopNavigating()
 		})
+		select {
+		case <-done:
+		case <-time.After(navDetailWait):
+		}
 		return ctx.Err()
 	case ok := <-navigateCh:
 		if !ok {
 			// Must await Execute: fire-and-forget raced the tick loop and
 			// always read detail="" → bare "unable to reach destination"
-			// with no diagnostic (live a5ab5fa showcase).
+			// with no diagnostic (live a5ab5fa showcase). Bound the wait so a
+			// saturated tick loop cannot hang the suite for minutes.
 			var detail string
-			<-b.Execute(func(a *actor.Actor) {
+			done := b.Execute(func(a *actor.Actor) {
 				detail = a.NavFailureDetail()
 				a.StopNavigating()
 			})
+			select {
+			case <-done:
+			case <-time.After(navDetailWait):
+			case <-ctx.Done():
+				return ctx.Err()
+			}
 			if detail != "" && detail != "stopped" {
 				return fmt.Errorf("unable to reach destination (%s)", detail)
 			}

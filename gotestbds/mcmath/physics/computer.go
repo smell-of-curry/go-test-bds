@@ -194,7 +194,10 @@ func blockBBoxsAround(source world.BlockSource, box cube.BBox) []cube.BBox {
 		for x := minX; x <= maxX; x++ {
 			for z := minZ; z <= maxZ; z++ {
 				pos := cube.Pos{x, y, z}
-				boxes := source.Block(pos).Model().BBox(pos, source)
+				// Network-decoded blocks (e.g. ShulkerBox with nil progress) can
+				// panic in Model(); treat them as a full solid cube instead of
+				// killing the tick loop mid-walk.
+				boxes := safeBBoxs(source.Block(pos), pos, source)
 				for _, box := range boxes {
 					blockBBoxs = append(blockBBoxs, box.Translate(mgl64.Vec3{float64(x), float64(y), float64(z)}))
 				}
@@ -205,3 +208,18 @@ func blockBBoxsAround(source world.BlockSource, box cube.BBox) []cube.BBox {
 }
 
 const epsilon = 0.001
+
+// safeBBoxs returns Model().BBox for bl, or a full cube when Model panics.
+//
+// @param bl Block at pos.
+// @param pos Block coordinates.
+// @param source Block source passed to Model.
+// @returns collision boxes in block-local space.
+func safeBBoxs(bl world.Block, pos cube.Pos, source world.BlockSource) (boxes []cube.BBox) {
+	defer func() {
+		if recover() != nil {
+			boxes = []cube.BBox{cube.Box(0, 0, 0, 1, 1, 1)}
+		}
+	}()
+	return bl.Model().BBox(pos, source)
+}

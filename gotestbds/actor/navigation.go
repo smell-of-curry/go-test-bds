@@ -3,6 +3,7 @@ package actor
 import (
 	"fmt"
 	"math"
+	"time"
 
 	pathfind "github.com/FDUTCH/Pathfinder"
 	"github.com/FDUTCH/Pathfinder/evaluator"
@@ -413,8 +414,18 @@ func (a *Actor) formatNavFailure(reason string) string {
 	if a.navLastGoal != a.navLastTarget {
 		clamped = fmt.Sprintf(" clamped=%v", a.navLastGoal)
 	}
+	navTicks := uint64(0)
+	if a.tick >= a.navStartTick {
+		navTicks = a.tick - a.navStartTick
+	}
+	ticksPerSec := 0.0
+	if !a.navStartedAt.IsZero() {
+		if elapsed := time.Since(a.navStartedAt).Seconds(); elapsed > 0 {
+			ticksPerSec = float64(navTicks) / elapsed
+		}
+	}
 	return fmt.Sprintf(
-		"%s start=%v(%s) goal=%v(%s)%s pathNodes=%d reached=%v unknownNear=%d incompleteNear=%d budgetVisited=%d fruitless=%d",
+		"%s start=%v(%s) goal=%v(%s)%s pathNodes=%d reached=%v unknownNear=%d incompleteNear=%d budgetVisited=%d fruitless=%d physicsSkipped=%d/%d ticksPerSec=%.1f moveZero=%d/%d moveRejected=%d skipStreak=%d speed=%.3f",
 		reason,
 		a.navLastStart, a.navLastStartState,
 		a.navLastTarget, a.navLastGoalState,
@@ -422,6 +433,9 @@ func (a *Actor) formatNavFailure(reason string) string {
 		a.navLastPathCount, a.navLastReached,
 		a.navLastUnknownNear, a.navLastIncompleteNear, a.navLastMaxVisited,
 		a.fruitlessRepaths,
+		a.navPhysicsSkipped, navTicks, ticksPerSec,
+		a.navMoveZero, a.navMoveAttempts, a.navMoveRejected,
+		a.physicsSkipStreak, a.Speed(),
 	)
 }
 
@@ -434,6 +448,7 @@ func (a *Actor) failNavigation(reason string) {
 	a.repathCooldown = 0
 	a.fruitlessRepaths = 0
 	a.emptyPathWaits = 0
+	a.navStartedAt = time.Time{}
 	a.Handler().HandleStopNavigation(a)
 }
 
@@ -454,6 +469,16 @@ func (a *Actor) Navigate(target cube.Pos) {
 	a.path = p
 	a.navigationTarget = target
 	a.navFailDetail = ""
+	// Reset movement diagnostics only on the first Navigate of a leg (instruction
+	// entry). Repaths keep the counters so the failure line covers the whole attempt.
+	if a.navStartedAt.IsZero() {
+		a.navStartedAt = time.Now()
+		a.navStartTick = a.tick
+		a.navPhysicsSkipped = 0
+		a.navMoveAttempts = 0
+		a.navMoveZero = 0
+		a.navMoveRejected = 0
+	}
 }
 
 // findPathSafe wraps Pathfinder.FindPath and returns an empty path on panic.
@@ -507,6 +532,7 @@ func (a *Actor) tickNavigating() {
 			a.fruitlessRepaths = 0
 			a.emptyPathWaits = 0
 			a.navFailDetail = ""
+			a.navStartedAt = time.Time{}
 			a.Handler().HandleReachTarget(a)
 			return
 		}
@@ -557,6 +583,7 @@ func (a *Actor) tickNavigating() {
 			a.fruitlessRepaths = 0
 			a.emptyPathWaits = 0
 			a.navFailDetail = ""
+			a.navStartedAt = time.Time{}
 			a.Handler().HandleReachTarget(a)
 			return
 		}
@@ -578,11 +605,17 @@ func (a *Actor) tickNavigating() {
 	pitch := a.Rotation().Pitch()
 	a.LookAtBlock(look)
 	previousPosition := a.Position()
+	a.navMoveAttempts++
 	if !a.MoveRawInput(input, cube.Rotation{0, pitch - a.Rotation().Pitch()}) {
+		// Silent return used to hang navigation until the suite timed out
+		// (MoveRawInput false every tick → no fruitless, no callback).
+		a.navMoveRejected++
+		a.repathTowardTarget(true)
 		return
 	}
 
 	if a.Position().ApproxEqual(previousPosition) {
+		a.navMoveZero++
 		a.repathTowardTarget(true)
 		return
 	}
@@ -617,6 +650,7 @@ func (a *Actor) repathTowardTarget(forceFruitless bool) {
 				a.fruitlessRepaths = 0
 				a.emptyPathWaits = 0
 				a.navFailDetail = ""
+				a.navStartedAt = time.Time{}
 				a.Handler().HandleReachTarget(a)
 				return
 			}
@@ -639,6 +673,7 @@ func (a *Actor) StopNavigating() {
 	a.repathCooldown = 0
 	a.fruitlessRepaths = 0
 	a.emptyPathWaits = 0
+	a.navStartedAt = time.Time{}
 	// Leave navFailDetail set when failNavigation already filled it; clear
 	// only for external/timeout stops so a late false callback stays quiet.
 	if a.navFailDetail == "" {
