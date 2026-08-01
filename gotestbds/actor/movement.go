@@ -62,7 +62,9 @@ type movementData struct {
 	navMoveAttempts    int
 	navMoveZero        int // MoveRawInput ran but position unchanged
 	navMoveRejected    int // MoveRawInput returned false
-	physicsSkipStreak  int // consecutive ticks physics was skipped (any time)
+	navBestDist        float64 // closest distToNavTarget this leg (0 = unset)
+	navNoProgressTicks int     // ticks since navBestDist last improved
+	physicsSkipStreak  int     // consecutive ticks physics was skipped (any time)
 
 	mc *physics.Computer
 }

@@ -51,6 +51,13 @@ const (
 	// cheaper than a 15s hang that timed out the showcase suite).
 	emptyPathWaitTicks = 60
 
+	// navNoProgressLimit: ticks without closing distance to the true target
+	// before fail-fast. fruitlessRepaths resets on ANY MoveRawInput displacement,
+	// so micro-jitter / void slides never hit fruitless_stuck and NavigateToBlock
+	// waited until the (often multi-minute) instruction timeout — live post-arena
+	// silence with StartTickLoop healthy and Run parked on navigateCh.
+	navNoProgressLimit = 20 * 15 // 15s at 20 Hz
+
 	// pathNeighborhoodChunks: columns in a (2r+1)² around the start must be
 	// ColumnComplete before an empty FindPath is treated as a real failure.
 	// Incomplete neighbours read as bedrock in pathSource, so a lone complete
@@ -448,8 +455,29 @@ func (a *Actor) failNavigation(reason string) {
 	a.repathCooldown = 0
 	a.fruitlessRepaths = 0
 	a.emptyPathWaits = 0
+	a.navBestDist = 0
+	a.navNoProgressTicks = 0
 	a.navStartedAt = time.Time{}
 	a.Handler().HandleStopNavigation(a)
+}
+
+// noteNavProgress updates best-distance tracking and fails the leg when the
+// actor has not closed on the true target for navNoProgressLimit ticks.
+//
+// @returns true when the leg was failed (caller must return).
+func (a *Actor) noteNavProgress() bool {
+	dist := distToNavTarget(a.Position(), a.navigationTarget)
+	if a.navBestDist == 0 || dist < a.navBestDist-navProgressEps {
+		a.navBestDist = dist
+		a.navNoProgressTicks = 0
+		return false
+	}
+	a.navNoProgressTicks++
+	if a.navNoProgressTicks <= navNoProgressLimit {
+		return false
+	}
+	a.failNavigation("no_progress")
+	return true
 }
 
 // Navigate builds a path to the destination position.
@@ -478,6 +506,8 @@ func (a *Actor) Navigate(target cube.Pos) {
 		a.navMoveAttempts = 0
 		a.navMoveZero = 0
 		a.navMoveRejected = 0
+		a.navBestDist = 0
+		a.navNoProgressTicks = 0
 	}
 }
 
@@ -516,6 +546,10 @@ func (a *Actor) tickNavigating() {
 		return
 	}
 
+	if a.noteNavProgress() {
+		return
+	}
+
 	if a.repathCooldown > 0 {
 		a.repathCooldown--
 	}
@@ -531,6 +565,8 @@ func (a *Actor) tickNavigating() {
 			a.path = nil
 			a.fruitlessRepaths = 0
 			a.emptyPathWaits = 0
+			a.navBestDist = 0
+			a.navNoProgressTicks = 0
 			a.navFailDetail = ""
 			a.navStartedAt = time.Time{}
 			a.Handler().HandleReachTarget(a)
@@ -582,6 +618,8 @@ func (a *Actor) tickNavigating() {
 			a.path = nil
 			a.fruitlessRepaths = 0
 			a.emptyPathWaits = 0
+			a.navBestDist = 0
+			a.navNoProgressTicks = 0
 			a.navFailDetail = ""
 			a.navStartedAt = time.Time{}
 			a.Handler().HandleReachTarget(a)
@@ -649,6 +687,8 @@ func (a *Actor) repathTowardTarget(forceFruitless bool) {
 				a.path = nil
 				a.fruitlessRepaths = 0
 				a.emptyPathWaits = 0
+				a.navBestDist = 0
+				a.navNoProgressTicks = 0
 				a.navFailDetail = ""
 				a.navStartedAt = time.Time{}
 				a.Handler().HandleReachTarget(a)
@@ -673,6 +713,8 @@ func (a *Actor) StopNavigating() {
 	a.repathCooldown = 0
 	a.fruitlessRepaths = 0
 	a.emptyPathWaits = 0
+	a.navBestDist = 0
+	a.navNoProgressTicks = 0
 	a.navStartedAt = time.Time{}
 	// Leave navFailDetail set when failNavigation already filled it; clear
 	// only for external/timeout stops so a late false callback stays quiet.

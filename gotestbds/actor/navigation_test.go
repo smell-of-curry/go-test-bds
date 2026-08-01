@@ -626,3 +626,33 @@ func TestTruncatePathBeforeFallKeepsPrefix(t *testing.T) {
 		t.Fatalf("truncated end=%v, want (2,70,0)", out.EndNode().Pos)
 	}
 }
+
+// TestNoteNavProgressFailsWithoutClosing: micro-jitter used to reset
+// fruitlessRepaths forever so NavigateToBlock never completed (post-arena hang
+// with a healthy tick loop). Distance must improve or the leg fails.
+func TestNoteNavProgressFailsWithoutClosing(t *testing.T) {
+	const floorY = 64
+	a := Config{Conn: navStubConn{pos: mgl32.Vec3{0.5, float32(floorY + 1), 0.5}}}.New()
+	fillFlatFloor(a.World(), -2, 4, 0, floorY)
+	h := &navStopCounter{}
+	a.Handle(h)
+
+	a.navigationTarget = cube.Pos{80, floorY + 1, 0}
+	a.path = pathfind.NewPath([]*pathfind.Node{{Pos: cube.Pos{1, floorY + 1, 0}}}, false, a.navigationTarget)
+	a.navBestDist = distToNavTarget(a.Position(), a.navigationTarget)
+
+	for i := 0; i < navNoProgressLimit; i++ {
+		if a.noteNavProgress() {
+			t.Fatalf("no_progress failed early at tick %d", i)
+		}
+	}
+	if !a.noteNavProgress() {
+		t.Fatal("expected no_progress fail after navNoProgressLimit ticks")
+	}
+	if h.stopped == 0 {
+		t.Fatal("HandleStopNavigation should fire")
+	}
+	if !strings.Contains(a.NavFailureDetail(), "no_progress") {
+		t.Fatalf("detail=%q, want no_progress", a.NavFailureDetail())
+	}
+}
