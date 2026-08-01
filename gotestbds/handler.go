@@ -214,22 +214,27 @@ const statusFragmentInterval = 60 * time.Millisecond
 // with dozens of buttons) are split into chat-sized fragments because BDS
 // silently drops oversized inbound chat; fragments are paced one per
 // statusFragmentInterval for the same reason.
+//
+// Chat is enqueued on Bot's background writer — never via Execute→Actor.Chat on
+// the tick loop. Live hang: battle-phase 12-fragment getForm replies made
+// WritePacket(*packet.Text) the slowestPacket while ticks fell to ~11/s, then
+// total silence (tick loop stuck in a blocked write / task queue).
 func broadcastStatus(id, status, message string, data any, b *bot.Bot) {
-	b.Execute(func(a *actor.Actor) {
-		payload, _ := MarshalStatusEnvelope(id, status, message, data)
-		msgs := EncodeStatusMessages(id, string(payload))
-		a.Chat(msgs[0])
-		if len(msgs) == 1 {
-			return
-		}
-		slog.Info("chunked status", "id", id, "fragments", len(msgs), "bytes", len(payload))
-		go func() {
-			for _, msg := range msgs[1:] {
-				time.Sleep(statusFragmentInterval)
-				b.Execute(func(a *actor.Actor) {
-					a.Chat(msg)
-				})
+	payload, _ := MarshalStatusEnvelope(id, status, message, data)
+	msgs := EncodeStatusMessages(id, string(payload))
+	b.EnqueueChat(msgs[0])
+	if len(msgs) == 1 {
+		return
+	}
+	slog.Info("chunked status", "id", id, "fragments", len(msgs), "bytes", len(payload))
+	go func() {
+		for _, msg := range msgs[1:] {
+			select {
+			case <-time.After(statusFragmentInterval):
+			case <-b.Closed():
+				return
 			}
-		}()
-	})
+			b.EnqueueChat(msg)
+		}
+	}()
 }

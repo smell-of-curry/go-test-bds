@@ -31,6 +31,9 @@ type Bot struct {
 	packets chan packet.Packet
 	logger  *slog.Logger
 
+	// chatOut carries outbound status chat off the tick loop (see EnqueueChat).
+	chatOut chan string
+
 	chunks chunkHealth
 }
 
@@ -43,6 +46,7 @@ func NewBot(conn Conn, logger *slog.Logger) *Bot {
 		tasks:                     make(chan task, 256),
 		pendingItemStackResponses: make(map[int32]*inventory.History),
 		packets:                   make(chan packet.Packet, 256),
+		chatOut:                   make(chan string, chatOutBuf),
 		logger:                    logger,
 	}
 	bot.a = actor.Config{
@@ -66,6 +70,13 @@ func NewBot(conn Conn, logger *slog.Logger) *Bot {
 func (b *Bot) Close() error {
 	b.closeOnce.Do(func() { close(b.closed) })
 	return nil
+}
+
+// Closed is closed when Close has been called (or the tick loop is shutting down).
+//
+// @returns a receive-only channel that closes on shutdown.
+func (b *Bot) Closed() <-chan struct{} {
+	return b.closed
 }
 
 // maxPriorityTicks bounds how many due ticks are taken back-to-back before the
@@ -94,6 +105,7 @@ func (b *Bot) StartTickLoop() {
 	defer b.a.Close()
 
 	go b.handlePackets()
+	b.startChatWriter()
 
 	var health tickHealth
 	health.watchStalls(b.logger, b.closed)
@@ -135,13 +147,35 @@ func (b *Bot) StartTickLoop() {
 }
 
 // Execute - executes fn on the Actor.
+//
+// Blocks until the task is queued (or the bot is closed). Callers that must not
+// wait on a saturated queue should use TryExecute.
 func (b *Bot) Execute(fn func(*actor.Actor)) chan struct{} {
 	done := make(chan struct{})
-	b.tasks <- task{
-		fn:   fn,
-		done: done,
+	select {
+	case <-b.closed:
+		close(done)
+		return done
+	case b.tasks <- task{fn: fn, done: done}:
+		return done
 	}
-	return done
+}
+
+// TryExecute queues fn without blocking. Returns false when the task buffer is
+// full or the bot is closed (fn is not run).
+//
+// @param fn Work to run on the tick loop.
+// @returns true when the task was queued.
+func (b *Bot) TryExecute(fn func(*actor.Actor)) bool {
+	done := make(chan struct{})
+	select {
+	case <-b.closed:
+		return false
+	case b.tasks <- task{fn: fn, done: done}:
+		return true
+	default:
+		return false
+	}
 }
 
 // Conn returns network connection.
