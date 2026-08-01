@@ -957,25 +957,37 @@ export function applyTimelapse(opts: ApplyTimelapseOptions): TimelapseResult {
     effectivePlan.forEach((p, i) => {
       const segPath = join(segDir, `seg_${String(i).padStart(3, "0")}.webm`);
       segPaths.push(segPath);
-      // -ss before -i seeks the input; with -t (a duration, unambiguous
-      // regardless of -ss placement) the invocation decodes only its slice.
-      const args = ["-nostdin", "-y", "-loglevel", "error"];
-      args.push("-ss", sec(p.startMs));
-      if (p.endMs !== null) args.push("-t", sec(p.endMs - p.startMs));
-      args.push("-i", videoPath);
       const speed =
-        p.mode === "walk" && factor > 1
-          ? factor
-          : p.mode === "highlight" && highlightFactor > 1
-            ? highlightFactor
-            : p.mode === "idle" && idleFactor > 1
-              ? idleFactor
+        p.mode === "highlight"
+          ? Math.max(1, highlightFactor)
+          : p.mode === "walk"
+            ? Math.max(1, factor)
+            : p.mode === "idle"
+              ? Math.max(1, idleFactor)
               : 1;
-      const pts =
-        speed > 1 ? `setpts=(PTS-STARTPTS)/${speed}` : "setpts=PTS-STARTPTS";
-      // fps=25 (Playwright's recording rate) drops the surplus frames a fast
-      // piece would otherwise carry into the output.
-      args.push("-filter:v", `${pts},fps=25`, "-an");
+      const srcMs =
+        p.endMs !== null
+          ? p.endMs - p.startMs
+          : Math.max(0, durationMs - p.startMs);
+      const expectMs = Math.round(srcMs / speed);
+      // Realtime (highlight / factor-1) pieces: decode-accurate -ss AFTER -i
+      // and no setpts/fps chain. Input-seek + setpts=PTS-STARTPTS,fps=25 on
+      // Playwright webm was collapsing ~128s of highlight into idle-length
+      // crumbs (plan estimated ~155s, output landed ~34s ≈ highlight÷24).
+      const args = ["-nostdin", "-y", "-loglevel", "error"];
+      if (speed <= 1) {
+        args.push("-i", videoPath);
+        args.push("-ss", sec(p.startMs));
+        if (p.endMs !== null) args.push("-t", sec(srcMs));
+      } else {
+        // -ss before -i seeks the input; with -t the invocation decodes only
+        // its slice (keeps walk/idle encodes cheap on long recordings).
+        args.push("-ss", sec(p.startMs));
+        if (p.endMs !== null) args.push("-t", sec(srcMs));
+        args.push("-i", videoPath);
+        args.push("-filter:v", `setpts=(PTS-STARTPTS)/${speed},fps=25`);
+      }
+      args.push("-an");
       // Mirrors Playwright's own vp8 recording settings so quality/size match
       // the recording; realtime deadline keeps the pass well under the
       // recording's own length.
@@ -983,6 +995,17 @@ export function applyTimelapse(opts: ApplyTimelapseOptions): TimelapseResult {
       args.push("-crf", "8", "-b:v", "1M");
       args.push("-deadline", "realtime", "-cpu-used", "8", segPath);
       execFileSync(ff, args, { stdio: ["ignore", "ignore", "pipe"] });
+      const gotMs = probeDurationMs(ff, segPath);
+      if (
+        gotMs !== null &&
+        expectMs >= 1000 &&
+        (gotMs < expectMs * 0.5 || gotMs > expectMs * 1.5)
+      ) {
+        log.warn(
+          `timelapse: piece ${i} mode=${p.mode} speed=${speed} ` +
+            `expected ~${(expectMs / 1000).toFixed(1)}s got ${(gotMs / 1000).toFixed(1)}s`,
+        );
+      }
     });
 
     // concat demuxer + stream copy: every segment shares codec/params, so the
