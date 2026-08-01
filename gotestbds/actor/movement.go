@@ -278,12 +278,10 @@ func (a *Actor) SendMovement() {
 	})
 }
 
-// tickMovement simulates Actor's movement.
-func (a *Actor) tickMovement() {
-	defer a.clearMovement()
-
-	a.SendMovement()
-
+// tickPhysicsOnly runs gravity/collision without sending AuthInput or clearing
+// the walk bitset. Actor.Tick sends movement after navigation so the packet
+// includes this tick's MoveRawInput delta.
+func (a *Actor) tickPhysicsOnly() {
 	// Simulating against a missing OR incomplete column reads air (World.Block),
 	// so gravity walks the bot into the void / into solids that appear later.
 	// Pathfinding already treats incomplete as bedrock (pathSource) — physics
@@ -295,7 +293,6 @@ func (a *Actor) tickMovement() {
 			a.navPhysicsSkipped++
 		}
 		a.SetVelocity(mgl64.Vec3{})
-		a.tick++
 		return
 	}
 	a.physicsSkipStreak = 0
@@ -306,8 +303,6 @@ func (a *Actor) tickMovement() {
 	a.resolveVelocity(physicsTick.Velocity())
 
 	a.onGround = physicsTick.OnGround()
-
-	a.tick++
 }
 
 // chunkLoaded reports whether the chunk the Actor stands in is ready for physics.

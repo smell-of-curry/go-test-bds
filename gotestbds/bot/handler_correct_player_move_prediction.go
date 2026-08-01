@@ -16,10 +16,15 @@ type CorrectPlayerMovePredictionHandler struct{}
 // Handle applies a server movement correction using the same eye-offset
 // convention as PlayerAuthInput / MovePlayer.
 //
-// The old handler treated the wire position as feet. Auth input sends eyes
-// (feet + 1.62); applying that as feet jammed the AABB into ceilings so every
-// MoveRawInput collided to zero displacement → fruitless_stuck with a valid path.
+// Soft corrects are ignored while Navigate owns the client prediction: live
+// showcase (11b3e4a) showed Correct every ~300ms snapping the bot back to the
+// pre-walk pose, so MoveRawInput made same-tick progress but never arrived —
+// NavigateToBlock hit context deadline with zero fruitless. MovePlayer
+// teleports still apply (different packet).
 func (*CorrectPlayerMovePredictionHandler) Handle(p packet.Packet, b *Bot, a *actor.Actor) error {
+	if a.Navigating() {
+		return nil
+	}
 	if b != nil && b.logger != nil {
 		b.logger.Warn("mismatched movement", slog.String("src", "CorrectPlayerMovePrediction"))
 	}

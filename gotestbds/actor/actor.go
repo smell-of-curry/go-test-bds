@@ -301,10 +301,18 @@ func (a *Actor) SetHeldItems(main, off item.Stack) error {
 }
 
 // Tick - simulates client tick.
+//
+// Order: physics first (gravity/collision), then navigation MoveRawInput so
+// walk has the last word on position this tick, then AuthInput carries that
+// walk delta (tickMovement used to SendMovement before nav, so the packet
+// always lagged one tick and looked idle to BDS → Correct spam).
 func (a *Actor) Tick() {
 	a.Handler().HandleTick(a, a.CurrentTick())
-	a.tickMovement()
+	a.tickPhysicsOnly()
 	a.tickNavigating()
+	a.SendMovement()
+	a.clearMovement()
+	a.tick++
 	a.unloadChunks()
 }
 
