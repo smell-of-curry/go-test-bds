@@ -10,8 +10,8 @@ github.com/creack/pty v1.1.9/go.mod h1:oKZEueFk5CKHvIhNR5MUki03XCEU+Q6VDXinZuGJ3
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
-github.com/df-mc/dragonfly v0.11.0 h1:bylZOYzHRuaBxYewToTPa3v1m74aKfG0yd433ZiypfQ=
-github.com/df-mc/dragonfly v0.11.0/go.mod h1:OFJjCz3xfDalVZEtV4lJdbenwKDEAczKHikHN7kVwMc=
+github.com/df-mc/dragonfly v0.11.1 h1:o22uDh6sQsSlrV2ag0BzAT92NDrLR/jZ23kCvMbip6s=
+github.com/df-mc/dragonfly v0.11.1/go.mod h1:CY4J+eo+hvEAAnup7Bnd3/w6zniWc/BB6UFuds7xCBg=
 github.com/df-mc/go-nethernet v1.0.17 h1:3lbw/N+Zy4eU8dUREVMFhq9Xl8qXJsJomuHIwH2VO9Q=
 github.com/df-mc/go-nethernet v1.0.17/go.mod h1:4yrQZMotdkZJvdYnRQr5L8OnokZtSzqJ6EU3dntAaIU=
 github.com/df-mc/go-playfab v1.0.0 h1:6gVukk3aQbJ934GJFdcZJHVIw9lhauK+KHOevbwJA10=
@@ -103,10 +103,10 @@ github.com/restartfu/gophig v0.1.0 h1:MIjY15QqwLiWIl5eHkGE0apJlz0IC3bDJxWtFHHd1s
 github.com/restartfu/gophig v0.1.0/go.mod h1:o2kdXyRLv/Ji8hkmleYHnx0fmrLmn2/OdOYRFzOh13A=
 github.com/rogpeppe/go-internal v1.9.0 h1:73kH8U+JUqXU8lRuOHeVHaa/SZPifC7BkcraZVejAe8=
 github.com/rogpeppe/go-internal v1.9.0/go.mod h1:WtVeX8xhTBvf0smdhujwtBcq4Qrzq/fJaraNFVN+nFs=
-github.com/sandertv/go-raknet v1.15.1-0.20260112202637-beca0b10c217 h1:UZQq2253Q+7co/C9Et62RYPBggzz+L+2yqGlvQhSNM8=
-github.com/sandertv/go-raknet v1.15.1-0.20260112202637-beca0b10c217/go.mod h1:/yysjwfCXm2+2OY8mBazLzcxJ3irnylKCyG3FLgUPVU=
-github.com/sandertv/gophertunnel v1.57.2-0.20260722164704-0a2ecd5633ea h1:smtXqddGtexU6SYybPLyQGMkz+cZSr/y5VKZH9zfqr4=
-github.com/sandertv/gophertunnel v1.57.2-0.20260722164704-0a2ecd5633ea/go.mod h1:Frjuk3g1EEGRYjzyrEMS4j/hDvTcez2STfuRHkRPlNU=
+github.com/sandertv/go-raknet v1.15.2-0.20260705184311-0d1fd09e2cf6 h1:Oj7QsiwWTOLmCpOjjmW0Qwde4BE8F5+Kjz817qzICyk=
+github.com/sandertv/go-raknet v1.15.2-0.20260705184311-0d1fd09e2cf6/go.mod h1:/yysjwfCXm2+2OY8mBazLzcxJ3irnylKCyG3FLgUPVU=
+github.com/sandertv/gophertunnel v1.58.0 h1:j7Q+ujZShOSY0gNTFw6iHepD3yJF1cbTllnK/AtQuw8=
+github.com/sandertv/gophertunnel v1.58.0/go.mod h1:Lc+biKFJEg2zX4yagHK04XnjH53nzS9nrjgQHsi+h+8=
 github.com/segmentio/fasthash v1.0.3 h1:EI9+KE1EwvMLBWwjpRDc+fEM+prwxDYbslddQGtrmhM=
 github.com/segmentio/fasthash v1.0.3/go.mod h1:waKX8l2N8yckOgmSsXJi7x1ZfdKZ4x7KRMzBtS3oedY=
 github.com/stretchr/objx v0.1.0/go.mod h1:HFkY916IF+rwdDfMAkV7OtwuqBVzrE8GR6GFx+wExME=

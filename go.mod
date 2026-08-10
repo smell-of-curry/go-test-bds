@@ -5,11 +5,11 @@ go 1.26.0
 require (
 	github.com/FDUTCH/Pathfinder v0.0.0-20250802000749-2bc6b6bbf97d
 	github.com/FDUTCH/dummy_item_blocks v0.0.0-20251114174505-8e5ffc1c2c7c
-	github.com/df-mc/dragonfly v0.11.0
+	github.com/df-mc/dragonfly v0.11.1
 	github.com/go-gl/mathgl v1.2.0
 	github.com/google/uuid v1.6.0
 	github.com/restartfu/gophig v0.1.0
-	github.com/sandertv/gophertunnel v1.57.2-0.20260722164704-0a2ecd5633ea
+	github.com/sandertv/gophertunnel v1.58.0
 )
 
 require (
@@ -21,13 +21,13 @@ require (
 	github.com/df-mc/goleveldb v1.1.9 // indirect
 	github.com/df-mc/jsonc v1.0.5 // indirect
 	github.com/df-mc/worldupgrader v1.0.21 // indirect
+	github.com/fsnotify/fsnotify v1.6.0 // indirect
 	github.com/go-jose/go-jose/v4 v4.1.4 // indirect
 	github.com/goccy/go-json v0.10.2 // indirect
 	github.com/golang/snappy v0.0.4 // indirect
 	github.com/joho/godotenv v1.5.1 // indirect
 	github.com/klauspost/compress v1.18.4 // indirect
 	github.com/kr/pretty v0.3.1 // indirect
-	github.com/nxadm/tail v1.4.11 // indirect
 	github.com/pelletier/go-toml/v2 v2.0.7 // indirect
 	github.com/pion/datachannel v1.6.0 // indirect
 	github.com/pion/dtls/v3 v3.1.2 // indirect
@@ -45,7 +45,7 @@ require (
 	github.com/pion/transport/v4 v4.0.1 // indirect
 	github.com/pion/turn/v4 v4.1.4 // indirect
 	github.com/pion/webrtc/v4 v4.2.10-0.20260224155637-aa3b95c72dd2 // indirect
-	github.com/sandertv/go-raknet v1.15.1-0.20260112202637-beca0b10c217 // indirect
+	github.com/sandertv/go-raknet v1.15.2-0.20260705184311-0d1fd09e2cf6 // indirect
 	github.com/segmentio/fasthash v1.0.3 // indirect
 	github.com/wlynxg/anet v0.0.5 // indirect
 	golang.org/x/crypto v0.48.0 // indirect
