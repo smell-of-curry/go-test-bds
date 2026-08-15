@@ -35,8 +35,8 @@ func (m *MenuFormRespond) Run(ctx context.Context, b *bot.Bot) error {
 			return f.Ignore()
 		}
 
-		if m.Response > len(buttons)+1 || m.Response < 1 {
-			return fmt.Errorf("invalid button")
+		if m.Response < 1 || m.Response > len(buttons) {
+			return fmt.Errorf("invalid button response %d: valid range is 1..%d (%d buttons)", m.Response, len(buttons), len(buttons))
 		}
 
 		return buttons[m.Response-1].Press()

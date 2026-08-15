@@ -9,6 +9,7 @@ import (
 	"github.com/smell-of-curry/go-test-bds/gotestbds/actor"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/bot"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/instruction"
+	"github.com/smell-of-curry/go-test-bds/gotestbds/viewer"
 )
 
 // Test allows specifying specific settings for testing on the Minecraft server.
@@ -19,7 +20,12 @@ type Test struct {
 	Logger            *slog.Logger
 	Instructions      *instruction.Pull
 	InstructionPrefix string
-	rejoin            bool
+	// DefaultInstructionTimeout overrides DefaultInstructionTimeout when non-zero.
+	DefaultInstructionTimeout time.Duration
+	// Viewer is the optional process-wide state-export hub. Nil means the
+	// viewer is disabled — a run must behave identically either way.
+	Viewer *viewer.Hub
+	rejoin bool
 }
 
 // Run runs test.
@@ -38,9 +44,22 @@ func (t *Test) RunCtx(ctx context.Context) error {
 	if t.Instructions == nil {
 		t.Instructions = instruction.DefaultPull(nil)
 	}
+	if t.Viewer != nil {
+		instruction.RegisterViewer(t.Instructions, t.Viewer)
+	}
 
 	if t.InstructionPrefix == "" {
 		t.InstructionPrefix = DefaultInstructionPrefix
+	}
+
+	// Register the stream before dial/spawn. The capture harness starts as soon
+	// as BDS `list` shows the bot, which is before pack ingest finishes —
+	// delaying Register until NewTestingHandler raced the harness into a
+	// /stream 404 (unknown bot) and killed capture for the whole run.
+	botName := t.Dialer.IdentityData.DisplayName
+	if t.Viewer != nil && botName != "" {
+		t.Viewer.Register(botName)
+		defer t.Viewer.Unregister(botName)
 	}
 
 	t.Logger.Debug("dialing", "address", t.RemoteAddress)
@@ -56,6 +75,17 @@ func (t *Test) RunCtx(ctx context.Context) error {
 	}
 	t.Logger.Debug("spawned", "address", t.RemoteAddress)
 
+	// Ingest the server's resource pack stack into the viewer asset manager.
+	// DownloadResourcePack already gated acceptance; ResourcePacks() holds
+	// what arrived, and the stack order was captured via PacketFunc.
+	if t.Viewer != nil {
+		if mgr := t.Viewer.Assets(); mgr != nil {
+			if err := mgr.IngestServerPacks(conn.ResourcePacks()); err != nil {
+				t.Logger.Error("ingest resource packs", "error", err)
+			}
+		}
+	}
+
 	b := bot.NewBot(conn, t.Logger.With("src", "bot"))
 	h := NewTestingHandler(b, t)
 	b.Execute(func(a *actor.Actor) {
@@ -64,7 +94,22 @@ func (t *Test) RunCtx(ctx context.Context) error {
 
 	// without this delay BDS won't let Actor move.
 	time.Sleep(time.Second * 2)
+
+	// The tick loop only stops when the bot is closed, so cancellation has to
+	// close it: without this the bot ignored SIGTERM, outlived whatever spawned
+	// it, and left the server holding a session that refused the next run's
+	// login as a duplicate identity.
+	stopped := make(chan struct{})
+	go func() {
+		select {
+		case <-ctx.Done():
+			_ = b.Close()
+		case <-stopped:
+		}
+	}()
+
 	b.StartTickLoop()
+	close(stopped)
 
 	if t.rejoin {
 		// rejoining...

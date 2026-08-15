@@ -1,0 +1,19 @@
+{
+  "format_version": "1.10.0",
+  "minecraft:client_entity": {
+    "description": {
+      "identifier": "test:blocky",
+      "materials": {
+        "default": "entity_alphatest"
+      },
+      "textures": {
+        "default": "textures/entity/blocky",
+        "alt": "textures/entity/blocky_alt"
+      },
+      "geometry": {
+        "default": "geometry.test.blocky"
+      },
+      "render_controllers": ["controller.render.blocky"]
+    }
+  }
+}

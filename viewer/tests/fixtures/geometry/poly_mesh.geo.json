@@ -1,0 +1,42 @@
+{
+  "format_version": "1.21.0",
+  "minecraft:geometry": [
+    {
+      "description": {
+        "identifier": "geometry.test.poly_mesh",
+        "texture_width": 16,
+        "texture_height": 16
+      },
+      "bones": [
+        {
+          "name": "body",
+          "pivot": [0, 0, 0],
+          "poly_mesh": {
+            "normalized_uvs": false,
+            "positions": [
+              [0, 0, 0],
+              [16, 0, 0],
+              [16, 16, 0],
+              [0, 16, 0]
+            ],
+            "normals": [[0, 0, -1]],
+            "uvs": [
+              [0, 16],
+              [16, 16],
+              [16, 0],
+              [0, 0]
+            ],
+            "polys": [
+              [
+                [0, 0, 0],
+                [1, 0, 1],
+                [2, 0, 2],
+                [3, 0, 3]
+              ]
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -2,7 +2,6 @@ package bot
 
 import (
 	"github.com/df-mc/dragonfly/server/block/cube"
-	"github.com/df-mc/dragonfly/server/world"
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/actor"
@@ -15,8 +14,11 @@ type UpdateBlockHandler struct{}
 func (*UpdateBlockHandler) Handle(p packet.Packet, b *Bot, a *actor.Actor) error {
 	updateBlock := p.(*packet.UpdateBlock)
 
-	bl, _ := world.BlockByRuntimeID(updateBlock.NewBlockRuntimeID)
-	a.World().SetBlockOnTheLayer(blockPosToCubePos(updateBlock.Position), bl, updateBlock.Layer)
+	a.World().SetBlockRuntimeID(
+		blockPosToCubePos(updateBlock.Position),
+		updateBlock.NewBlockRuntimeID,
+		updateBlock.Layer,
+	)
 	return nil
 }
 

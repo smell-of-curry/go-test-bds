@@ -2,3 +2,20 @@ LogLevel = "warn" # debug, info, warn, error, fatal
 
 [Network]
 ServerAddress = "127.0.0.1:19132" # The address of the server to connect to
+
+[Bots]
+Name = "TestBot"
+Count = 1
+
+[Viewer]
+Enabled = false
+Address = "127.0.0.1:24680"
+Radius = 4
+SectionRadius = 4
+ArtifactDir = "artifacts"
+AppDir = ""
+CacheDir = ""                          # default: <ArtifactDir>/.cache
+BaselineTag = "v1.26.30.5"             # pinned Mojang/bedrock-samples tag
+AcceptServerPacks = true               # download server resource packs (viewer only)
+Offline = false                        # use cache only; never fetch baseline/packs
+MemoryPerformanceTier = 5              # subpack selection tier (1–5)

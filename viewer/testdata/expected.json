@@ -1,0 +1,23 @@
+{
+  "blockInstanceCount": 10,
+  "sectionMeshCount": 1,
+  "columnCount": 1,
+  "entityCount": 1,
+  "tick": 200,
+  "dimension": 1,
+  "schemaOk": true,
+  "resyncCount": 0,
+  "frames": [
+    "hello",
+    "keyframe",
+    "delta",
+    "delta",
+    "delta",
+    "delta",
+    "delta",
+    "delta",
+    "mark",
+    "capture",
+    "delta"
+  ]
+}

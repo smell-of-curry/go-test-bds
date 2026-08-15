@@ -1,0 +1,30 @@
+{
+  "format_version": "1.17.30",
+  "animation_controllers": {
+    "controller.animation.test.blocky.move": {
+      "initial_state": "idle",
+      "states": {
+        "idle": {
+          "animations": ["nod"],
+          "transitions": [
+            { "active": "variable.mode == 1" }
+          ],
+          "blend_transition": 0.1
+        },
+        "active": {
+          "animations": ["raise"],
+          "transitions": [
+            { "idle": "variable.mode == 0" },
+            { "done": "query.all_animations_finished" }
+          ]
+        },
+        "done": {
+          "animations": ["hold"],
+          "transitions": [
+            { "idle": "variable.mode == 0" }
+          ]
+        }
+      }
+    }
+  }
+}

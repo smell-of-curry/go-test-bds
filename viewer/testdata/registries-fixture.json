@@ -1,0 +1,60 @@
+{
+  "blocks": [
+    {
+      "name": "fixture:custom_crate",
+      "molangVersion": 10,
+      "properties": [{ "name": "fixture:open", "enum": [false, true] }],
+      "components": {
+        "geometry": "geometry.fixture.custom_crate",
+        "materialInstances": {
+          "*": {
+            "texture": "palette_right_texture",
+            "renderMethod": "opaque",
+            "faceDimming": true,
+            "ambientOcclusion": true
+          }
+        },
+        "transformation": {
+          "rx": 0,
+          "ry": 90,
+          "rz": 0,
+          "sx": 1,
+          "sy": 1,
+          "sz": 1,
+          "tx": 0,
+          "ty": 0,
+          "tz": 0
+        },
+        "lightEmission": 0.4
+      },
+      "permutations": [
+        {
+          "condition": "query.block_state('fixture:open') == true",
+          "components": { "geometry": "geometry.fixture.custom_crate_open" }
+        }
+      ]
+    },
+    {
+      "name": "fixture:bare_unit",
+      "components": {
+        "unitCube": true
+      }
+    },
+    {
+      "name": "fixture:cutout_leaves",
+      "components": {
+        "geometry": "geometry.fixture.leaves",
+        "materialInstances": {
+          "*": {
+            "texture": "palette_right_texture",
+            "renderMethod": "alpha_test",
+            "faceDimming": false,
+            "ambientOcclusion": true
+          }
+        }
+      }
+    }
+  ],
+  "items": [],
+  "actors": []
+}

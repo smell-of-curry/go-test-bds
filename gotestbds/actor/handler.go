@@ -43,8 +43,9 @@ type Handler interface {
 	HandleUseItemOnEntity(ctx *Context, item item.Stack, ent world.Entity)
 	// HandleReleaseItem ...
 	HandleReleaseItem(ctx *Context, item item.Stack)
-	// HandleReceiveMessage ...
-	HandleReceiveMessage(actor *Actor, msg string)
+	// HandleReceiveMessage handles a chat/system/translation message.
+	// parameters is packet.Text.Parameters (nil/empty for ordinary chat).
+	HandleReceiveMessage(actor *Actor, msg string, parameters []string)
 	// HandleReceiveForm handles Actor receiving Form.
 	// If the form was not used and the ctx is not canceled, then the form will be ignored.
 	HandleReceiveForm(ctx *Context, form *Form)
@@ -59,6 +60,9 @@ type Handler interface {
 	HandleStopNavigation(actor *Actor)
 	// HandleCommandOutput ...
 	HandleCommandOutput(actor *Actor, messages []protocol.CommandOutputMessage)
+	// HandleChangeDimension is called after the world has flushed the leaving
+	// dimension's columns and switched to the destination dimension.
+	HandleChangeDimension(a *Actor, from, to int32)
 }
 
 var _ Handler = NopHandler{}
@@ -79,10 +83,11 @@ func (NopHandler) HandleUseItem(ctx *Context, item item.Stack)                  
 func (NopHandler) HandleUseItemOnBlock(ctx *Context, item item.Stack, pos cube.Pos)             {}
 func (NopHandler) HandleUseItemOnEntity(ctx *Context, item item.Stack, ent world.Entity)        {}
 func (NopHandler) HandleReleaseItem(ctx *Context, item item.Stack)                              {}
-func (NopHandler) HandleReceiveMessage(actor *Actor, msg string)                                {}
+func (NopHandler) HandleReceiveMessage(actor *Actor, msg string, parameters []string)           {}
 func (NopHandler) HandleReceiveForm(ctx *Context, form *Form)                                   {}
 func (NopHandler) HandleReceiveSign(actor *Actor, sign *Sign)                                   {}
 func (NopHandler) HandleReceiveDialogue(ctx *Context, dialogue *Dialogue)                       {}
 func (NopHandler) HandleReachTarget(actor *Actor)                                               {}
 func (NopHandler) HandleStopNavigation(actor *Actor)                                            {}
 func (h NopHandler) HandleCommandOutput(actor *Actor, messages []protocol.CommandOutputMessage) {}
+func (NopHandler) HandleChangeDimension(a *Actor, from, to int32)                               {}

@@ -3,6 +3,8 @@ package instruction
 import (
 	"encoding/json"
 	"fmt"
+
+	"github.com/smell-of-curry/go-test-bds/gotestbds/viewer"
 )
 
 // Pull stores all instructions.
@@ -32,7 +34,11 @@ func (pull *Pull) UnmarshalJSON(data []byte) error {
 	if !ok {
 		return fmt.Errorf("unregistered instruction %v", definition.Action)
 	}
-	err := json.Unmarshal(definition.Parameters, instruction)
+	params := definition.Parameters
+	if len(params) == 0 {
+		params = json.RawMessage("{}")
+	}
+	err := json.Unmarshal(params, instruction)
 	if err != nil {
 		return err
 	}
@@ -64,6 +70,23 @@ func (pull *Pull) Decode(msg string) (Instruction, error) {
 		return nil, err
 	}
 	return pull.instruction, nil
+}
+
+// DecodeAction builds an Instruction from an action name and raw parameters JSON.
+// A nil or empty params value is treated as an empty object.
+func (pull *Pull) DecodeAction(action string, params json.RawMessage) (Instruction, error) {
+	instruction, ok := pull.Instruction(action)
+	if !ok {
+		return nil, fmt.Errorf("unregistered instruction %v", action)
+	}
+	if len(params) == 0 {
+		params = json.RawMessage("{}")
+	}
+	if err := json.Unmarshal(params, instruction); err != nil {
+		return nil, err
+	}
+	pull.instruction = instruction
+	return instruction, nil
 }
 
 // DefaultPull returns new instance of default Pull.
@@ -106,7 +129,42 @@ func DefaultPull(callbacker Callbacker) *Pull {
 	pull.Register(create[ToggleCrafterSlot]())
 	pull.Register(create[InventoryAction]())
 	pull.Register(create[DialogueResponse]())
+	pull.Register(create[GetState]())
+	pull.Register(create[GetInventory]())
+	pull.Register(create[GetForm]())
+	pull.Register(create[GetBlock]())
+	pull.Register(create[GetNearbyEntities]())
+	pull.Register(create[GetMessages]())
+	pull.Register(create[WaitForForm]())
+	pull.Register(create[WaitForMessage]())
+	pull.Register(create[ClickFormButton]())
+	// Registered hubless so a suite that hovers before clicking still works
+	// against a bot with no viewer configured (validate + silent no-op);
+	// RegisterViewer re-registers it with the hub attached.
+	pull.Register(create[HoverFormButton]())
 	return pull
+}
+
+// RegisterViewer registers the viewer instructions against hub.
+//
+// Call from Test.RunCtx when a Hub is configured. DefaultPull's signature stays
+// unchanged for external consumers; these actions are optional extras.
+func RegisterViewer(pull *Pull, hub *viewer.Hub) {
+	if pull == nil || hub == nil {
+		return
+	}
+	pull.Register(func() Instruction {
+		return &Screenshot{hub: hub}
+	})
+	pull.Register(func() Instruction {
+		return &ViewerMark{hub: hub}
+	})
+	pull.Register(func() Instruction {
+		return &PullArtifacts{hub: hub}
+	})
+	pull.Register(func() Instruction {
+		return &HoverFormButton{hub: hub}
+	})
 }
 
 // create creates new instance of the Instruction.

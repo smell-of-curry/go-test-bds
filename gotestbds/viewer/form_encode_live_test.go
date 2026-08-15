@@ -1,0 +1,325 @@
+package viewer
+
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/smell-of-curry/go-test-bds/gotestbds/actor"
+	"github.com/smell-of-curry/go-test-bds/gotestbds/assets"
+)
+
+// keepFormHandler cancels the receive context so LastForm keeps the form
+// (same path TestingHandler uses for viewer capture).
+type keepFormHandler struct {
+	actor.NopHandler
+}
+
+func (keepFormHandler) HandleReceiveForm(ctx *actor.Context, _ *actor.Form) {
+	ctx.Cancel()
+}
+
+func receiveForm(t *testing.T, a *actor.Actor, f *actor.Form) {
+	t.Helper()
+	a.Handle(keepFormHandler{})
+	a.ReceiveForm(f)
+	if _, ok := a.LastForm(); !ok {
+		t.Fatal("LastForm empty after keepFormHandler")
+	}
+}
+
+// Live BEH battle move button shape (BattleUtils.addMoveButton): first text
+// part carries the b:N_ padded encoding; later parts are translate+with for
+// the hover description. Actor.Text keeps the raw JSON when "with" is present.
+func TestEncodeUIFormButtonsPreserveBattleMovePrefix(t *testing.T) {
+	moveText := `{"rawtext":[{"text":"b:1_` + "normal" +
+		strings.Repeat("_", 24) + "\u00a0." + "growl" + strings.Repeat("_", 25) +
+		"\u00a040/40" + strings.Repeat("_", 25) + `"},` +
+		`{"text":"§l"},{"translate":"showdown.moves.growl.name"},` +
+		`{"text":"§r\n"},{"translate":"forms.battle.moveButton.label.accuracy","with":["100"]},` +
+		`{"text":"\n"},{"translate":"showdown.moves.growl.shortDesc"}]}`
+
+	payload := map[string]any{
+		"type":    "form",
+		"title":   "§b§a§t§l§e§s§m",
+		"content": "Turn 1",
+		"buttons": []any{
+			map[string]any{
+				"text": json.RawMessage(moveText),
+				"image": map[string]string{
+					"type": "path",
+					"data": "t__20",
+				},
+			},
+			map[string]any{
+				"text": "battleButton:bagBag",
+				"image": map[string]string{
+					"type": "path",
+					"data": "t",
+				},
+			},
+		},
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Re-marshal with text as embedded JSON object (not a string).
+	var wire map[string]any
+	if err := json.Unmarshal(raw, &wire); err != nil {
+		t.Fatal(err)
+	}
+	buttons := wire["buttons"].([]any)
+	b0 := buttons[0].(map[string]any)
+	var moveObj any
+	if err := json.Unmarshal([]byte(moveText), &moveObj); err != nil {
+		t.Fatal(err)
+	}
+	b0["text"] = moveObj
+	raw, err = json.Marshal(wire)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	f, err := actor.NewForm(raw, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := testActor(t, "FormBot")
+	receiveForm(t, a, f)
+
+	ui := newEncoder("FormBot", 4, 4).encodeUI(a)
+	if ui.Form == nil {
+		t.Fatal("form missing")
+	}
+	if len(ui.Form.Buttons) != 2 {
+		t.Fatalf("buttons=%d want 2; buttons=%v", len(ui.Form.Buttons), ui.Form.Buttons)
+	}
+	if !strings.Contains(ui.Form.Buttons[0], "b:1_") {
+		t.Fatalf("move button lost b:1_ prefix: %q", ui.Form.Buttons[0])
+	}
+	if ui.Form.ButtonImages == nil || ui.Form.ButtonImages[0] != "t__20" {
+		t.Fatalf("buttonImages=%v", ui.Form.ButtonImages)
+	}
+	t.Logf("move button wire text (%d chars): %q", len(ui.Form.Buttons[0]), ui.Form.Buttons[0])
+}
+
+// Live move buttons carry translate keys in the hover/rawtext tail. With a
+// pack lang table installed, flattenRawtext must resolve them (Growl) while
+// keeping the b:N_ prefix the JSON UI pack parses for the on-button label.
+func TestEncodeUIFormButtonsResolveMoveTranslateWithLang(t *testing.T) {
+	dir := t.TempDir()
+	writeMoveLangPack(t, dir)
+	st, err := assets.BuildStack([]assets.StackEntry{{ID: "moves", Dir: dir}}, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { activeLang.Store(nil) })
+	installLangTable(st)
+
+	moveText := `{"rawtext":[{"text":"b:1_` + "normal" +
+		strings.Repeat("_", 24) + "\u00a0." + "growl" + strings.Repeat("_", 25) +
+		"\u00a040/40" + strings.Repeat("_", 25) + `"},` +
+		`{"text":"§l"},{"translate":"showdown.moves.growl.name"},` +
+		`{"text":"§r\n"},{"translate":"showdown.moves.growl.shortDesc"}]}`
+
+	var moveObj any
+	if err := json.Unmarshal([]byte(moveText), &moveObj); err != nil {
+		t.Fatal(err)
+	}
+	payload := map[string]any{
+		"type":    "form",
+		"title":   "§b§a§t§l§e§s§m",
+		"content": "Turn 1",
+		"buttons": []any{
+			map[string]any{
+				"text":  moveObj,
+				"image": map[string]string{"type": "path", "data": "t__20"},
+			},
+		},
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	f, err := actor.NewForm(raw, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := testActor(t, "FormBot")
+	receiveForm(t, a, f)
+	ui := newEncoder("FormBot", 4, 4).encodeUI(a)
+	if ui.Form == nil || len(ui.Form.Buttons) != 1 {
+		t.Fatalf("form=%v", ui.Form)
+	}
+	got := ui.Form.Buttons[0]
+	if !strings.Contains(got, "b:1_") {
+		t.Fatalf("lost b:1_ prefix: %q", got)
+	}
+	if !strings.Contains(got, "Growl") {
+		t.Fatalf("translate key not resolved via lang table: %q", got)
+	}
+	if strings.Contains(got, "showdown.moves.growl.name") {
+		t.Fatalf("raw lang key leaked into button text: %q", got)
+	}
+}
+
+// Live BEH actor plates (PlayerActor): padEnd(50) + G0.0⠀pct%%. Pack slices
+// details at %.58s — encode must realign so the SSE wire health starts at 58.
+//
+// JS padEnd counts UTF-16 code units (§ = 1); Go string len is bytes (§ = 2
+// in UTF-8). Build the fixture with explicit underscores so health sits at
+// byte index matching the JS-length-50 layout the live wire uses after decode.
+func TestEncodeUIFormButtonsActorPlatePadTo58(t *testing.T) {
+	// After JSON round-trip, § is one Go rune; use runes for pad length.
+	detailsRunes := []rune("§0§a§1§r§l§fMunchlax§r\n Lv.5")
+	for len(detailsRunes) < 50 {
+		detailsRunes = append(detailsRunes, '_')
+	}
+	button := string(detailsRunes) + "G0.0⠀100%%"
+	if len([]rune(string(detailsRunes))) != 50 {
+		t.Fatalf("fixture details runes=%d want 50", len(detailsRunes))
+	}
+
+	payload := map[string]any{
+		"type":    "form",
+		"title":   "§b§a§t§l§e§s§m",
+		"content": "Turn 1",
+		"buttons": []any{
+			map[string]any{
+				"text": button,
+				"image": map[string]string{
+					"type": "path",
+					"data": "textures/sprites/default/munchlax",
+				},
+			},
+		},
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := actor.NewForm(raw, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := testActor(t, "FormBot")
+	receiveForm(t, a, f)
+	ui := newEncoder("FormBot", 4, 4).encodeUI(a)
+	if ui.Form == nil || len(ui.Form.Buttons) != 1 {
+		t.Fatalf("form=%v", ui.Form)
+	}
+	got := ui.Form.Buttons[0]
+	gotRunes := []rune(got)
+	t.Logf("actor plate wire text (%d runes): %q", len(gotRunes), got)
+
+	healthAt := -1
+	for i := 0; i+3 < len(gotRunes); i++ {
+		if gotRunes[i] == 'G' && gotRunes[i+1] == '0' && gotRunes[i+2] == '.' && gotRunes[i+3] == '0' {
+			healthAt = i
+			break
+		}
+	}
+	if healthAt != 58 {
+		t.Fatalf("healthAt=%d want 58; wire=%q", healthAt, got)
+	}
+	if strings.Contains(string(gotRunes[:58]), "G0.0") {
+		t.Fatalf("details slice still contains health: %q", string(gotRunes[:58]))
+	}
+}
+
+func writeMoveLangPack(t *testing.T, dir string) {
+	t.Helper()
+	manifest := `{
+  "format_version": 2,
+  "header": {
+    "name": "Move Lang",
+    "description": "test",
+    "uuid": "44444444-4444-4444-4444-444444444444",
+    "version": [1, 0, 0],
+    "min_engine_version": [1, 20, 0]
+  },
+  "modules": [
+    {"type": "resources", "uuid": "44444444-4444-4444-4444-444444444445", "version": [1, 0, 0]}
+  ]
+}`
+	if err := os.WriteFile(filepath.Join(dir, "manifest.json"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "texts"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	lang := "showdown.moves.growl.name=Growl\nshowdown.moves.growl.shortDesc=Lowers Attack.\n"
+	if err := os.WriteFile(filepath.Join(dir, "texts", "en_US.lang"), []byte(lang), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestEncodeUIFormButtonsStarterPickerShape(t *testing.T) {
+	buttons := make([]any, 0, 36)
+	for i := 0; i < 30; i++ {
+		buttons = append(buttons, map[string]any{
+			"text": "§lMon" + string(rune('A'+i%26)) + "§r\n§7No. 00" + string(rune('1'+i%9)),
+			"image": map[string]string{
+				"type": "path",
+				"data": "textures/sprites/bulbasaur",
+			},
+		})
+	}
+	// Fillers + nav row (page 0: no back).
+	for i := 0; i < 5; i++ {
+		buttons = append(buttons, map[string]any{"text": ""})
+	}
+	buttons = append(buttons, map[string]any{
+		"text": map[string]any{
+			"rawtext": []any{map[string]string{"translate": "common.nextPage"}},
+		},
+		"image": map[string]string{"type": "path", "data": "textures/ui/arrow_right"},
+	})
+
+	payload := map[string]any{
+		"type":    "form",
+		"title":   "§p§o§k§e§1",
+		"content": "",
+		"buttons": buttons,
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := actor.NewForm(raw, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := testActor(t, "FormBot")
+	receiveForm(t, a, f)
+	ui := newEncoder("FormBot", 4, 4).encodeUI(a)
+	if ui.Form == nil {
+		t.Fatal("missing form")
+	}
+	if len(ui.Form.Buttons) != 36 {
+		t.Fatalf("buttons=%d want 36", len(ui.Form.Buttons))
+	}
+	if ui.Form.Title != "§p§o§k§e§1" {
+		t.Fatalf("title=%q", ui.Form.Title)
+	}
+	empty := 0
+	for _, b := range ui.Form.Buttons {
+		if b == "" {
+			empty++
+		}
+	}
+	if empty < 4 {
+		t.Fatalf("expected filler empties, got empty=%d sample=%q", empty, ui.Form.Buttons[30])
+	}
+	if got := ui.Form.Buttons[35]; !strings.Contains(got, "common.nextPage") && got != "common.nextPage" {
+		t.Logf("next page button=%q", got)
+	}
+	if len(ui.Form.ButtonImages) != 36 {
+		t.Fatalf("images=%d want 36", len(ui.Form.ButtonImages))
+	}
+}

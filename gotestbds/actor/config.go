@@ -1,13 +1,14 @@
 package actor
 
 import (
-	_ "unsafe"
-
+	"github.com/df-mc/dragonfly/server/block/cube"
+	dfworld "github.com/df-mc/dragonfly/server/world"
 	"github.com/google/uuid"
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/entity"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/inventory"
+	"github.com/smell-of-curry/go-test-bds/gotestbds/mcmath"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/mcmath/physics"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/world"
 )
@@ -33,9 +34,11 @@ func (c Config) New() (actor *Actor) {
 		EntityRuntimeID: gameData.EntityRuntimeID,
 		Position:        gameData.PlayerPosition,
 		GameType:        gameData.PlayerGameMode,
+		AbilityData:     protocol.AbilityData{EntityUniqueID: gameData.EntityUniqueID},
 	})
 
-	w := world.NewWorld()
+	w := world.NewWorld(gameData.UseBlockNetworkIDHashes)
+	w.SetDimension(gameData.Dimension)
 	w.AddEntity(pl)
 
 	data := actorData{
@@ -45,6 +48,9 @@ func (c Config) New() (actor *Actor) {
 		ui:            c.Ui,
 		effectManager: entity.NewEffectManager(),
 		chunkRadius:   int(gameData.ChunkRadius),
+		// Until the first NetworkChunkPublisherUpdate, unload against spawn —
+		// leaving this at {0,0,0} would prune a spawn far from the origin.
+		loadingCenter: cube.PosFromVec3(mcmath.Vec32To64(gameData.PlayerPosition)),
 	}
 
 	data.movementBitset = protocol.NewBitset(packet.PlayerAuthInputBitsetSize)
@@ -55,7 +61,9 @@ func (c Config) New() (actor *Actor) {
 		DragBeforeGravity: true,
 	}
 
-	finaliseBlockRegistry()
+	// The bot never constructs a dragonfly server/world, so nothing else
+	// finalizes the block registry for us. Chunk decoding needs it finalized.
+	dfworld.DefaultBlockRegistry.Finalize()
 
 	actor = &Actor{
 		conn:      c.Conn,
@@ -68,6 +76,3 @@ func (c Config) New() (actor *Actor) {
 
 	return actor
 }
-
-//go:linkname finaliseBlockRegistry github.com/df-mc/dragonfly/server/world.finaliseBlockRegistry
-func finaliseBlockRegistry()

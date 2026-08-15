@@ -31,6 +31,8 @@ type Entity interface {
 	SetHeldItems(main, offHand item.Stack) error
 	// RuntimeID returns Entity runtime id.
 	RuntimeID() uint64
+	// UniqueID returns Entity unique id used by RemoveActor and similar.
+	UniqueID() int64
 	// Move moves Entity.
 	Move(pos mgl64.Vec3, rot cube.Rotation)
 	// Type returns Entity type.

@@ -24,6 +24,7 @@ import (
 	"github.com/smell-of-curry/go-test-bds/gotestbds/entity"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/inventory"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/mcmath"
+	"github.com/smell-of-curry/go-test-bds/gotestbds/wire"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/world"
 )
 
@@ -37,6 +38,10 @@ type Actor struct {
 	actorData
 
 	conn Conn
+
+	// wireReg is nil until a viewer asks for join-sequence definitions.
+	// Written only on the bot goroutine.
+	wireReg *wire.Registries
 }
 
 // Handler returns Actor's handler.
@@ -210,27 +215,23 @@ func (a *Actor) StartBreakingBlock(pos cube.Pos) (time.Duration, error) {
 
 // BreakTime returns break time of the block at position passed.
 func (a *Actor) BreakTime(pos cube.Pos) time.Duration {
-	held := a.HeldItem()
-	breakTime := block.BreakDuration(a.world.Block(pos), held)
-	if !a.OnGround() {
-		breakTime *= 5
-	}
-
-	if _, ok := a.Armour().Helmet().Enchantment(enchantment.AquaAffinity); a.InsideOfWater() && !ok {
-		breakTime *= 5
+	_, aquaAffinity := a.Armour().Helmet().Enchantment(enchantment.AquaAffinity)
+	ctx := block.BreakContext{
+		Airborne:     !a.OnGround(),
+		Underwater:   a.InsideOfWater(),
+		AquaAffinity: aquaAffinity,
 	}
 	for e := range a.Effects() {
-		lvl := e.Level()
 		switch e.Type() {
 		case effect.Haste:
-			breakTime = time.Duration(float64(breakTime) * effect.Haste.Multiplier(lvl))
+			ctx.HasteLevel = e.Level()
 		case effect.MiningFatigue:
-			breakTime = time.Duration(float64(breakTime) * effect.MiningFatigue.Multiplier(lvl))
+			ctx.MiningFatigueLevel = e.Level()
 		case effect.ConduitPower:
-			breakTime = time.Duration(float64(breakTime) * effect.ConduitPower.Multiplier(lvl))
+			ctx.ConduitPowerLevel = e.Level()
 		}
 	}
-	return breakTime
+	return block.BreakDuration(a.world.Block(pos), a.HeldItem(), ctx)
 }
 
 // InsideOfWater returns whether the Actor is inside the water.
@@ -300,10 +301,18 @@ func (a *Actor) SetHeldItems(main, off item.Stack) error {
 }
 
 // Tick - simulates client tick.
+//
+// Order: physics first (gravity/collision), then navigation MoveRawInput so
+// walk has the last word on position this tick, then AuthInput carries that
+// walk delta (tickMovement used to SendMovement before nav, so the packet
+// always lagged one tick and looked idle to BDS → Correct spam).
 func (a *Actor) Tick() {
 	a.Handler().HandleTick(a, a.CurrentTick())
-	a.tickMovement()
+	a.tickPhysicsOnly()
 	a.tickNavigating()
+	a.SendMovement()
+	a.clearMovement()
+	a.tick++
 	a.unloadChunks()
 }
 
@@ -465,8 +474,11 @@ func (a *Actor) Chat(message string) {
 }
 
 // ReceiveMessage makes Actor receive message.
-func (a *Actor) ReceiveMessage(message string) {
-	a.Handler().HandleReceiveMessage(a, message)
+//
+// @param message The packet.Text Message field (plain text or translate key).
+// @param parameters Optional TextTypeTranslation/Tip/Popup Parameters.
+func (a *Actor) ReceiveMessage(message string, parameters ...string) {
+	a.Handler().HandleReceiveMessage(a, message, parameters)
 }
 
 // ReceiveForm makes Actor receive Form.
@@ -592,7 +604,7 @@ func (a *Actor) ReleaseItem() error {
 	}
 	heldItem, _ := a.Inventory().ItemInstance(a.heldSlot)
 	action := &protocol.ReleaseItemTransactionData{
-		ActionType:   uint32(actionType),
+		ActionType:   int32(actionType),
 		HotBarSlot:   int32(a.heldSlot),
 		HeldItem:     heldItem,
 		HeadPosition: mcmath.Vec64To32(a.EyePos()),
@@ -659,6 +671,25 @@ func (a *Actor) Health() float64 {
 	return a.Attributes().Health()
 }
 
+// MaxHealth returns Actor's maximum health from the last attribute update.
+func (a *Actor) MaxHealth() float64 {
+	return a.Attributes().MaxHealth()
+}
+
+// XUID returns the Actor's Xbox Live user ID from the connection identity.
+func (a *Actor) XUID() string {
+	return a.conn.IdentityData().XUID
+}
+
+// Dimension returns the dimension the actor's world is currently tracking.
+//
+// Seeded from GameData at construction; updated when ChangeDimension arrives.
+// Reading GameData forever would leave the actor in the spawn dimension after a
+// portal, and every column would share one coordinate space with the overworld.
+func (a *Actor) Dimension() int32 {
+	return a.world.Dimension()
+}
+
 // CanSprint returns whether the Actor is able to sprint.
 func (a *Actor) CanSprint() bool {
 	return a.Attributes().Food() > 6
@@ -676,9 +707,27 @@ func (a *Actor) RunCommand(cmd string) {
 	})
 }
 
+// AckDimensionChange tells the server the client finished the dimension
+// loading screen so chunk streaming / post-transfer teleports can proceed.
+//
+// @returns any WritePacket error from the connection.
+func (a *Actor) AckDimensionChange() error {
+	return a.conn.WritePacket(&packet.PlayerAction{
+		EntityRuntimeID: a.RuntimeID(),
+		ActionType:      protocol.PlayerActionDimensionChangeDone,
+	})
+}
+
 // SetChunkLoadCenter sets chunk loading center.
 func (a *Actor) SetChunkLoadCenter(pos cube.Pos) {
 	a.loadingCenter = pos
+}
+
+// ChunkLoadCenter returns the position columns are kept around.
+//
+// @returns the block position the unload window is centred on.
+func (a *Actor) ChunkLoadCenter() cube.Pos {
+	return a.loadingCenter
 }
 
 // RequestRenderDistance requests new chunk radius.
@@ -851,13 +900,18 @@ func (a *Actor) EditBook(action BookAction, slot int) error {
 	if err != nil {
 		return err
 	}
-	pk.InventorySlot = byte(slot)
+	pk.InventorySlot = int32(slot)
 	return a.conn.WritePacket(pk)
 }
 
-// OpenContainer ...
+// OpenContainer records a container the server just opened, closing whichever
+// one was open before it.
+//
+// @param container The newly opened container.
 func (a *Actor) OpenContainer(container *Container) {
-	if a.container != nil || !a.container.closed {
+	// `||` here read as "no container, or one that is still open" and then
+	// dereferenced the nil: opening the first container of a session panicked.
+	if a.container != nil && !a.container.closed {
 		_ = a.container.Close()
 	}
 	a.container = container
@@ -865,7 +919,7 @@ func (a *Actor) OpenContainer(container *Container) {
 
 // CurrentContainer returns current opened container.
 func (a *Actor) CurrentContainer() (*Container, bool) {
-	if a.container != nil || !a.container.closed {
+	if a.container == nil || a.container.closed {
 		return nil, false
 	}
 	return a.container, true

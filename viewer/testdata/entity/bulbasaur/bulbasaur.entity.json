@@ -1,0 +1,83 @@
+{
+	"format_version": "1.18.3",
+	"minecraft:client_entity": {
+		"description": {
+			"identifier": "pokemon:bulbasaur",
+			"materials": {
+				"default": "entity_emissive_alpha",
+				"aura": "charged_creeper"
+			},
+			"textures": {
+				"evo_aura": "textures/entity/evolving",
+				"default": "textures/entity/pokemon/bulbasaur/bulbasaur.png",
+				"shiny_default": "textures/entity/pokemon/bulbasaur/shiny_bulbasaur.png"
+			},
+			"particle_effects": {
+				"landing_puff": "pokeb:landing_puff",
+				"shiny_sparkle": "pokeb:shiny_sparkle"
+			},
+			"scripts": {
+				"scale": "q.property('pokeb:scale')",
+				"initialize": [
+					"v.blink_chance = 0.01;",
+					"v.move_threshold = 0.01;"
+				],
+				"pre_animation": [
+					"v.skin_index = query.property('pokeb:skin_index');",
+					"v.is_ground_idling = query.is_on_ground && query.modified_move_speed < v.move_threshold;",
+					"v.is_air_idling = !query.is_on_ground && !query.is_in_water && !query.is_jumping && query.modified_move_speed < v.move_threshold;",
+					"v.is_water_idling = query.is_in_water && !query.is_swimming;",
+					"v.is_walking = query.modified_move_speed >= v.move_threshold && query.is_on_ground && !query.is_in_water;",
+					"v.is_swimming = query.is_swimming;",
+					"v.is_gliding = query.has_rider && q.can_fly && query.modified_move_speed >= v.move_threshold && !query.is_on_ground && !query.is_in_water;",
+					"v.is_flying = query.modified_move_speed >= v.move_threshold && q.can_fly && !query.is_on_ground && !query.is_in_water && !query.is_jumping && !v.is_gliding;",
+					"v.is_sleeping = q.is_sleeping;",
+					"v.should_blink = math.random(0.0, 1.0) <= v.blink_chance;"
+				],
+				"animate": [
+					"controller",
+					{
+						"blink": "v.should_blink"
+					},
+					{
+						"landing": "q.has_rider"
+					},
+					{
+						"shiny_sparkle": "query.property('pokeb:shiny')"
+					}
+				]
+			},
+			"animations": {
+				"default_ground_idle": "animation.bulbasaur.ground_idle",
+				"default_air_idle": "animation.bulbasaur.ground_idle",
+				"default_water_idle": "animation.bulbasaur.ground_idle",
+				"default_walking": "animation.bulbasaur.walking",
+				"default_flying": "animation.bulbasaur.ground_idle",
+				"default_ride_flying": "animation.bulbasaur.ground_idle",
+				"default_swimming": "animation.bulbasaur.ground_idle",
+				"default_sleeping": "animation.bulbasaur.ground_idle",
+				"look_at_target": "animation.pokemon.look_at_target",
+				"landing": "controller.animation.pokemon_landing",
+				"shiny_sparkle": "animation.pokemon.shiny_sparkle",
+				"attack": "animation.bulbasaur.attack",
+				"blink": "animation.bulbasaur.blink",
+				"controller": "controller.animation.pokemon"
+			},
+			"render_controllers": [
+				{
+					"controller.render.pokemon": "query.variant==0"
+				},
+				{
+					"controller.render.evolve": "query.variant==1"
+				}
+			],
+			"spawn_egg": {
+				"texture": "bulbasaur",
+				"texture_index": 0
+			},
+			"geometry": {
+				"default": "geometry.bulbasaur"
+			}
+		}
+	}
+}

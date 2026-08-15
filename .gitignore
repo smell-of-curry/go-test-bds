@@ -2,3 +2,19 @@
 config.toml
 node_modules/
 .tsbuildinfo
+testdata/e2e-pack/scripts/main.js
+bds/
+*.log
+/bin/
+.local/
+viewer/artifacts-*/
+# Viewer pack cache: Mojang/bedrock-samples baseline + server packs.
+# Licence is all-rights-reserved under the Minecraft EULA — never commit.
+artifacts/.cache/
+.cache/
+**/.cache/viewer/
+**/.cache/baseline/
+
+viewer/dist.sha
+
+viewer/testdata/jsonui/live-v2.18.5*

@@ -38,8 +38,8 @@ func (c *CustomFormRespond) Run(ctx context.Context, b *bot.Bot) error {
 		elements := content.Elements()
 
 		for _, o := range c.Options {
-			if len(elements) < o.Index || o.Index < 0 {
-				return fmt.Errorf("incorrect option index %v", o.Index)
+			if o.Index < 0 || o.Index >= len(elements) {
+				return fmt.Errorf("incorrect option index %v: valid range is 0..%d (%d elements)", o.Index, len(elements)-1, len(elements))
 			}
 			switch el := elements[o.Index].(type) {
 			case *actor.FormInput:

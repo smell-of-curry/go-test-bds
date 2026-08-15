@@ -1,0 +1,161 @@
+{
+  "format_version": "1.18.20",
+  "animation_controllers": {
+    "controller.animation.pokemon_landing": {
+      "initial_state": "grounded",
+      "states": {
+        "grounded": {
+          "transitions": [
+            {
+              "airborne": "!q.is_on_ground && !q.is_in_water"
+            }
+          ]
+        },
+        "airborne": {
+          "transitions": [
+            {
+              "landing": "q.is_on_ground && q.has_rider"
+            },
+            {
+              "grounded": "q.is_on_ground || q.is_in_water"
+            }
+          ]
+        },
+        "landing": {
+          "particle_effects": [
+            {
+              "effect": "landing_puff"
+            }
+          ],
+          "transitions": [
+            {
+              "grounded": "(1.0)"
+            }
+          ]
+        }
+      }
+    },
+    "controller.animation.pokemon": {
+      "initial_state": "default",
+      "states": {
+        "default": {
+          "transitions": [
+            {
+              "ground_idle": "v.is_ground_idling"
+            },
+            {
+              "air_idle": "v.is_air_idling"
+            },
+            {
+              "water_idle": "v.is_water_idling"
+            },
+            {
+              "walking": "v.is_walking"
+            },
+            {
+              "swimming": "v.is_swimming"
+            },
+            {
+              "ride_flying": "v.is_gliding"
+            },
+            {
+              "flying": "v.is_flying"
+            },
+            {
+              "sleeping": "v.is_sleeping"
+            }
+          ],
+          "blend_transition": 0.3
+        },
+        "ground_idle": {
+          "animations": [
+            "default_ground_idle"
+          ],
+          "transitions": [
+            {
+              "default": "!v.is_ground_idling"
+            }
+          ],
+          "blend_transition": 0.3
+        },
+        "air_idle": {
+          "animations": [
+            "default_air_idle"
+          ],
+          "transitions": [
+            {
+              "default": "!v.is_air_idling"
+            }
+          ],
+          "blend_transition": 0.3
+        },
+        "water_idle": {
+          "animations": [
+            "default_water_idle"
+          ],
+          "transitions": [
+            {
+              "default": "!v.is_water_idling"
+            }
+          ],
+          "blend_transition": 0.3
+        },
+        "walking": {
+          "animations": [
+            "default_walking"
+          ],
+          "transitions": [
+            {
+              "default": "!v.is_walking"
+            }
+          ],
+          "blend_transition": 0.3
+        },
+        "flying": {
+          "animations": [
+            "default_flying"
+          ],
+          "transitions": [
+            {
+              "default": "!v.is_flying"
+            }
+          ],
+          "blend_transition": 0.3
+        },
+        "ride_flying": {
+          "animations": [
+            "default_ride_flying"
+          ],
+          "transitions": [
+            {
+              "default": "!v.is_gliding"
+            }
+          ],
+          "blend_transition": 0.3
+        },
+        "swimming": {
+          "animations": [
+            "default_swimming"
+          ],
+          "transitions": [
+            {
+              "default": "!v.is_swimming"
+            }
+          ],
+          "blend_transition": 0.3
+        },
+        "sleeping": {
+          "animations": [
+            "default_sleeping"
+          ],
+          "transitions": [
+            {
+              "default": "!v.is_sleeping"
+            }
+          ],
+          "blend_transition": 0.3
+        }
+      }
+    }
+  }
+}

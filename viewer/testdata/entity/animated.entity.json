@@ -1,0 +1,35 @@
+{
+  "format_version": "1.10.0",
+  "minecraft:client_entity": {
+    "description": {
+      "identifier": "test:blocky_anim",
+      "materials": {
+        "default": "entity_alphatest"
+      },
+      "textures": {
+        "default": "textures/entity/blocky"
+      },
+      "geometry": {
+        "default": "geometry.test.blocky"
+      },
+      "animations": {
+        "nod": "animation.test.blocky.nod",
+        "raise": "animation.test.blocky.raise",
+        "hold": "animation.test.blocky.hold",
+        "spin": "animation.test.blocky.molang_spin",
+        "move": "controller.animation.test.blocky.move"
+      },
+      "scripts": {
+        "initialize": ["variable.mode = 0;"],
+        "pre_animation": [
+          "variable.pulse = math.sin(query.life_time * 90);"
+        ],
+        "animate": [
+          "move",
+          { "spin": "variable.mode == 2" }
+        ]
+      },
+      "render_controllers": ["controller.render.blocky"]
+    }
+  }
+}

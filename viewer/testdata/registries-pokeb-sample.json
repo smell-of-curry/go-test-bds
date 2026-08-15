@@ -1,0 +1,68 @@
+{
+  "blocks": [
+    {
+      "name": "pokeb:apricorn_log",
+      "components": {
+        "geometry": "geometry.pokeb.apricorn_log",
+        "materialInstances": {
+          "*": {
+            "texture": "apricorn_log",
+            "renderMethod": "opaque"
+          },
+          "up": {
+            "texture": "apricorn_log_top",
+            "renderMethod": "opaque"
+          },
+          "down": {
+            "texture": "apricorn_log_top",
+            "renderMethod": "opaque"
+          }
+        }
+      }
+    },
+    {
+      "name": "pokeb:red_apricorn_leaves",
+      "components": {
+        "geometry": "geometry.pokeb.apricorn_leaves",
+        "materialInstances": {
+          "*": {
+            "texture": "apricorn_leaves",
+            "renderMethod": "alpha_test"
+          }
+        }
+      }
+    },
+    {
+      "name": "pokeb:red_apricorn",
+      "components": {
+        "geometry": "geometry.pokeb.apricorn",
+        "materialInstances": {
+          "*": {
+            "texture": "red_apricorn",
+            "renderMethod": "alpha_test"
+          }
+        }
+      }
+    },
+    {
+      "name": "pokeb:pc",
+      "components": {
+        "unitCube": true
+      }
+    },
+    {
+      "name": "pokeb:berry_plant",
+      "components": {
+        "geometry": "geometry.pokeb.berry_plant",
+        "materialInstances": {
+          "*": {
+            "texture": "berry_plant_stage_2",
+            "renderMethod": "alpha_test"
+          }
+        }
+      }
+    }
+  ],
+  "items": [],
+  "actors": []
+}

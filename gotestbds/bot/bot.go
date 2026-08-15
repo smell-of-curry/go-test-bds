@@ -3,6 +3,7 @@ package bot
 import (
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
@@ -13,9 +14,10 @@ import (
 
 // Bot handles server packets and Actor's actions.
 type Bot struct {
-	a      *actor.Actor
-	closed chan struct{}
-	conn   Conn
+	a         *actor.Actor
+	closed    chan struct{}
+	closeOnce sync.Once
+	conn      Conn
 
 	handlers                  map[uint32]packetHandler
 	tasks                     chan task
@@ -28,6 +30,11 @@ type Bot struct {
 
 	packets chan packet.Packet
 	logger  *slog.Logger
+
+	// chatOut carries outbound status chat off the tick loop (see EnqueueChat).
+	chatOut chan string
+
+	chunks chunkHealth
 }
 
 // NewBot ...
@@ -38,7 +45,8 @@ func NewBot(conn Conn, logger *slog.Logger) *Bot {
 		handlers:                  make(map[uint32]packetHandler),
 		tasks:                     make(chan task, 256),
 		pendingItemStackResponses: make(map[int32]*inventory.History),
-		packets:                   make(chan packet.Packet, 256),
+		packets:                   make(chan packet.Packet, packetBuf),
+		chatOut:                   make(chan string, chatOutBuf),
 		logger:                    logger,
 	}
 	bot.a = actor.Config{
@@ -53,44 +61,121 @@ func NewBot(conn Conn, logger *slog.Logger) *Bot {
 	return bot
 }
 
-// Close ...
+// Close stops the tick loop, which disconnects the bot.
+//
+// Safe to call more than once and from any goroutine: shutdown races with the
+// loop ending on its own, and a second close of the channel would panic.
+//
+// @returns nil, always.
 func (b *Bot) Close() error {
-	close(b.closed)
+	b.closeOnce.Do(func() { close(b.closed) })
 	return nil
 }
 
+// Closed is closed when Close has been called (or the tick loop is shutting down).
+//
+// @returns a receive-only channel that closes on shutdown.
+func (b *Bot) Closed() <-chan struct{} {
+	return b.closed
+}
+
+// maxPriorityTicks bounds how many due ticks are taken back-to-back before the
+// loop must offer packets and tasks a turn. When a tick itself runs longer than
+// the tick interval, the ticker is due again the moment it returns; an
+// unbounded priority path then degenerates into ticking forever — the tick
+// counters look perfectly healthy while every inbound packet (and with them
+// every test instruction) starves without a single warning. Seen live as a bot
+// that answers forms all run and then goes permanently silent the moment the
+// world grows expensive enough to push a tick past 50ms.
+const maxPriorityTicks = 3
+
 // StartTickLoop starts handling loop.
+//
+// The tick is what makes the bot a client: physics, navigation and every timeout
+// expressed in ticks run off it. A due tick is therefore taken before anything
+// else — `select` picks at random between ready cases, and `time.Ticker` drops
+// ticks rather than queueing them, so a busy packet queue would otherwise cost
+// simulated time with nothing to show it happened. The priority is bounded by
+// maxPriorityTicks so an over-budget tick cannot starve I/O forever.
 func (b *Bot) StartTickLoop() {
-	ticker := time.NewTicker(time.Second / 20)
+	ticker := time.NewTicker(tickInterval)
+	defer ticker.Stop()
 
 	defer b.conn.Close()
 	defer b.a.Close()
 
 	go b.handlePackets()
+	b.startChatWriter()
 
+	var health tickHealth
+	health.watchStalls(b.logger, b.closed)
+	priorityTicks := 0
 	for {
+		now := time.Now()
+		health.report(b.logger, now)
+		b.chunks.report(b.logger, b.a, now)
+
+		if priorityTicks < maxPriorityTicks {
+			select {
+			case <-b.closed:
+				return
+			case <-ticker.C:
+				b.a.Tick()
+				health.tick()
+				priorityTicks++
+				continue
+			default:
+			}
+		}
+		priorityTicks = 0
+
 		select {
 		case <-b.closed:
 			return
 		case <-ticker.C:
 			b.a.Tick()
+			health.tick()
 		case t := <-b.tasks:
 			t.fn(b.a)
 			close(t.done)
 		case pk := <-b.packets:
+			start := time.Now()
 			b.HandlePacket(pk)
+			health.packet(pk, time.Since(start))
 		}
 	}
 }
 
 // Execute - executes fn on the Actor.
+//
+// Blocks until the task is queued (or the bot is closed). Callers that must not
+// wait on a saturated queue should use TryExecute.
 func (b *Bot) Execute(fn func(*actor.Actor)) chan struct{} {
 	done := make(chan struct{})
-	b.tasks <- task{
-		fn:   fn,
-		done: done,
+	select {
+	case <-b.closed:
+		close(done)
+		return done
+	case b.tasks <- task{fn: fn, done: done}:
+		return done
 	}
-	return done
+}
+
+// TryExecute queues fn without blocking. Returns false when the task buffer is
+// full or the bot is closed (fn is not run).
+//
+// @param fn Work to run on the tick loop.
+// @returns true when the task was queued.
+func (b *Bot) TryExecute(fn func(*actor.Actor)) bool {
+	done := make(chan struct{})
+	select {
+	case <-b.closed:
+		return false
+	case b.tasks <- task{fn: fn, done: done}:
+		return true
+	default:
+		return false
+	}
 }
 
 // Conn returns network connection.
@@ -98,7 +183,18 @@ func (b *Bot) Conn() Conn {
 	return b.conn
 }
 
-// handlePackets ...
+// packetBuf bounds inbound packets waiting for the tick loop. When full,
+// enqueuePacket drops the oldest rather than blocking ReadPacket — a blocked
+// read stops RakNet ACK processing, which then stalls every WritePacket
+// (AuthInput / SubChunkRequest / status chat) and freezes StartTickLoop.
+// Live: post-arena silence after "ticking below the client rate" with
+// slowestPacket=*packet.Text or *packet.NetworkChunkPublisherUpdate.
+const packetBuf = 1024
+
+// handlePackets reads the connection forever and hands packets to the tick loop.
+//
+// Must never block on b.packets: the tick loop itself calls WritePacket, and
+// gophertunnel needs ReadPacket to keep running for those writes to complete.
 func (b *Bot) handlePackets() {
 	for {
 		pk, err := b.conn.ReadPacket()
@@ -106,7 +202,51 @@ func (b *Bot) handlePackets() {
 			_ = b.Close()
 			return
 		}
-		b.packets <- pk
+		if !b.enqueuePacket(pk) {
+			return
+		}
+	}
+}
+
+// enqueuePacket queues pk for the tick loop without blocking ReadPacket.
+//
+// When the buffer is full the oldest packet is dropped so fresher state
+// (movement, chunks) still arrives. Returns false when the bot is closed.
+//
+// @param pk Inbound packet from Conn.ReadPacket.
+// @returns false when the bot is shutting down.
+func (b *Bot) enqueuePacket(pk packet.Packet) bool {
+	select {
+	case <-b.closed:
+		return false
+	case b.packets <- pk:
+		return true
+	default:
+	}
+	// Drop oldest to make room.
+	select {
+	case <-b.packets:
+	default:
+	}
+	select {
+	case <-b.closed:
+		return false
+	case b.packets <- pk:
+		if b.logger != nil {
+			b.logger.Warn("inbound packet dropped; tick loop behind",
+				slog.String("packet", fmt.Sprintf("%T", pk)),
+				slog.Int("buf", packetBuf),
+			)
+		}
+		return true
+	default:
+		if b.logger != nil {
+			b.logger.Warn("inbound packet dropped; tick loop behind",
+				slog.String("packet", fmt.Sprintf("%T", pk)),
+				slog.Int("buf", packetBuf),
+			)
+		}
+		return true
 	}
 }
 
@@ -137,9 +277,11 @@ func (b *Bot) registerHandlers() {
 		packet.IDLevelChunk:                  &LevelChunkHandler{},
 		packet.IDSubChunk:                    &SubChunkHandler{},
 		packet.IDUpdateBlock:                 &UpdateBlockHandler{},
+		packet.IDUpdateSubChunkBlocks:        &UpdateSubChunkBlocksHandler{},
 		packet.IDSetActorData:                &SetActorDataHandler{},
 		packet.IDSetActorMotion:              &SetActorMotionHandler{},
 		packet.IDMoveActorAbsolute:           &MoveActorAbsoluteHandler{},
+		packet.IDMovePlayer:                  &MovePlayerHandler{},
 		packet.IDInventoryContent:            &InventoryContentHandler{},
 		packet.IDInventorySlot:               &InventorySlotHandler{},
 		packet.IDItemStackResponse:           &ItemStackResponseHandler{},
@@ -148,10 +290,17 @@ func (b *Bot) registerHandlers() {
 		packet.IDCorrectPlayerMovePrediction: &CorrectPlayerMovePredictionHandler{},
 		packet.IDRemoveActor:                 &RemoveActorHandler{},
 		packet.IDActorEvent:                  &ActorEventHandler{},
+		packet.IDAnimate:                     &AnimateHandler{},
+		packet.IDChangeDimension:             &ChangeDimensionHandler{},
 		packet.IDChunkRadiusUpdated:          &ChunkRadiusUpdatedHandler{},
 		packet.IDNetworkChunkPublisherUpdate: &NetworkChunkPublisherUpdateHandler{},
 		packet.IDModalFormRequest:            &ModalFormRequestHandler{},
 		packet.IDText:                        &TextHandler{},
+		packet.IDSetTitle:                    &SetTitleHandler{},
+		packet.IDSetTime:                     &SetTimeHandler{},
+		packet.IDSpawnParticleEffect:         &SpawnParticleEffectHandler{},
+		packet.IDCameraPresets:               &CameraPresetsHandler{},
+		packet.IDCameraInstruction:           &CameraInstructionHandler{},
 		packet.IDMobArmourEquipment:          &MobArmourEquipmentHandler{},
 		packet.IDMobEquipment:                &MobEquipmentHandler{},
 		packet.IDBlockActorData:              &BlockActorDataHandler{},
@@ -159,6 +308,8 @@ func (b *Bot) registerHandlers() {
 		packet.IDNPCDialogue:                 &NpcDialogueHandler{},
 		packet.IDContainerOpen:               &ContainerOpenHandler{},
 		packet.IDCommandOutput:               &CommandOutputHandler{},
+		packet.IDItemRegistry:                &ItemRegistryHandler{},
+		packet.IDSyncActorProperty:           &SyncActorPropertyHandler{},
 	}
 }
 

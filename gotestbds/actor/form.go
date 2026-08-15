@@ -23,13 +23,22 @@ type Form struct {
 	id       uint32
 	formType FormType
 	title    string
-	f        formInternals
+	// raw keeps the payload the server sent. A form that parses into something
+	// unusable is only diagnosable from its original JSON, and the bot sees
+	// whatever shape the addon under test chose to send.
+	raw []byte
+	f   formInternals
+}
+
+// Raw returns the JSON the server sent for this form.
+func (f *Form) Raw() string {
+	return string(f.raw)
 }
 
 // UnmarshalJSON ...
 func (f *Form) UnmarshalJSON(data []byte) error {
 	header := struct {
-		Title string `json:"title"`
+		Title Text   `json:"title"`
 		Type  string `json:"type"`
 	}{}
 	err := json.Unmarshal(data, &header)
@@ -37,8 +46,9 @@ func (f *Form) UnmarshalJSON(data []byte) error {
 		return err
 	}
 
-	f.title = header.Title
+	f.title = header.Title.String()
 	f.formType = FormType(header.Type)
+	f.raw = data
 
 	switch f.Type() {
 	case FormTypeMenu:
@@ -54,7 +64,10 @@ func (f *Form) UnmarshalJSON(data []byte) error {
 		err = json.Unmarshal(data, &f.f.customForm)
 		f.f.Content.f = f
 	}
-	return nil
+	// Returning this used to be skipped, which turned a form whose body failed
+	// to parse into a silently empty one — the caller then reported "0 buttons"
+	// with no hint that decoding had failed at all.
+	return err
 }
 
 // Type ...
@@ -65,6 +78,28 @@ func (f *Form) Type() FormType {
 // Title ...
 func (f *Form) Title() string {
 	return f.title
+}
+
+// ContentText returns the menu/modal body text from the raw form JSON.
+//
+// Menu forms store content only in the payload (not on the typed struct), and
+// the viewer needs that string for the UI snapshot without changing how forms
+// are answered.
+//
+// @returns the flattened content text, or empty when absent.
+func (f *Form) ContentText() string {
+	if len(f.raw) == 0 {
+		return ""
+	}
+	var shape struct {
+		Content json.RawMessage `json:"content"`
+	}
+	if json.Unmarshal(f.raw, &shape) != nil || len(shape.Content) == 0 {
+		return ""
+	}
+	var t Text
+	_ = t.UnmarshalJSON(shape.Content)
+	return t.String()
 }
 
 // CustomFormContent ...

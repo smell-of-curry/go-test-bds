@@ -32,5 +32,6 @@
     "incremental": true,
     "tsBuildInfoFile": "./.tsbuildinfo"
   },
-  "include": ["scripts/**/*.ts", ".husky/scripts/*.ts"]
+  "include": ["scripts/**/*.ts", ".husky/scripts/*.ts"],
+  "exclude": ["viewer", "node_modules"]
 }

@@ -1,0 +1,21 @@
+{
+  "ui_defs": [
+    "ui/pokemon/attack.json",
+    "ui/pokemon/pokemon.json",
+    "ui/chest_server_form.json",
+    "ui/search_server_form.json",
+    "ui/rotom_phone/first.json",
+    "ui/rotom_phone/second.json",
+    "ui/rotom_phone/third.json",
+    "ui/phud/phud.json",
+    "ui/phud/phone.json",
+    "ui/phud/currency.json",
+    "ui/phud/battle_wait.json",
+    "ui/phud/loadingScreen.json",
+    "ui/phud/evolutionWait.json",
+    "ui/phud/playerPing.json",
+    "ui/phud/sidebar.json",
+    "ui/pokemon/pokedex.json",
+    "ui/pokemon/pc.json"
+  ]
+}
