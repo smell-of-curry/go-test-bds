@@ -1148,16 +1148,23 @@ test.describe("terrain atlas + mesher (browser)", () => {
   });
 
   test("merged stripe face tiles in pixels; fixture screenshot is bright", async ({
-    page,
+    browser,
   }) => {
-    test.setTimeout(120_000);
+    // Fresh context: WebGL/SwiftShader hangs on reused pages after earlier
+    // mesher tests (same flake as network-palette below).
+    test.setTimeout(180_000);
+    const context = await browser.newContext({
+      viewport: { width: 1280, height: 720 },
+      deviceScaleFactor: 1,
+    });
+    const page = await context.newPage();
     const assets = await startTerrainAssetServer();
     let devServer: ViteDevServer | undefined;
     try {
       devServer = await createServer({
         root: viewerRoot,
         configFile: join(viewerRoot, "vite.config.ts"),
-        server: { host: "127.0.0.1", port: 5181, strictPort: false },
+        server: { host: "127.0.0.1", port: 0, strictPort: false },
       });
       await devServer.listen();
       const base = devServer.resolvedUrls?.local[0];
@@ -1332,6 +1339,7 @@ test.describe("terrain atlas + mesher (browser)", () => {
       );
     } finally {
       await page.close().catch(() => undefined);
+      await context.close().catch(() => undefined);
       await devServer?.close();
       await assets.close();
     }
