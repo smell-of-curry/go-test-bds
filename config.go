@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/restartfu/gophig"
+	"github.com/restartfu/gophig/codecs"
 )
 
 // Config controls how the runner connects bots to a server.
@@ -46,7 +47,7 @@ type Config struct {
 		// CacheDir holds the gitignored pack/baseline cache. Empty defaults to
 		// <ArtifactDir>/.cache so artefacts and packs share one root.
 		CacheDir string
-		// BaselineTag pins Mojang/bedrock-samples (e.g. v1.26.30.5).
+		// BaselineTag pins Mojang/bedrock-samples (e.g. v1.26.50.4).
 		BaselineTag string
 		// AcceptServerPacks downloads the server's resource pack stack when
 		// the viewer is enabled. Ignored when the viewer is off.
@@ -74,7 +75,7 @@ func DefaultConfig() Config {
 	c.Viewer.ArtifactDir = "artifacts"
 	c.Viewer.AppDir = ""
 	c.Viewer.CacheDir = ""
-	c.Viewer.BaselineTag = "v1.26.30.5"
+	c.Viewer.BaselineTag = "v1.26.50.4"
 	c.Viewer.AcceptServerPacks = true
 	c.Viewer.Offline = false
 	c.Viewer.MemoryPerformanceTier = 5
@@ -91,7 +92,7 @@ func DefaultConfig() Config {
 // @returns the resolved configuration.
 // @throws an error if config.toml exists but cannot be read or written.
 func ReadConfig() (Config, error) {
-	g := gophig.NewGophig[Config]("./config.toml", gophig.TOMLMarshaler{}, os.ModePerm)
+	g := gophig.NewGophig[Config]("./config.toml", codecs.TOMLMarshaler{}, os.ModePerm)
 	c, err := g.LoadConf()
 	if os.IsNotExist(err) {
 		c = DefaultConfig()

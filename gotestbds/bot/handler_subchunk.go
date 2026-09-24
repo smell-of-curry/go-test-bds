@@ -67,8 +67,15 @@ func (*SubChunkHandler) Handle(p packet.Packet, b *Bot, a *actor.Actor) error {
 
 		// Whatever the previous entry left behind (its block entities, or the tail
 		// of a payload that failed to decode) would be read as this entry's header.
+		payload, ok := entry.RawPayload.Value()
+		if !ok {
+			// Success without payload is treated like all-air: still retire the
+			// outstanding request so the column can become complete.
+			c.ReceiveSubChunk()
+			continue
+		}
 		buf.Reset()
-		buf.Write(entry.RawPayload)
+		buf.Write(payload)
 
 		var index byte
 		decodedSC, err := decodeSubChunk(buf, c.Chunk, &index, chunk.NetworkEncoding)

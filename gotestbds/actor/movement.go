@@ -28,7 +28,7 @@ type movementData struct {
 	tick   uint64
 
 	sneaking, sprinting, swimming, crawling, gliding, immobile, onGround bool
-	movementBitset                                                       protocol.Bitset
+	movementBitset                                                       protocol.InputFlags
 
 	path             *pathfind.Path
 	navigationTarget cube.Pos
@@ -261,7 +261,7 @@ func (a *Actor) SendMovement() {
 	}
 
 	a.fillMovementBitset()
-	_ = a.conn.WritePacket(&packet.PlayerAuthInput{
+	pk := &packet.PlayerAuthInput{
 		Pitch:             pitch,
 		Yaw:               yaw,
 		Position:          mcmath.Vec64To32(a.Position().Add(mgl64.Vec3{0, 1.62})),
@@ -274,10 +274,13 @@ func (a *Actor) SendMovement() {
 		InteractYaw:       yaw,
 		Tick:              a.tick,
 		Delta:             mcmath.Vec64To32(a.delta),
-		BlockActions:      a.blockActions(),
 		CameraOrientation: mcmath.Vec64To32(a.Rotation().Vec3()),
 		RawMoveVector:     moveVector,
-	})
+	}
+	if actions := a.blockActions(); len(actions) > 0 {
+		pk.BlockActions = protocol.Option(actions)
+	}
+	_ = a.conn.WritePacket(pk)
 }
 
 // tickPhysicsOnly runs gravity/collision without sending AuthInput or clearing
@@ -507,5 +510,5 @@ func (a *Actor) fillInput(input movement.Input) {
 func (a *Actor) clearMovement() {
 	a.moving = false
 	a.delta = mgl64.Vec3{}
-	a.movementBitset = protocol.NewBitset(packet.PlayerAuthInputBitsetSize)
+	a.movementBitset = protocol.NewInputFlags(packet.InputFlagCount)
 }

@@ -63,10 +63,11 @@ func (*LevelChunkHandler) Handle(p packet.Packet, b *Bot, a *actor.Actor) error 
 
 // subChunkCount reads how many sub-chunks a LevelChunk carries.
 //
-// SubChunkCount doubles as a sentinel: the two request modes ask the client to
-// pull the blocks itself with SubChunkRequest, and the payload then holds only
-// biomes. Feeding those sentinels to a block decoder reads the biome bytes as
-// sub-chunk headers, which is where "unknown sub chunk version 89" comes from.
+// As of protocol 1.26.50, request mode is SubChunkCount=0 plus an optional
+// SubChunkLimit (replacing the old MaxUint32 sentinels + HighestSubChunk).
+// The payload then holds only biomes. Feeding a request-mode packet to a block
+// decoder reads the biome bytes as sub-chunk headers, which is where
+// "unknown sub chunk version 89" comes from.
 //
 // @param levelChunk The packet to read.
 // @param r The vertical range of the chunk's dimension.
@@ -74,13 +75,14 @@ func (*LevelChunkHandler) Handle(p packet.Packet, b *Bot, a *actor.Actor) error 
 // SubChunkRequest instead of having sent the blocks inline.
 func subChunkCount(levelChunk *packet.LevelChunk, r cube.Range) (int, bool) {
 	max := (r.Max() - r.Min() + 1) >> 4
-	switch levelChunk.SubChunkCount {
-	case protocol.SubChunkRequestModeLimited:
-		// HighestSubChunk indexes from the bottom of the dimension, so everything
-		// above it is air and not worth asking for.
-		return min(int(levelChunk.HighestSubChunk)+1, max), true
-	case protocol.SubChunkRequestModeLimitless:
-		return max, true
+	if limit, ok := levelChunk.SubChunkLimit.Value(); ok {
+		// -1 = limitless (request the full dimension height).
+		if limit < 0 {
+			return max, true
+		}
+		// SubChunkLimit is a count from the bottom (HighestFilledSubChunk),
+		// not a 0-based index.
+		return min(int(limit), max), true
 	}
 	return min(int(levelChunk.SubChunkCount), max), false
 }

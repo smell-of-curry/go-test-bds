@@ -53,7 +53,7 @@ func (c Config) New() (actor *Actor) {
 		loadingCenter: cube.PosFromVec3(mcmath.Vec32To64(gameData.PlayerPosition)),
 	}
 
-	data.movementBitset = protocol.NewBitset(packet.PlayerAuthInputBitsetSize)
+	data.movementBitset = protocol.NewInputFlags(packet.InputFlagCount)
 
 	data.mc = &physics.Computer{
 		Gravity:           0.08,

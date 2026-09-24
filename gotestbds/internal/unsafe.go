@@ -8,15 +8,6 @@ import (
 	_ "unsafe"
 )
 
-// for whatever reason I cannot link functions directly.
-// so I've just added implementation here.
-
-//go:linkname readItem github.com/df-mc/dragonfly/server/internal/nbtconv.Item
-func readItem(data map[string]any, s *item.Stack) item.Stack
-
-//go:linkname writeItem github.com/df-mc/dragonfly/server/internal/nbtconv.WriteItem
-func writeItem(s item.Stack, disk bool) map[string]any
-
 //go:linkname item_id github.com/df-mc/dragonfly/server/item.id
 func item_id(s item.Stack) int32 // probably this is useless.
 
@@ -38,10 +29,9 @@ func stackFromItem(it item.Stack) protocol.ItemStack {
 			NetworkID:     rid,
 			MetadataValue: uint32(meta),
 		},
-		HasNetworkID:   true,
 		Count:          uint16(it.Count()),
 		BlockRuntimeID: int32(blockRuntimeID),
-		NBTData:        writeItem(it, false),
+		NBTData:        item.WriteNBT(it, false),
 	}
 }
 
@@ -65,7 +55,7 @@ func StackToItem(it protocol.ItemStack) item.Stack {
 		t = nbter.DecodeNBT(it.NBTData).(world.Item)
 	}
 	s := item.NewStack(t, int(it.Count))
-	return readItem(it.NBTData, &s)
+	return item.ReadNBT(it.NBTData, &s)
 }
 
 // InstanceFromItem translates item.Stack for the network.
