@@ -31,9 +31,29 @@ jobs:
   viewer:
     name: Viewer
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Cache vanilla baseline
+        uses: actions/cache@v4
+        with:
+          path: .cache/baseline
+          key: bedrock-samples-${{ hashFiles('viewer/baseline.tag') }}
+
+      - name: Fetch vanilla baseline
+        id: baseline
+        run: |
+          set -euo pipefail
+          DIR=$(go run ./cmd/fetch-baseline .cache)
+          echo "dir=${DIR}" >> "$GITHUB_OUTPUT"
+          test -f "${DIR}/resource_pack/blocks.json"
 
       - name: Set up Node
         uses: actions/setup-node@v4
@@ -60,6 +80,9 @@ jobs:
 
       - name: Test
         working-directory: viewer
+        env:
+          GOLDEN_BASELINE_DIR: ${{ steps.baseline.outputs.dir }}
+          GOLDEN_USE_BASELINE: "1"
         run: npm test
 
       # The suites render, screenshot and record; when one fails, the picture is
