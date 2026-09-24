@@ -532,9 +532,15 @@ test.describe("terrain parse / resolve (node)", () => {
 
 test.describe("terrain atlas + mesher (browser)", () => {
   test("atlas packs mixed sizes, UV for known tile, flipbook by tick, missing→fallback", async ({
-    page,
+    browser,
   }) => {
-    test.setTimeout(120_000);
+    // Fresh context: first WebGL mesher slot can hang on reused SwiftShader.
+    test.setTimeout(180_000);
+    const context = await browser.newContext({
+      viewport: { width: 1280, height: 720 },
+      deviceScaleFactor: 1,
+    });
+    const page = await context.newPage();
     const assets = await startTerrainAssetServer();
     let devServer: ViteDevServer | undefined;
     try {
@@ -545,7 +551,7 @@ test.describe("terrain atlas + mesher (browser)", () => {
       devServer = await createServer({
         root: viewerRoot,
         configFile: join(viewerRoot, "vite.config.ts"),
-        server: { host: "127.0.0.1", port: 5178, strictPort: false },
+        server: { host: "127.0.0.1", port: 0, strictPort: false },
       });
       await devServer.listen();
       const base = devServer.resolvedUrls?.local[0];
@@ -612,6 +618,7 @@ test.describe("terrain atlas + mesher (browser)", () => {
       expect(result.fallbackId).toBe(FALLBACK_TEXTURE);
     } finally {
       await page.close().catch(() => undefined);
+      await context.close().catch(() => undefined);
       await devServer?.close();
       await assets.close();
     }
