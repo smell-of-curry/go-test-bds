@@ -164,6 +164,10 @@ jobs:
           set_prop allow-list false
           set_prop server-port 19132
           set_prop server-portv6 19133
+          # 1.26.50+ ships transport=nethernet by default (dual-stack signaling
+          # on server-port). Bots dial RakNet with no Xbox identity, so force
+          # the classic UDP listener.
+          set_prop transport raknet
           set_prop view-distance 4
           set_prop tick-distance 4
           set_prop max-threads 2
@@ -174,7 +178,7 @@ jobs:
           set_prop content-log-file-enabled true
           set_prop content-log-console-output-enabled true
           set_prop script-debugger-enabled false
-          grep -E '^(online-mode|allow-list|server-port|level-name|view-distance)=' "$PROP"
+          grep -E '^(online-mode|allow-list|server-port|level-name|view-distance|transport)=' "$PROP"
 
       - name: Run e2e against live BDS
         run: |
