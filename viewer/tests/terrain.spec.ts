@@ -1338,16 +1338,23 @@ test.describe("terrain atlas + mesher (browser)", () => {
   });
 
   test("network palette: material_instances textured; bare → neutral; pack precedence", async ({
-    page,
+    browser,
   }) => {
+    // Fresh context: later suite slots sometimes hang inside page.evaluate on
+    // a reused Chromium/SwiftShader process after several WebGL mesher tests.
     test.setTimeout(180_000);
+    const context = await browser.newContext({
+      viewport: { width: 1280, height: 720 },
+      deviceScaleFactor: 1,
+    });
+    const page = await context.newPage();
     const assets = await startTerrainAssetServer();
     let devServer: ViteDevServer | undefined;
     try {
       devServer = await createServer({
         root: viewerRoot,
         configFile: join(viewerRoot, "vite.config.ts"),
-        server: { host: "127.0.0.1", port: 5183, strictPort: false },
+        server: { host: "127.0.0.1", port: 0, strictPort: false },
       });
       await devServer.listen();
       const base = devServer.resolvedUrls?.local[0];
