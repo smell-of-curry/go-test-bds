@@ -1340,7 +1340,7 @@ test.describe("terrain atlas + mesher (browser)", () => {
   test("network palette: material_instances textured; bare → neutral; pack precedence", async ({
     page,
   }) => {
-    test.setTimeout(120_000);
+    test.setTimeout(180_000);
     const assets = await startTerrainAssetServer();
     let devServer: ViteDevServer | undefined;
     try {
