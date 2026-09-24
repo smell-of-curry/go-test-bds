@@ -3,10 +3,10 @@ package actor
 import "sync"
 
 type worldTimeState struct {
-	mu      sync.Mutex
-	time    int32
-	known   bool
-	seq     uint64
+	mu    sync.Mutex
+	time  int32
+	known bool
+	seq   uint64
 }
 
 // SetWorldTime records the absolute world time from a SetTime packet.

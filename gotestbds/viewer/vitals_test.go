@@ -166,4 +166,3 @@ func mustVitals(t *testing.T, sub *subscriber) VitalsFrame {
 		return vf
 	}
 }
-

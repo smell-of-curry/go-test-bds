@@ -60,8 +60,8 @@ type movementData struct {
 	navStartTick       uint64
 	navPhysicsSkipped  int // ticks physics gated on missing/incomplete column
 	navMoveAttempts    int
-	navMoveZero        int // MoveRawInput ran but position unchanged
-	navMoveRejected    int // MoveRawInput returned false
+	navMoveZero        int     // MoveRawInput ran but position unchanged
+	navMoveRejected    int     // MoveRawInput returned false
 	navBestDist        float64 // closest distToNavTarget this leg (0 = unset)
 	navNoProgressTicks int     // ticks since navBestDist last improved
 	physicsSkipStreak  int     // consecutive ticks physics was skipped (any time)

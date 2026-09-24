@@ -75,19 +75,19 @@ type Delta struct {
 
 // Camera is a server-driven camera override (CameraInstruction). Additive.
 type Camera struct {
-	Preset         string     `json:"preset,omitempty"`
+	Preset         string      `json:"preset,omitempty"`
 	Pos            *[3]float64 `json:"pos,omitempty"`
 	Rot            *[2]float64 `json:"rot,omitempty"` // [yaw, pitch] degrees
-	EaseDurationMs int        `json:"easeDurationMs,omitempty"`
-	FOV            *float64   `json:"fov,omitempty"`
+	EaseDurationMs int         `json:"easeDurationMs,omitempty"`
+	FOV            *float64    `json:"fov,omitempty"`
 	Fade           *CameraFade `json:"fade,omitempty"`
 }
 
 // CameraFade is a screen fade from CameraInstruction.
 type CameraFade struct {
-	FadeInSec  float64  `json:"fadeInSec,omitempty"`
-	WaitSec    float64  `json:"waitSec,omitempty"`
-	FadeOutSec float64  `json:"fadeOutSec,omitempty"`
+	FadeInSec  float64   `json:"fadeInSec,omitempty"`
+	WaitSec    float64   `json:"waitSec,omitempty"`
+	FadeOutSec float64   `json:"fadeOutSec,omitempty"`
 	Colour     *[3]uint8 `json:"colour,omitempty"`
 }
 

@@ -50,10 +50,10 @@ type Stream struct {
 
 	// Vitals lane — bot goroutine writes fingerprint/throttle; lastVitalsData
 	// is also read on attach (HTTP goroutine) under mu.
-	lastVitalsKey   string // fingerprint of lastVitalsData
-	lastEmittedKey  string // fingerprint of last fan-out
-	lastVitalsAt    time.Time
-	lastVitalsData  []byte
+	lastVitalsKey  string // fingerprint of lastVitalsData
+	lastEmittedKey string // fingerprint of last fan-out
+	lastVitalsAt   time.Time
+	lastVitalsData []byte
 
 	// lastPhud is the latest value per PHUD token (bot goroutine writes;
 	// attach/keyframe replay reads under mu). EventSource reconnects wipe the
