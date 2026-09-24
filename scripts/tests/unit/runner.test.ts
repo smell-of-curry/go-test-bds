@@ -21,6 +21,11 @@ describe("runner", () => {
     resetFakeSystem();
     cancelAllInstructions("test reset");
     bot = new Bot(createFakePlayer("RunnerBot") as unknown as Player);
+    // Unit tests have no bot reply channel. viewerMark / pullArtifacts go
+    // through runAction and would hang forever waiting on fake ticks that
+    // only the timeout-driving tests advance.
+    bot.viewerMark = async () => {};
+    bot.pullArtifacts = async () => [];
   });
 
   afterEach(() => {
@@ -166,7 +171,7 @@ describe("runner", () => {
       reporter: silentReporter,
       runId: "cleanup-3",
     });
-    const result = await driveUntil(pending, msToTicks(timeoutMs) + 10);
+    const result = await driveUntil(pending, msToTicks(timeoutMs) + 40);
 
     assert.equal(result.suites[0].tests[0].status, "failed");
     assert.match(result.suites[0].tests[0].error ?? "", /timed out/);

@@ -30,6 +30,7 @@ describe("Bot.clickThrough", () => {
     const forms = await bot.clickThrough({
       until: () => answered >= 2,
       onForm: (form) => seen.push(form.title),
+      hover: false,
     });
 
     assert.deepEqual(
@@ -51,6 +52,7 @@ describe("Bot.clickThrough", () => {
         until: () => false,
         maxForms: 2,
         description: "quest complete",
+        hover: false,
       }),
       (error: unknown) => {
         assert.ok(error instanceof Error);
@@ -75,6 +77,7 @@ describe("Bot.clickThrough", () => {
         until: () => false,
         formTimeoutMs: 1500,
         description: "flag set",
+        hover: false,
       }),
       (error: unknown) => {
         assert.ok(error instanceof TimeoutError);
@@ -110,6 +113,7 @@ describe("Bot.clickThrough", () => {
     await bot.clickThrough({
       until: () => clicked.length >= 2,
       button: (form) => Math.min(1, (form.buttons?.length ?? 1) - 1),
+      hover: false,
     });
 
     assert.deepEqual(clicked, [1, 0]);
@@ -130,6 +134,7 @@ describe("Bot.clickThrough", () => {
     await bot.clickThrough({
       until: () => clicks >= 2,
       onForm: (form) => titles.push(form.title),
+      hover: false,
     });
 
     assert.deepEqual(titles, ["A", "B"]);
