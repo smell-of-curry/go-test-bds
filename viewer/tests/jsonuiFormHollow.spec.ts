@@ -22,7 +22,7 @@ import {
   type JsonlFrame,
 } from "./fixtureServer";
 import { ensureBaseline } from "./ensureBaseline";
-import { ensureLiveExtract } from "./ensureLiveExtract";
+import { ensureLiveExtract, liveExtractAvailable } from "./ensureLiveExtract";
 import { waitForJsonUiPaintReady } from "./jsonUiPaintReady";
 import { handleJsonUiPackRequest } from "./jsonuiPackServer";
 
@@ -31,6 +31,13 @@ const viewerRoot = join(here, "..");
 const VIEWPORT = { width: 1280, height: 720 } as const;
 
 test.use({ viewport: VIEWPORT, deviceScaleFactor: 1 });
+
+test.beforeAll(() => {
+  test.skip(
+    !liveExtractAvailable(),
+    "testdata/jsonui/live-v2.18.5.zip (or extract) required for hollow form chrome",
+  );
+});
 
 interface Harness {
   base: string;

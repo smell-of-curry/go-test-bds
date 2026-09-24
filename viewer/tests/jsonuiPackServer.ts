@@ -10,19 +10,31 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { ensureBaseline } from "./ensureBaseline";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const fixturesRoot = join(here, "..", "testdata", "jsonui");
+const viewerRoot = join(here, "..");
+const repoRoot = join(viewerRoot, "..");
+const fixturesRoot = join(viewerRoot, "testdata", "jsonui");
 const liveExtract = join(fixturesRoot, "live-v2.18.5", "_extract");
-const baselineUi = join(
-  here,
-  "..",
-  "..",
-  ".cache",
-  "baseline",
-  "v1.26.30.5",
-  "resource_pack",
-);
+
+let baselineFetched = false;
+
+/**
+ * Absolute path to the pinned bedrock-samples resource_pack.
+ *
+ * Reads `viewer/baseline.tag` (and optionally `GOLDEN_BASELINE_DIR`) so a pin
+ * bump does not leave this helper stuck on a stale hardcoded tag.
+ *
+ * @returns resource_pack directory, which may not exist yet.
+ */
+function baselineResourcePack(): string {
+  const fromEnv = process.env.GOLDEN_BASELINE_DIR?.trim();
+  if (fromEnv) return join(fromEnv, "resource_pack");
+  const raw = readFileSync(join(viewerRoot, "baseline.tag"), "utf8").trim();
+  const pinned = raw.startsWith("v") ? raw : `v${raw}`;
+  return join(repoRoot, ".cache", "baseline", pinned, "resource_pack");
+}
 
 const CORS = {
   "access-control-allow-origin": "*",
@@ -48,7 +60,14 @@ export function isJsonUiPackPath(pathname: string): boolean {
  * @returns absolute path, or null.
  */
 function resolveAssetFile(rel: string): string | null {
-  const candidates = [join(liveExtract, rel), join(baselineUi, rel)];
+  if (!baselineFetched) {
+    ensureBaseline();
+    baselineFetched = true;
+  }
+  const candidates = [
+    join(liveExtract, rel),
+    join(baselineResourcePack(), rel),
+  ];
   for (const abs of candidates) {
     if (existsSync(abs) && statSync(abs).isFile()) return abs;
   }

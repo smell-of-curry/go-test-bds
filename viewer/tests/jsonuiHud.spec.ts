@@ -8,11 +8,18 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { PNG } from "pngjs";
 import { createServer as createViteServer, type ViteDevServer } from "vite";
-import { ensureLiveExtract } from "./ensureLiveExtract";
+import { ensureLiveExtract, liveExtractAvailable } from "./ensureLiveExtract";
 import { handleJsonUiPackRequest } from "./jsonuiPackServer";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const viewerRoot = join(here, "..");
+
+test.beforeAll(() => {
+  test.skip(
+    !liveExtractAvailable(),
+    "testdata/jsonui/live-v2.18.5.zip (or extract) required for PHUD chrome textures",
+  );
+});
 
 interface Harness {
   pageUrl: string;

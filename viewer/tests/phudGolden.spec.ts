@@ -27,7 +27,7 @@ import {
 } from "./fixtureServer";
 import { assertGolden } from "./goldenCompare";
 import { ensureBaseline } from "./ensureBaseline";
-import { ensureLiveExtract } from "./ensureLiveExtract";
+import { ensureLiveExtract, liveExtractAvailable } from "./ensureLiveExtract";
 import { waitForJsonUiPaintReady } from "./jsonUiPaintReady";
 import { handleJsonUiPackRequest } from "./jsonuiPackServer";
 import {
@@ -48,6 +48,13 @@ test.use({ viewport: VIEWPORT, deviceScaleFactor: 1 });
 // Each golden boots its own vite + stream; serialise to keep startup timing
 // (and therefore text rasterisation) stable on the CI runner.
 test.describe.configure({ mode: "serial" });
+
+test.beforeAll(() => {
+  test.skip(
+    !liveExtractAvailable(),
+    "testdata/jsonui/live-v2.18.5.zip (or extract) required for PHUD goldens",
+  );
+});
 
 interface Harness {
   base: string;
