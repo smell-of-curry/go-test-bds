@@ -40,3 +40,35 @@ func TestMenuFormParsesButtons(t *testing.T) {
 		})
 	}
 }
+
+// TestModalFormParsesButtons pins MessageFormData / modal payload shapes.
+func TestModalFormParsesButtons(t *testing.T) {
+	for name, data := range map[string]string{
+		// Script API MessageFormData: button1/button2 are plain strings.
+		"stringButtons": `{"type":"modal","title":"GoTestBDS Modal","content":"body","button1":"Yes","button2":"No"}`,
+		"objectButtons": `{"type":"modal","title":"GoTestBDS Modal","content":"body",` +
+			`"button1":{"text":"Yes"},"button2":{"text":"No"}}`,
+		"rawtextTitle": `{"type":"modal","title":{"rawtext":[{"text":"GoTestBDS Modal"}]},"content":"body",` +
+			`"button1":"Yes","button2":"No"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			f, err := NewForm([]byte(data), 1, nil)
+			if err != nil {
+				t.Fatalf("NewForm: %v", err)
+			}
+			if f.Title() != "GoTestBDS Modal" {
+				t.Fatalf("title = %q", f.Title())
+			}
+			yes, no, ok := f.ModalFormButtons()
+			if !ok {
+				t.Fatalf("form type %q is not a modal", f.Type())
+			}
+			if yes.Text() != "Yes" {
+				t.Fatalf("button1 = %q", yes.Text())
+			}
+			if no.Text() != "No" {
+				t.Fatalf("button2 = %q", no.Text())
+			}
+		})
+	}
+}

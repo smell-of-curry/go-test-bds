@@ -19,8 +19,15 @@ type FormButton struct {
 	f *Form
 }
 
-// UnmarshalJSON ...
+// UnmarshalJSON accepts either a button object (`{"text":…}`) or a bare
+// string label. MessageFormData on current Bedrock sends button1/button2 as
+// plain strings; ActionFormData sends objects.
 func (b *FormButton) UnmarshalJSON(data []byte) error {
+	var label string
+	if err := json.Unmarshal(data, &label); err == nil {
+		b.b = buttonInternals{Text: Text(label)}
+		return nil
+	}
 	return json.Unmarshal(data, &b.b)
 }
 
