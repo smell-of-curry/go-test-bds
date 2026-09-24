@@ -1527,6 +1527,7 @@ test.describe("terrain atlas + mesher (browser)", () => {
       expect(result.coverage.neutralNoMaterials).toBe(1);
     } finally {
       await page.close().catch(() => undefined);
+      await context.close().catch(() => undefined);
       await devServer?.close();
       await assets.close();
     }
