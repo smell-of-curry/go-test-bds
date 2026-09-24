@@ -19,6 +19,7 @@ import {
   loadJsonlFrames,
   type JsonlFrame,
 } from "./fixtureServer";
+import { liveExtractAvailable } from "./ensureLiveExtract";
 import { handleJsonUiPackRequest } from "./jsonuiPackServer";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -29,6 +30,9 @@ test.use({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 1 });
 // Boots its own vite + waits for assetsSettled; under a parallel full-suite
 // run the cold start alone can eat the default 60s budget.
 test.setTimeout(120_000);
+
+const LIVE_PACK_SKIP =
+  "testdata/jsonui/live-v2.18.5.zip (or extract) required for PHUD chrome";
 
 const EMPTY = ["null", "null", "null", "false", "empty", "null", "100"];
 
@@ -74,6 +78,7 @@ async function openHudOnly(page: Page, appUrl: string): Promise<void> {
 test("realistic sidebar payload: clean text, dock on-screen, empty clears", async ({
   page,
 }) => {
+  test.skip(!liveExtractAvailable(), LIVE_PACK_SKIP);
   const all = loadJsonlFrames();
   const hello = all.find((f) => f.type === "hello");
   const keyframe = all.find((f) => f.type === "keyframe");

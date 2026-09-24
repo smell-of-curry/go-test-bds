@@ -3,21 +3,19 @@
  * armor row, and title tip backgrounds.
  */
 import { expect, test } from "@playwright/test";
-import {
-  createServer as createHttpServer,
-  type IncomingMessage,
-  type Server,
-  type ServerResponse,
-} from "node:http";
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { createServer as createHttpServer, type Server } from "node:http";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { PNG } from "pngjs";
 import { createServer as createViteServer, type ViteDevServer } from "vite";
+import { liveExtractAvailable } from "./ensureLiveExtract";
+import { handleJsonUiPackRequest } from "./jsonuiPackServer";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const viewerRoot = join(here, "..");
-const fixturesRoot = join(viewerRoot, "testdata", "jsonui");
+
+const LIVE_PACK_SKIP =
+  "testdata/jsonui/live-v2.18.5.zip (or extract) required for PHUD chrome";
 
 interface Harness {
   pageUrl: string;
@@ -29,56 +27,10 @@ interface Harness {
  */
 async function startHarness(): Promise<Harness> {
   const packHttp: Server = createHttpServer((req, res) => {
-    void handlePack(req, res);
-  });
-
-  async function handlePack(
-    req: IncomingMessage,
-    res: ServerResponse,
-  ): Promise<void> {
-    const url = new URL(req.url ?? "/", "http://127.0.0.1");
-    const cors = {
-      "access-control-allow-origin": "*",
-      "access-control-allow-methods": "GET, OPTIONS",
-    };
-    if (req.method === "OPTIONS") {
-      res.writeHead(204, cors);
-      res.end();
-      return;
-    }
-    if (url.pathname === "/packs") {
-      res.writeHead(200, { ...cors, "content-type": "application/json" });
-      res.end(
-        JSON.stringify([
-          { id: "vanilla", priority: 0 },
-          { id: "pokebedrock", priority: 1 },
-        ]),
-      );
-      return;
-    }
-    const packMatch = /^\/pack\/([^/]+)\/(.+)$/.exec(url.pathname);
-    if (packMatch) {
-      const packId = decodeURIComponent(packMatch[1]!);
-      let rel = decodeURIComponent(packMatch[2]!);
-      if (rel.toLowerCase().startsWith("ui/")) rel = rel.slice(3);
-      const abs = join(fixturesRoot, packId, rel);
-      if (!existsSync(abs) || !statSync(abs).isFile()) {
-        res.writeHead(404, cors);
-        res.end("missing");
-        return;
-      }
-      res.writeHead(200, { ...cors, "content-type": "application/json" });
-      res.end(readFileSync(abs));
-      return;
-    }
-    if (url.pathname.startsWith("/asset/")) {
-      res.writeHead(404, cors);
-      res.end("no asset");
-      return;
-    }
-    res.writeHead(404, cors);
+    if (handleJsonUiPackRequest(req, res)) return;
+    res.writeHead(404);
     res.end("not found");
-  }
+  });
 
   await new Promise<void>((resolve) =>
     packHttp.listen(0, "127.0.0.1", resolve),
@@ -114,6 +66,7 @@ async function startHarness(): Promise<Harness> {
 test("empty slots hidden; air/armor/xp gated; no fat green XP", async ({
   page,
 }) => {
+  test.skip(!liveExtractAvailable(), LIVE_PACK_SKIP);
   test.setTimeout(120_000);
   const harness = await startHarness();
   try {
@@ -506,6 +459,7 @@ test("empty slots hidden; air/armor/xp gated; no fat green XP", async ({
 test("loadingScreen PHUD paints TUTORIAL COMPLETE over sidebar", async ({
   page,
 }) => {
+  test.skip(!liveExtractAvailable(), LIVE_PACK_SKIP);
   test.setTimeout(120_000);
   const harness = await startHarness();
   try {
@@ -831,6 +785,7 @@ test("hearts sit above hotbar; quest-only currency hides coin chip", async ({
 test("HUD placement: full root, hotbar floor, top chips, ping top-left", async ({
   page,
 }) => {
+  test.skip(!liveExtractAvailable(), LIVE_PACK_SKIP);
   test.setTimeout(120_000);
   const harness = await startHarness();
   try {

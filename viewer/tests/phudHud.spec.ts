@@ -20,10 +20,14 @@ import {
   loadJsonlFrames,
   type JsonlFrame,
 } from "./fixtureServer";
+import { liveExtractAvailable } from "./ensureLiveExtract";
 import { handleJsonUiPackRequest } from "./jsonuiPackServer";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const viewerRoot = join(here, "..");
+
+const LIVE_PACK_SKIP =
+  "testdata/jsonui/live-v2.18.5.zip (or extract) required for PHUD chrome";
 
 /** Battle title flag (forms.ts FORM_FLAG_ROUTES → battle.main). */
 const BATTLE_FLAG = "§b§a§t§l§e";
@@ -170,6 +174,7 @@ function moveLabel(
 test("phud lanes render ping, banner+currency and the sidebar", async ({
   page,
 }) => {
+  test.skip(!liveExtractAvailable(), LIVE_PACK_SKIP);
   const h = await startHarness();
   try {
     await openViewer(
@@ -313,6 +318,7 @@ test("phud lanes render ping, banner+currency and the sidebar", async ({
 test("battle form renders the bottom battle bar and hover follows formHover", async ({
   page,
 }) => {
+  test.skip(!liveExtractAvailable(), LIVE_PACK_SKIP);
   const h = await startHarness();
   try {
     await openViewer(
@@ -637,9 +643,7 @@ test("battle form renders the bottom battle bar and hover follows formHover", as
     expect(hpLabel.every((h) => !h.clippedBottom)).toBe(true);
     // Tight-box fix: line-height fills the painted box (centers ink).
     expect(
-      hpLabel.every(
-        (h) => Math.abs(parseFloat(h.lineHeight) - h.boxH) < 0.6,
-      ),
+      hpLabel.every((h) => Math.abs(parseFloat(h.lineHeight) - h.boxH) < 0.6),
     ).toBe(true);
 
     // Clone onto a clean fixed plate — absolute battle chrome composites into
@@ -653,7 +657,9 @@ test("battle form renders the bottom battle bar and hover follows formHover", as
       ].find((e) => {
         if (e.style.display === "none") return false;
         const r = e.getBoundingClientRect();
-        return r.width > 8 && r.height > 2 && (e.textContent ?? "").includes("%");
+        return (
+          r.width > 8 && r.height > 2 && (e.textContent ?? "").includes("%")
+        );
       });
       if (!el) return;
       const r = el.getBoundingClientRect();
