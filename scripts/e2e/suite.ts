@@ -1,5 +1,5 @@
 import { ItemStack, world } from "@minecraft/server";
-import { ActionFormData } from "@minecraft/server-ui";
+import { ActionFormData, MessageFormData } from "@minecraft/server-ui";
 import {
   assert,
   assertContains,
@@ -163,7 +163,7 @@ export const protocolSuite: TestSuite = defineSuite({
       },
     },
     {
-      name: "menuFormRespond dismisses an open form",
+      name: "dismissForm closes an open action form",
       async run(ctx) {
         const form = new ActionFormData()
           .title("GoTestBDS Dismiss")
@@ -176,6 +176,23 @@ export const protocolSuite: TestSuite = defineSuite({
 
         const response = await shown;
         assert(response.canceled, "dismissed form should report canceled");
+      },
+    },
+    {
+      name: "dismissForm closes an open modal form",
+      async run(ctx) {
+        const form = new MessageFormData()
+          .title("GoTestBDS Modal Dismiss")
+          .body("Modal should dismiss without a button press.")
+          .button1("Yes")
+          .button2("No");
+
+        const shown = form.show(ctx.bot.player);
+        await ctx.bot.waitForForm(seconds(15));
+        await ctx.bot.dismissForm();
+
+        const response = await shown;
+        assert(response.canceled, "dismissed modal should report canceled");
       },
     },
   ],

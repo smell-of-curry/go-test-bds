@@ -54,6 +54,9 @@ export interface DialogueResponse {
 /** Disconnect closes the Bot connection. */
 export interface Disconnect {}
 
+/** DismissForm closes whatever form the bot has open (menu, modal, or custom), as though the player dismissed it without answering. */
+export interface DismissForm {}
+
 /** DropSelectedItem drops the currently held item stack. */
 export interface DropSelectedItem {}
 
@@ -245,6 +248,7 @@ export type InstructionAction =
   | "customFormRespond"
   | "dialogueResponse"
   | "disconnect"
+  | "dismissForm"
   | "dropSelectedItem"
   | "editSign"
   | "getBlock"
@@ -290,6 +294,7 @@ export interface InstructionParametersByAction {
   customFormRespond: CustomFormRespond;
   dialogueResponse: DialogueResponse;
   disconnect: Disconnect;
+  dismissForm: DismissForm;
   dropSelectedItem: DropSelectedItem;
   editSign: EditSign;
   getBlock: GetBlock;
@@ -336,6 +341,7 @@ export type InstructionPayload =
   | { action: "customFormRespond"; parameters: CustomFormRespond }
   | { action: "dialogueResponse"; parameters: DialogueResponse }
   | { action: "disconnect"; parameters: Disconnect }
+  | { action: "dismissForm"; parameters: DismissForm }
   | { action: "dropSelectedItem"; parameters: DropSelectedItem }
   | { action: "editSign"; parameters: EditSign }
   | { action: "getBlock"; parameters: GetBlock }

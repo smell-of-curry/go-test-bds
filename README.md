@@ -152,6 +152,16 @@ await ctx.bot.clickThrough({
 });
 ```
 
+To dismiss whatever form is open without answering — action/menu, modal/message,
+or custom — use `bot.closeForm()` (alias `bot.dismissForm()`). It sends the
+`dismissForm` instruction, which works for every form type; the typed
+`*FormRespond` instructions with `ignore: true` reject the wrong type.
+
+```typescript
+await ctx.bot.waitForForm();
+await ctx.bot.closeForm();
+```
+
 ### Seeing what the bot saw
 
 The optional **viewer** is an HTTP hub on the bot (`gotestbds/viewer/`) that

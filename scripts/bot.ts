@@ -695,18 +695,28 @@ export class Bot {
   }
 
   /**
-   * Closes the form the bot has open, as though the player dismissed it.
+   * Closes whatever form the bot has open (action/menu, modal/message, or
+   * custom), as though the player dismissed it without answering.
+   *
+   * Prefer this over `menuFormRespond` / `modalFormRespond` /
+   * `customFormRespond` with `ignore: true` when the open form's type is
+   * unknown — those instructions reject the wrong type.
    *
    * @param options Timeout overrides.
    * @returns A promise resolving once the bot confirms the action.
    */
   async closeForm(options?: RunActionOptions): Promise<void> {
-    await runAction(
-      this.player,
-      "menuFormRespond",
-      { response: 0, ignore: true },
-      this.opts(options),
-    );
+    await runAction(this.player, "dismissForm", {}, this.opts(options));
+  }
+
+  /**
+   * Alias of {@link Bot.closeForm}.
+   *
+   * @param options Timeout overrides.
+   * @returns A promise resolving once the bot confirms the action.
+   */
+  async dismissForm(options?: RunActionOptions): Promise<void> {
+    return this.closeForm(options);
   }
 
   // --- viewer ----------------------------------------------------------------

@@ -121,6 +121,7 @@ func DefaultPull(callbacker Callbacker) *Pull {
 	pull.Register(create[StopNavigating]())
 	pull.Register(create[StopUsingItem]())
 	pull.Register(create[CustomFormRespond]())
+	pull.Register(create[DismissForm]())
 	pull.Register(create[MenuFormRespond]())
 	pull.Register(create[ModalFormRespond]())
 	pull.Register(create[RunCommand]())

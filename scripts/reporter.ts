@@ -31,8 +31,9 @@ export interface SuiteResult {
   durationMs: number;
   tests: TestResult[];
   /**
-   * Failure raised by the suite's own `setup`/`teardown` rather than by a test.
-   * When `setup` throws, every test in the suite is reported as skipped.
+   * Failure raised by the suite's own `setup`/`teardown`/cleanups rather than
+   * by a test body. When `setup` or `teardown` throws, affected tests are also
+   * marked `failed` so `totals.failed` is non-zero.
    */
   error?: string;
 }

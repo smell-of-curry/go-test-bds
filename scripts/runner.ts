@@ -94,16 +94,18 @@ export interface TestSuite {
   /** Labels for filtering. Tests inherit these for filter purposes. */
   tags?: string[];
   /**
-   * Runs once before the suite's tests. If it throws, every test in the suite
-   * is reported as skipped rather than failed, so one broken fixture does not
-   * masquerade as many broken features.
+   * Runs once before the suite's tests. If it throws, every selected test in
+   * the suite is reported as failed (not skipped) with the setup error, so the
+   * run's totals.failed is non-zero and CI cannot go green.
    *
    * @param ctx The run context.
    * @returns Nothing, or a promise.
    */
   setup?(ctx: TestContext): Promise<void> | void;
   /**
-   * Runs once after the suite's tests, even when they failed.
+   * Runs once after the suite's tests, even when they failed. If it throws,
+   * previously-passed tests in the suite are marked failed with the teardown
+   * error (intentional `skip` stays skipped).
    *
    * @param ctx The run context.
    * @returns Nothing, or a promise.
@@ -297,7 +299,9 @@ async function runSuite(
   }
 
   if (setupError) {
-    // The fixture never came up, so the tests were never really exercised.
+    // Fixture never came up — mark every selected non-skipped test failed so
+    // totals.failed is non-zero. Explicit `skip` stays skipped.
+    const error = `suite setup failed: ${setupError}`;
     for (const test of tests) {
       await emitViewerMark(bot, {
         phase: "testStart",
@@ -305,14 +309,23 @@ async function runSuite(
         suite: suite.name,
         test: test.name,
       });
-      const result: TestResult = {
-        suite: suite.name,
-        name: test.name,
-        status: "skipped",
-        durationMs: 0,
-        skipReason: `suite setup failed: ${setupError}`,
-        logs: [],
-      };
+      const result: TestResult = test.skip
+        ? {
+            suite: suite.name,
+            name: test.name,
+            status: "skipped",
+            durationMs: 0,
+            skipReason: typeof test.skip === "string" ? test.skip : "skipped",
+            logs: [],
+          }
+        : {
+            suite: suite.name,
+            name: test.name,
+            status: "failed",
+            durationMs: 0,
+            error,
+            logs: [],
+          };
       await finishTest(bot, env.runId, result);
       results.push(result);
       env.reporter.onTestEnd?.(result);
@@ -337,11 +350,39 @@ async function runSuite(
   }
   const cleanupError = await runCleanups(cleanups);
 
+  // Suite-level hook failures must red the run: aggregators key off
+  // runEnd.totals.failed, not suiteEnd.error alone.
+  const hookFailures: string[] = [];
+  if (teardownError)
+    hookFailures.push(`suite teardown failed: ${teardownError}`);
+  if (cleanupError) hookFailures.push(cleanupError);
+  if (hookFailures.length > 0) {
+    const hookError = hookFailures.join("; ");
+    for (const result of results) {
+      if (result.status === "skipped") continue;
+      if (result.status === "passed") {
+        result.status = "failed";
+        result.error = hookError;
+      } else if (result.status === "failed") {
+        result.error = result.error
+          ? `${result.error}; ${hookError}`
+          : hookError;
+      }
+      // Re-emit so [GOTESTBDS] testEnd lines match the final status.
+      await finishTest(bot, env.runId, result);
+      env.reporter.onTestEnd?.(result);
+    }
+  }
+
   const suiteResult: SuiteResult = {
     name: suite.name,
     durationMs: Date.now() - startedAt,
     tests: results,
-    error: setupError ?? teardownError ?? cleanupError,
+    error: setupError
+      ? `suite setup failed: ${setupError}`
+      : hookFailures.length > 0
+        ? hookFailures.join("; ")
+        : undefined,
   };
   const suiteEndIssuedAtMs = Date.now();
   await emitViewerMark(bot, {
