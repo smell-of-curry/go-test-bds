@@ -30,6 +30,7 @@ type movementData struct {
 
 	sneaking, sprinting, swimming, crawling, gliding, immobile, onGround bool
 	movementBitset                                                       protocol.InputFlags
+	pendingItemUseStop                                                   *packet.PlayerAction
 
 	path             *pathfind.Path
 	navigationTarget cube.Pos

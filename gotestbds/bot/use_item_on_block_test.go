@@ -33,8 +33,8 @@ func TestUseItemOnBlockSendsAcceptedClick(t *testing.T) {
 	if err := a.UseItemOnBlock(pos, cube.FaceUp, click); err != nil {
 		t.Fatal(err)
 	}
-	if len(conn.written) != 3 {
-		t.Fatalf("packets = %d, want start, transaction, stop", len(conn.written))
+	if len(conn.written) != 2 {
+		t.Fatalf("packets = %d, want start and transaction", len(conn.written))
 	}
 	start, ok := conn.written[0].(*packet.PlayerAction)
 	if !ok || start.ActionType != protocol.PlayerActionStartItemUseOn {
@@ -44,11 +44,6 @@ func TestUseItemOnBlockSendsAcceptedClick(t *testing.T) {
 	if !ok {
 		t.Fatalf("second packet = %T, want InventoryTransaction", conn.written[1])
 	}
-	stop, ok := conn.written[2].(*packet.PlayerAction)
-	if !ok || stop.ActionType != protocol.PlayerActionStopItemUseOn {
-		t.Fatalf("third packet = %#v, want stop item use", conn.written[2])
-	}
-
 	use, ok := tx.TransactionData.(*protocol.UseItemTransactionData)
 	if !ok {
 		t.Fatalf("transaction = %T", tx.TransactionData)
@@ -71,5 +66,17 @@ func TestUseItemOnBlockSendsAcceptedClick(t *testing.T) {
 	eyes := a.EyePos()
 	if use.Position.X() != float32(eyes.X()) || use.Position.Y() != float32(eyes.Y()) || use.Position.Z() != float32(eyes.Z()) {
 		t.Fatalf("position = %v, want eyes %v", use.Position, eyes)
+	}
+
+	conn.written = nil
+	a.Tick()
+	var stop *packet.PlayerAction
+	for _, pk := range conn.written {
+		if action, ok := pk.(*packet.PlayerAction); ok && action.ActionType == protocol.PlayerActionStopItemUseOn {
+			stop = action
+		}
+	}
+	if stop == nil {
+		t.Fatal("next tick did not stop item use")
 	}
 }
