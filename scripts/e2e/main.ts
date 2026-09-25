@@ -15,7 +15,7 @@ import {
   StructuredReporter,
   type RunResult,
 } from "../index";
-import { BOT_NAME, protocolSuite } from "./suite";
+import { BOT_NAME, interactionDiagnostics, protocolSuite } from "./suite";
 
 /** Script event that starts a run. Matches the consumer / orchestrator. */
 const RUN_EVENT_ID = "gotestbds:run";
@@ -37,6 +37,26 @@ let running = false;
  */
 function emitResultLine(ok: boolean): void {
   console.log(`GOTESTBDS_E2E_RESULT: ${ok ? "PASS" : "FAIL"}`);
+}
+
+/**
+ * Emits one compact diagnostic line per control case.
+ *
+ * @param result Completed test run.
+ */
+function emitCaseLines(result: RunResult): void {
+  for (const test of result.suites.flatMap((suite) => suite.tests)) {
+    const reason = (test.error ?? test.skipReason ?? "ok").replace(/\s+/g, " ");
+    const observed = interactionDiagnostics.get(test.name);
+    const events = observed
+      ? ` events=beforeBlock:${observed.beforeBlock},afterBlock:${observed.afterBlock},` +
+        `beforeItemUse:${observed.beforeItemUse},afterItemUse:${observed.afterItemUse}`
+      : "";
+    console.warn(
+      `GOTESTBDS_E2E_CASE: name=${JSON.stringify(test.name)} ` +
+        `status=${test.status.toUpperCase()} reason=${JSON.stringify(reason)}${events}`,
+    );
+  }
 }
 
 /**
@@ -79,6 +99,7 @@ async function startRun(message: string): Promise<void> {
   }
 
   running = true;
+  interactionDiagnostics.clear();
   const runId = request.runId ?? `e2e-${Date.now()}`;
   try {
     const bots = await connectBots(request.bots ?? 1);
@@ -91,6 +112,7 @@ async function startRun(message: string): Promise<void> {
         new StructuredReporter(),
       ),
     });
+    emitCaseLines(result);
     const ok = result.totals.failed === 0 && result.totals.passed > 0;
     console.log(
       `[tests] run ${runId} complete: ${result.totals.passed} passed, ` +

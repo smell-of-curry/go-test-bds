@@ -19,12 +19,15 @@ func (*LookAtEntity) Name() string {
 
 // Run is the function that runs the instruction.
 func (l *LookAtEntity) Run(ctx context.Context, b *bot.Bot) error {
-	return execute(b, func(a *actor.Actor) error {
+	if err := execute(b, func(a *actor.Actor) error {
 		ent, ok := a.World().Entity(l.RuntimeID)
 		if !ok {
 			return fmt.Errorf("entity not found")
 		}
 		a.LookAtEntity(ent)
 		return nil
-	})
+	}); err != nil {
+		return err
+	}
+	return waitForLookToSettle(ctx)
 }

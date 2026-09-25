@@ -9,11 +9,122 @@ import {
   assertNearPosition,
   defineSuite,
   seconds,
+  type TestContext,
   type TestSuite,
 } from "../index";
 
 /** Name of the first bot. Must match the Go binary `--name` / GOTESTBDS_BOT_NAME. */
 export const BOT_NAME = "TestBot";
+
+/** Script events observed for one block-interaction control case. */
+export interface InteractionDiagnostics {
+  beforeBlock: boolean;
+  afterBlock: boolean;
+  beforeItemUse: boolean;
+  afterItemUse: boolean;
+}
+
+/** Event observations printed by the CI fixture after the run. */
+export const interactionDiagnostics = new Map<string, InteractionDiagnostics>();
+
+function observeBlockInteraction(
+  ctx: TestContext,
+  testName: string,
+  support: { x: number; y: number; z: number },
+): void {
+  const observed: InteractionDiagnostics = {
+    beforeBlock: false,
+    afterBlock: false,
+    beforeItemUse: false,
+    afterItemUse: false,
+  };
+  interactionDiagnostics.set(testName, observed);
+
+  const isSubjectBlock = (location: {
+    x: number;
+    y: number;
+    z: number;
+  }): boolean =>
+    location.x === support.x &&
+    location.y === support.y &&
+    location.z === support.z;
+  const beforeBlock = world.beforeEvents.playerInteractWithBlock.subscribe(
+    (event) => {
+      if (
+        event.player.id === ctx.bot.player.id &&
+        isSubjectBlock(event.block.location)
+      ) {
+        observed.beforeBlock = true;
+      }
+    },
+  );
+  const afterBlock = world.afterEvents.playerInteractWithBlock.subscribe(
+    (event) => {
+      if (
+        event.player.id === ctx.bot.player.id &&
+        isSubjectBlock(event.block.location)
+      ) {
+        observed.afterBlock = true;
+      }
+    },
+  );
+  const beforeItemUse = world.beforeEvents.itemUse.subscribe((event) => {
+    if (event.source.id === ctx.bot.player.id) observed.beforeItemUse = true;
+  });
+  const afterItemUse = world.afterEvents.itemUse.subscribe((event) => {
+    if (event.source.id === ctx.bot.player.id) observed.afterItemUse = true;
+  });
+
+  ctx.track(() => {
+    world.beforeEvents.playerInteractWithBlock.unsubscribe(beforeBlock);
+    world.afterEvents.playerInteractWithBlock.unsubscribe(afterBlock);
+    world.beforeEvents.itemUse.unsubscribe(beforeItemUse);
+    world.afterEvents.itemUse.unsubscribe(afterItemUse);
+  });
+}
+
+async function prepareBlockInteraction(
+  ctx: TestContext,
+  itemType?: string,
+): Promise<{ support: { x: number; y: number; z: number } }> {
+  const inventory = ctx.bot.player.getComponent("minecraft:inventory");
+  assertDefined(inventory, "player should have an inventory");
+  const container = inventory.container;
+  assertDefined(container, "inventory should have a container");
+  container.clearAll();
+  if (itemType) container.setItem(0, new ItemStack(itemType));
+  await ctx.bot.getInventory();
+  await ctx.bot.setHeldSlot(0);
+  await assertEventually(() => ctx.bot.player.selectedSlotIndex === 0, {
+    timeoutMs: seconds(10),
+    description: "server to select hotbar slot 0",
+  });
+
+  const state = await ctx.bot.getState();
+  const support = {
+    x: Math.floor(state.position.x) + 2,
+    y: Math.floor(state.position.y) - 1,
+    z: Math.floor(state.position.z),
+  };
+  const dimension = ctx.bot.player.dimension;
+  dimension.getBlock(support)?.setType("minecraft:stone");
+  dimension
+    .getBlock({ x: support.x, y: support.y + 1, z: support.z })
+    ?.setType("minecraft:air");
+  await assertEventually(
+    async () => (await ctx.bot.getBlock(support)).name.includes("stone"),
+    {
+      timeoutMs: seconds(15),
+      description: "interaction support block to reach the bot",
+    },
+  );
+  await ctx.bot.lookAt({
+    x: support.x + 0.5,
+    y: support.y + 0.99,
+    z: support.z + 0.5,
+  });
+  return { support };
+}
 
 /**
  * Protocol smoke suite exercised by the CI fixture pack against a live BDS.
@@ -57,9 +168,9 @@ export const protocolSuite: TestSuite = defineSuite({
       async run(ctx) {
         const before = ctx.bot.player.location;
         const dest = {
-          x: Math.floor(before.x) + 8.5,
+          x: Math.floor(before.x) + 32.5,
           y: before.y,
-          z: Math.floor(before.z) + 8.5,
+          z: Math.floor(before.z) + 32.5,
         };
         ctx.bot.player.teleport(dest);
         await assertEventually(
@@ -160,6 +271,98 @@ export const protocolSuite: TestSuite = defineSuite({
           ),
           `bot should see 5 diamonds, saw ${JSON.stringify(synced.items)}`,
         );
+      },
+    },
+    {
+      name: "places a held block on a block",
+      async run(ctx) {
+        const testName = "places a held block on a block";
+        const { support } = await prepareBlockInteraction(
+          ctx,
+          "minecraft:dirt",
+        );
+        const placed = { x: support.x, y: support.y + 1, z: support.z };
+        ctx.track(() =>
+          ctx.bot.player.dimension.getBlock(placed)?.setType("minecraft:air"),
+        );
+
+        observeBlockInteraction(ctx, testName, support);
+        await ctx.bot.interactWithBlock(support);
+        await assertEventually(
+          () =>
+            ctx.bot.player.dimension.getBlock(placed)?.typeId ===
+            "minecraft:dirt",
+          {
+            timeoutMs: seconds(15),
+            description: "held dirt block to be placed",
+          },
+        );
+      },
+    },
+    {
+      name: "uses a spawn egg on a block",
+      async run(ctx) {
+        const testName = "uses a spawn egg on a block";
+        const dimension = ctx.bot.player.dimension;
+        for (const pig of dimension.getEntities({ type: "minecraft:pig" })) {
+          pig.remove();
+        }
+        ctx.track(() => {
+          for (const pig of dimension.getEntities({ type: "minecraft:pig" })) {
+            pig.remove();
+          }
+        });
+
+        const { support } = await prepareBlockInteraction(
+          ctx,
+          "minecraft:pig_spawn_egg",
+        );
+        observeBlockInteraction(ctx, testName, support);
+        await ctx.bot.interactWithBlock(support);
+        await assertEventually(
+          () =>
+            dimension.getEntities({
+              type: "minecraft:pig",
+              location: support,
+              maxDistance: 4,
+            }).length > 0,
+          {
+            timeoutMs: seconds(15),
+            description: "pig spawn egg to create a pig",
+          },
+        );
+      },
+    },
+    {
+      name: "empty-hand block interaction reaches before event",
+      async run(ctx) {
+        const testName = "empty-hand block interaction reaches before event";
+        const { support } = await prepareBlockInteraction(ctx);
+        let seen = false;
+        const sub = world.beforeEvents.playerInteractWithBlock.subscribe(
+          (event) => {
+            if (event.player.id !== ctx.bot.player.id) return;
+            const location = event.block.location;
+            if (
+              location.x !== support.x ||
+              location.y !== support.y ||
+              location.z !== support.z
+            ) {
+              return;
+            }
+            seen = true;
+          },
+        );
+        ctx.track(() =>
+          world.beforeEvents.playerInteractWithBlock.unsubscribe(sub),
+        );
+
+        observeBlockInteraction(ctx, testName, support);
+        await ctx.bot.interactWithBlock(support);
+        await assertEventually(() => seen, {
+          timeoutMs: seconds(15),
+          description: "playerInteractWithBlock before event",
+        });
       },
     },
     {
