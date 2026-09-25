@@ -101,9 +101,9 @@ export const protocolSuite: TestSuite = defineSuite({
       async run(ctx) {
         const before = ctx.bot.player.location;
         const dest = {
-          x: Math.floor(before.x) + 8.5,
+          x: Math.floor(before.x) + 32.5,
           y: before.y,
-          z: Math.floor(before.z) + 8.5,
+          z: Math.floor(before.z) + 32.5,
         };
         ctx.bot.player.teleport(dest);
         await assertEventually(
