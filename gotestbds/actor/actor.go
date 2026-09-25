@@ -573,7 +573,21 @@ func (a *Actor) UseItemOnBlock(pos cube.Pos, face cube.Face, clickPos mgl64.Vec3
 		clickPos = hitPoint.Sub(pos.Vec3())
 	}
 	blockRuntimeID, _ := a.world.NetworkBlockRuntimeID(pos, 0)
+	predictedItem := heldItem
+	if a.Gamemode() != 1 && predictedItem.Stack.Count > 0 {
+		predictedItem.Stack.Count--
+		if predictedItem.Stack.Count == 0 {
+			predictedItem = protocol.ItemInstance{}
+		}
+	}
 	action := &protocol.UseItemTransactionData{
+		Actions: []protocol.InventoryAction{{
+			SourceType:    protocol.InventoryActionSourceContainer,
+			WindowID:      protocol.Option(int8(protocol.WindowIDInventory)),
+			InventorySlot: uint32(a.heldSlot),
+			OldItem:       heldItem,
+			NewItem:       predictedItem,
+		}},
 		HotBarSlot:       int32(a.heldSlot),
 		HeldItem:         heldItem,
 		ActionType:       protocol.UseItemActionClickBlock,
@@ -585,8 +599,23 @@ func (a *Actor) UseItemOnBlock(pos cube.Pos, face cube.Face, clickPos mgl64.Vec3
 		BlockRuntimeID:   blockRuntimeID,
 		ClientPrediction: protocol.ClientPredictionSuccess,
 	}
-	a.pendingItemUse = action
-	return nil
+	if err := a.conn.WritePacket(&packet.PlayerAction{
+		EntityRuntimeID: a.RuntimeID(),
+		ActionType:      protocol.PlayerActionStartItemUseOn,
+		BlockPosition:   posToProtocol(pos),
+		ResultPosition:  posToProtocol(pos.Side(face)),
+		BlockFace:       int32(face),
+	}); err != nil {
+		return err
+	}
+	if err := a.useItem(action); err != nil {
+		return err
+	}
+	return a.conn.WritePacket(&packet.PlayerAction{
+		EntityRuntimeID: a.RuntimeID(),
+		ActionType:      protocol.PlayerActionStopItemUseOn,
+		BlockPosition:   posToProtocol(pos),
+	})
 }
 
 // ReleaseItem stops using held item.
