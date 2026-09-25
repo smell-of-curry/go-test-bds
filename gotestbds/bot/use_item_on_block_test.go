@@ -58,12 +58,20 @@ func TestUseItemOnBlockSendsAcceptedClick(t *testing.T) {
 	if err := a.UseItemOnBlock(pos, cube.FaceUp, click); err != nil {
 		t.Fatal(err)
 	}
-	if len(conn.written) != 1 {
-		t.Fatalf("packets = %d, want one InventoryTransaction", len(conn.written))
+	if len(conn.written) != 3 {
+		t.Fatalf("packets = %d, want start, transaction, stop", len(conn.written))
 	}
-	tx, ok := conn.written[0].(*packet.InventoryTransaction)
+	start, ok := conn.written[0].(*packet.PlayerAction)
+	if !ok || start.ActionType != protocol.PlayerActionStartItemUseOn {
+		t.Fatalf("first packet = %#v, want start item use", conn.written[0])
+	}
+	tx, ok := conn.written[1].(*packet.InventoryTransaction)
 	if !ok {
-		t.Fatalf("packet = %T, want InventoryTransaction", conn.written[0])
+		t.Fatalf("second packet = %T, want InventoryTransaction", conn.written[1])
+	}
+	stop, ok := conn.written[2].(*packet.PlayerAction)
+	if !ok || stop.ActionType != protocol.PlayerActionStopItemUseOn {
+		t.Fatalf("third packet = %#v, want stop item use", conn.written[2])
 	}
 
 	use, ok := tx.TransactionData.(*protocol.UseItemTransactionData)
@@ -79,12 +87,8 @@ func TestUseItemOnBlockSendsAcceptedClick(t *testing.T) {
 	if use.ClientPrediction != protocol.ClientPredictionSuccess {
 		t.Fatalf("prediction = %d, want success", use.ClientPrediction)
 	}
-	if len(use.Actions) != 1 {
-		t.Fatalf("inventory actions = %d, want 1", len(use.Actions))
-	}
-	if use.Actions[0].SourceType != protocol.InventoryActionSourceContainer ||
-		use.Actions[0].InventorySlot != uint32(a.HeldSlot()) {
-		t.Fatalf("inventory action = %#v", use.Actions[0])
+	if len(use.Actions) != 0 {
+		t.Fatalf("inventory actions = %d, want 0", len(use.Actions))
 	}
 	if use.BlockPosition.X() != int32(pos.X()) || use.BlockPosition.Y() != int32(pos.Y()) || use.BlockPosition.Z() != int32(pos.Z()) {
 		t.Fatalf("block position = %v", use.BlockPosition)
@@ -92,8 +96,8 @@ func TestUseItemOnBlockSendsAcceptedClick(t *testing.T) {
 	if use.ClickedPosition.Y() != 1 {
 		t.Fatalf("top-face click y = %v, want 1", use.ClickedPosition.Y())
 	}
-	feet := a.Position()
-	if use.Position.X() != float32(feet.X()) || use.Position.Y() != float32(feet.Y()) || use.Position.Z() != float32(feet.Z()) {
-		t.Fatalf("position = %v, want feet %v", use.Position, feet)
+	eyes := a.EyePos()
+	if use.Position.X() != float32(eyes.X()) || use.Position.Y() != float32(eyes.Y()) || use.Position.Z() != float32(eyes.Z()) {
+		t.Fatalf("position = %v, want eyes %v", use.Position, eyes)
 	}
 }

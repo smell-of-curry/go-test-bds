@@ -573,21 +573,7 @@ func (a *Actor) UseItemOnBlock(pos cube.Pos, face cube.Face, clickPos mgl64.Vec3
 		clickPos = hitPoint.Sub(pos.Vec3())
 	}
 	blockRuntimeID, _ := a.world.NetworkBlockRuntimeID(pos, 0)
-	predictedItem := heldItem
-	if a.Gamemode() != 1 && predictedItem.Stack.Count > 0 {
-		predictedItem.Stack.Count--
-		if predictedItem.Stack.Count == 0 {
-			predictedItem = protocol.ItemInstance{}
-		}
-	}
 	action := &protocol.UseItemTransactionData{
-		Actions: []protocol.InventoryAction{{
-			SourceType:    protocol.InventoryActionSourceContainer,
-			WindowID:      protocol.Option(int8(protocol.WindowIDInventory)),
-			InventorySlot: uint32(a.heldSlot),
-			OldItem:       heldItem,
-			NewItem:       predictedItem,
-		}},
 		HotBarSlot:       int32(a.heldSlot),
 		HeldItem:         heldItem,
 		ActionType:       protocol.UseItemActionClickBlock,
@@ -595,13 +581,27 @@ func (a *Actor) UseItemOnBlock(pos cube.Pos, face cube.Face, clickPos mgl64.Vec3
 		BlockPosition:    posToProtocol(pos),
 		BlockFace:        int32(face),
 		ClickedPosition:  mcmath.Vec64To32(clickPos),
-		Position:         mcmath.Vec64To32(a.Position()),
+		Position:         mcmath.Vec64To32(a.EyePos()),
 		BlockRuntimeID:   blockRuntimeID,
 		ClientPrediction: protocol.ClientPredictionSuccess,
 	}
-	// A real block click is one UseItem inventory transaction. Start/stop item
-	// actions describe holding a usable item and make BDS discard this click.
-	return a.useItem(action)
+	if err := a.conn.WritePacket(&packet.PlayerAction{
+		EntityRuntimeID: a.RuntimeID(),
+		ActionType:      protocol.PlayerActionStartItemUseOn,
+		BlockPosition:   posToProtocol(pos),
+		ResultPosition:  posToProtocol(pos.Side(face)),
+		BlockFace:       int32(face),
+	}); err != nil {
+		return err
+	}
+	if err := a.useItem(action); err != nil {
+		return err
+	}
+	return a.conn.WritePacket(&packet.PlayerAction{
+		EntityRuntimeID: a.RuntimeID(),
+		ActionType:      protocol.PlayerActionStopItemUseOn,
+		BlockPosition:   posToProtocol(pos.Side(face)),
+	})
 }
 
 // ReleaseItem stops using held item.
