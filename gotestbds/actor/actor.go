@@ -572,13 +572,21 @@ func (a *Actor) UseItemOnBlock(pos cube.Pos, face cube.Face, clickPos mgl64.Vec3
 	}
 
 	heldItem, _ := a.Inventory().ItemInstance(a.heldSlot)
+	// BDS drops a UseItem/ClickBlock whose zero fields do not match a real
+	// client: TriggerTypeUnknown, ClientPredictionFailure, position 0,0,0, and
+	// block runtime id 0 (air). Nothing is placed and no interact event fires.
+	blockRuntimeID, _ := a.world.NetworkBlockRuntimeID(pos, 0)
 	action := &protocol.UseItemTransactionData{
-		HotBarSlot:      int32(a.heldSlot),
-		HeldItem:        heldItem,
-		ActionType:      protocol.UseItemActionClickBlock,
-		BlockPosition:   posToProtocol(pos),
-		BlockFace:       int32(face),
-		ClickedPosition: mcmath.Vec64To32(clickPos),
+		HotBarSlot:       int32(a.heldSlot),
+		HeldItem:         heldItem,
+		ActionType:       protocol.UseItemActionClickBlock,
+		TriggerType:      protocol.TriggerTypePlayerInput,
+		BlockPosition:    posToProtocol(pos),
+		BlockFace:        int32(face),
+		ClickedPosition:  mcmath.Vec64To32(clickPos),
+		Position:         mcmath.Vec64To32(a.EyePos()),
+		BlockRuntimeID:   blockRuntimeID,
+		ClientPrediction: protocol.ClientPredictionSuccess,
 	}
 	_ = a.useItem(action)
 
