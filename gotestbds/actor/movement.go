@@ -2,6 +2,7 @@ package actor
 
 import (
 	"fmt"
+	"log/slog"
 	"math"
 	"time"
 
@@ -312,6 +313,12 @@ func (a *Actor) SendMovement() {
 		a.pendingItemUse.Position = pk.Position
 		pk.InputData.Set(packet.InputFlagPerformItemInteraction)
 		pk.ItemInteractionData = protocol.Option(*a.pendingItemUse)
+		slog.Info("auth-item-interaction",
+			"tick", pk.Tick,
+			"pos", pk.Position,
+			"net", a.pendingItemUse.HeldItem.Stack.ItemType.NetworkID,
+			"block", a.pendingItemUse.BlockRuntimeID,
+		)
 		a.pendingItemUse = nil
 	}
 	_ = a.conn.WritePacket(pk)
