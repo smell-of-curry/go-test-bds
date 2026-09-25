@@ -576,6 +576,12 @@ func (a *Actor) UseItemOnBlock(pos cube.Pos, face cube.Face, clickPos mgl64.Vec3
 	// BDS drops a UseItem/ClickBlock whose zero fields do not match a real
 	// client: TriggerTypeUnknown, ClientPredictionFailure, position 0,0,0, and
 	// block runtime id 0 (air). Nothing is placed and no interact event fires.
+	// It also drops a click whose face is not the face the look ray hits.
+	_, hitPos, hitFace, hitPoint := posFromRotation(6, a.Rotation(), a.EyePos(), a.world)
+	if hitPos == pos {
+		face = hitFace
+		clickPos = hitPoint.Sub(pos.Vec3())
+	}
 	blockRuntimeID, _ := a.world.NetworkBlockRuntimeID(pos, 0)
 	action := &protocol.UseItemTransactionData{
 		HotBarSlot:       int32(a.heldSlot),
@@ -601,8 +607,13 @@ func (a *Actor) UseItemOnBlock(pos cube.Pos, face cube.Face, clickPos mgl64.Vec3
 		"block", action.BlockRuntimeID,
 		"trigger", action.TriggerType,
 		"pred", action.ClientPrediction,
+		"item", a.ItemName(action.HeldItem.Stack.ItemType.NetworkID),
 		"slot", action.HotBarSlot,
 		"face", action.BlockFace,
+		"yaw", a.Rotation().Yaw(),
+		"pitch", a.Rotation().Pitch(),
+		"hit", hitPos,
+		"hitFace", hitFace,
 		"pos", action.Position,
 		"click", action.ClickedPosition,
 		"bpos", action.BlockPosition,
