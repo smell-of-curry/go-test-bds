@@ -260,6 +260,7 @@ func (a *Actor) fillMovementBitset() {
 		a.movementBitset.Set(packet.InputFlagPerformBlockActions)
 	}
 	a.movementBitset.Unset(packet.InputFlagPerformItemInteraction)
+	a.movementBitset.Unset(packet.InputFlagStartUsingItem)
 }
 
 // SendMovement sends movement to the server.
@@ -314,6 +315,7 @@ func (a *Actor) SendMovement() {
 	if a.pendingItemUse != nil {
 		a.pendingItemUse.Position = pk.Position
 		pk.InputData.Set(packet.InputFlagPerformItemInteraction)
+		pk.InputData.Set(packet.InputFlagStartUsingItem)
 		pk.ItemInteractionData = protocol.Option(*a.pendingItemUse)
 		a.pendingItemUse = nil
 	}

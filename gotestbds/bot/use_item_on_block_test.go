@@ -68,6 +68,9 @@ func TestUseItemOnBlockSendsAcceptedClick(t *testing.T) {
 	if auth == nil || !auth.InputData.Load(packet.InputFlagPerformItemInteraction) {
 		t.Fatal("next tick did not carry item interaction")
 	}
+	if !auth.InputData.Load(packet.InputFlagStartUsingItem) {
+		t.Fatal("next tick did not start item use")
+	}
 	use, ok := auth.ItemInteractionData.Value()
 	if !ok {
 		t.Fatal("auth input missing item interaction data")
