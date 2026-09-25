@@ -24,7 +24,6 @@ func (*InteractWithBlock) Name() string {
 // Run is the function that runs the instruction.
 func (i *InteractWithBlock) Run(ctx context.Context, b *bot.Bot) error {
 	return execute(b, func(a *actor.Actor) error {
-		a.UseItemOnBlock(cube.Pos(i.Pos), i.Face, i.ClickPos)
-		return nil
+		return a.UseItemOnBlock(cube.Pos(i.Pos), i.Face, i.ClickPos)
 	})
 }
