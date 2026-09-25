@@ -147,7 +147,7 @@ function readVariable(props: PropertyBag, name: string): unknown {
       : name in props
         ? props[name]
         : undefined;
-  // Chase `$alias` (sidebar `$var_index` → `$pokemon_id_index` → number).
+  // Chase `$alias` (`$var_index` → `$slot_index` → number).
   for (
     let i = 0;
     i < 8 && typeof v === "string" && /^\$[A-Za-z_][A-Za-z0-9_]*$/.test(v);

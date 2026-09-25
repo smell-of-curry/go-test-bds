@@ -296,6 +296,7 @@ export function createJsonUiRuntime(opts: JsonUiRuntimeOptions): JsonUiRuntime {
       host: formsHost,
       guiScale,
       formRoutes: extension?.formRoutes,
+      layoutRules: extension?.layoutRules,
     });
     if (pendingState) {
       const state = pendingState;

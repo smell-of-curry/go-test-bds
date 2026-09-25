@@ -16,7 +16,12 @@ import {
   LABEL_LINE_HEIGHT_GUI,
   collapseLangPercentEscapes,
 } from "./labelMetrics.js";
-import { layoutTree, type LayoutNode, type MeasureText } from "./layout.js";
+import {
+  layoutTree,
+  type LayoutNode,
+  type LayoutOptions,
+  type MeasureText,
+} from "./layout.js";
 import type {
   BindingSource,
   BindingValue,
@@ -74,6 +79,8 @@ export interface FormRendererDeps {
   lang?: Readonly<Record<string, string>>;
   /** Title-flag routes from a viewer extension. Empty uses vanilla forms only. */
   formRoutes?: readonly FormFlagRoute[];
+  /** Pack layout corrections. Forms use the same rules as the HUD. */
+  layoutRules?: LayoutOptions["rules"];
   /**
    * Texture size + nineslice map for dialogue chrome / portraits.
    * Prefer `assets.textureInfo`; this is a test/fixture override.
@@ -242,11 +249,8 @@ export function patchDialogueChrome(tree: ResolvedElement): void {
 }
 
 /**
- * Collect visible battle move cards from a laid-out tree.
- *
- * Pack `grid_button` hosts four `grid_button_check_id` slots; only the slot
- * matching the factory item's `b:N_` prefix stays visible. Prefer the inner
- * `button` panel (name + PP + type badge) over the full-width move host.
+ * Collect laid-out nodes whose `form_button_text` starts with `b:1_`…`b:4_`.
+ * Prefer a visible child named `button` for the measured box.
  *
  * @param root - Layout root from {@link layoutTree}.
  * @returns one rect per visible `b:1_`…`b:4_` card, sorted by id.
@@ -256,13 +260,7 @@ export function collectBattleMoveRects(root: LayoutNode): BattleMoveRect[] {
   (function walk(n: LayoutNode): void {
     if (!n.visible) return;
     const text = n.element.props.form_button_text;
-    if (
-      typeof text === "string" &&
-      /^b:[1-4]_/.test(text) &&
-      (n.element.name === "grid_button_check_id" ||
-        n.element.name === "move_button" ||
-        /^[1-4]$/.test(n.element.name))
-    ) {
+    if (typeof text === "string" && /^b:[1-4]_/.test(text)) {
       const card = n.children.find(
         (c) => c.visible && c.element.name === "button",
       );
@@ -445,8 +443,8 @@ export function createFormRenderer(deps: FormRendererDeps): FormRenderer {
   }
 
   function showEngine(form: FormSnapshot): boolean {
-    // Dialogue / vanilla long_form only — battle + other flag screens keep
-    // their own layout (another agent owns that path).
+    // Vanilla long/custom forms get dialogue chrome. Flag-routed screens
+    // keep the pack layout.
     const routed = routeForm(form, deps.formRoutes);
     const dialogue =
       routed.kind === "long_form" || routed.kind === "custom_form";
@@ -464,7 +462,10 @@ export function createFormRenderer(deps: FormRendererDeps): FormRenderer {
       width: Math.max(320, host.clientWidth / guiScale || 640),
       height: Math.max(180, host.clientHeight / guiScale || 360),
     };
-    const layout = layoutTree(prepared.tree, viewport, { measureText });
+    const layout = layoutTree(prepared.tree, viewport, {
+      measureText,
+      rules: deps.layoutRules,
+    });
     if (dialogue) mountFormScrim();
     engineRoot = renderTree(layout, host, {
       guiScale,

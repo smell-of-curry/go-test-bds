@@ -109,7 +109,7 @@ export class EntityModelRegistry {
   /**
    * Look up a render controller by name.
    *
-   * @param name - e.g. `controller.render.pokemon`.
+   * @param name - e.g. `controller.render.custom`.
    * @returns def or undefined.
    */
   getController(name: string): RenderControllerDef | undefined {

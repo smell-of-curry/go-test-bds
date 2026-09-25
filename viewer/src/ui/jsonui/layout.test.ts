@@ -855,7 +855,10 @@ describe("layoutTree self-axis %x/%y", () => {
     const tree = layoutTree(
       ball,
       { width: 640, height: 360 },
-      { measureText: measureStub },
+      {
+        measureText: measureStub,
+        rules: { layoutHiddenChildren: [{ name: "ball_icon" }] },
+      },
     );
     assert.equal(tree.visible, false);
     assert.equal(tree.children.length, 1);
@@ -917,8 +920,8 @@ describe("layoutTree self-axis %x/%y", () => {
   });
 });
 
-describe("layoutTree battle grid_button factory", () => {
-  it("stacks grid_button children so pack $offset compensation forms a 2×2", () => {
+describe("layoutTree factory offsets", () => {
+  it("stacks named children when a rule says their offsets compensate", () => {
     const offsets: Array<[string, string]> = [
       ["-19%", "25%"],
       ["-19%", "80%"],
@@ -960,7 +963,7 @@ describe("layoutTree battle grid_button factory", () => {
       {
         size: [200, 200],
         orientation: "vertical",
-        factory: { name: "buttons", control_name: "battle.grid_button" },
+        factory: { name: "buttons", control_name: "pack.slot" },
         collection_name: "form_buttons",
         anchor_from: "top_left",
         anchor_to: "top_left",
@@ -973,6 +976,7 @@ describe("layoutTree battle grid_button factory", () => {
       { width: 200, height: 200 },
       {
         measureText: measureStub,
+        rules: { stackFactoryChildNames: ["grid_button"] },
       },
     );
     const moves: Array<{ x: number; y: number; w: number; h: number }> = [];

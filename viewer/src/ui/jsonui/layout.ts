@@ -153,12 +153,14 @@ function layoutElement(
     };
   }
 
-  // Invisible factory siblings (battle bag/move slots) — stub only. Full
-  // layout of hidden trees made battle.main multi-second on the golden path.
-  // Exception: sidebar `ball_icon` wraps `pokemon_icon` — keep laying out the
-  // mon head when the empty-ball host is hidden (matches paintNode carve-out).
+  // Hidden subtrees are stubs. Laying them out made large forms take
+  // seconds. An extension can keep children of specific hidden hosts
+  // (`layoutHiddenChildren`); paint draws those children if they stay visible.
   if (!visible) {
-    if (el.name === "ball_icon" && el.controls.length > 0) {
+    const keepKids = opts.rules?.layoutHiddenChildren?.some((r) =>
+      ruleMatches(r, el),
+    );
+    if (keepKids && el.controls.length > 0) {
       return {
         element: el,
         box: { x: parentBox.x, y: parentBox.y, w: 0, h: 0 },
@@ -197,16 +199,14 @@ function layoutElement(
 
   if (el.type === "stack_panel") {
     // Collection hosts sized to the parent (100%, not %c) overlay factory
-    // children — battle bag/run/actor chips share one origin. Exception:
-    // `battle.grid_button` move slots author Y `$offset`s that *compensate*
-    // for vertical stack index (`-175%` / `-120%` for slots 3–4) to form a
-    // 2×2; overlaying them on one origin scatters/overlaps the cards.
+    // children so they share one origin. `stackFactoryChildNames` opts a
+    // child out: those `$offset`s compensate for stack index and must flow.
     if (el.props.factory && el.props.collection_name) {
       const hSpec = parseSize(readSizePair(el.props.size)[1]);
       if (
         !hSpec.needsChildren &&
         !hSpec.isDefault &&
-        !factoryUsesStackCompensatedOffsets(el)
+        !factoryUsesStackCompensatedOffsets(el, opts)
       ) {
         return layoutFactoryOverlay(
           el,
@@ -265,7 +265,7 @@ function stripScrollChrome(el: ResolvedElement): ResolvedElement {
 function isIgnored(props: PropertyBag): boolean {
   // common_buttons stacks default/hover/pressed/locked panels. Without a real
   // pointer-state machine, drop only the non-default faces (hover/locked were
-  // painting white focus_border_white / White slabs over the battle grid).
+  // painting white focus slabs over a button grid).
   // Do NOT key off `$default_state === false` — parents declare
   // `$default_state|default: false` before the child sets `$default_state: true`.
   if (
@@ -439,14 +439,12 @@ function layoutAnchored(
     remainingH: fill.remainingH,
   });
 
-  // BATTLE_LAYOUT_PATCH_V1: battle bag/run/party tabs — pack sizes host to 100% of wide
-  // `menu_extra`, then $size 25% chrome → ~230px chip at -45% (blue blob).
-  if (
-    el.name === "bag_button" ||
-    el.name === "run_button" ||
-    el.name === "party_pokemon_button"
-  ) {
-    const maxW = Math.min(160, Math.max(64, viewport.width * 0.2));
+  const widthCap = opts.rules?.maxWidth?.find((r) => ruleMatches(r, el));
+  if (widthCap) {
+    const maxW = Math.min(
+      widthCap.maxPx,
+      Math.max(widthCap.minPx, viewport.width * widthCap.viewportRatio),
+    );
     if (boxSize.w > maxW) boxSize = { ...boxSize, w: maxW };
   }
 
@@ -462,7 +460,7 @@ function layoutAnchored(
   const selfBox: LayoutBox = { x: pos.x, y: pos.y, w: boxSize.w, h: boxSize.h };
   const anchorFrom = readAnchor(el.props.anchor_from, anchorFromDefault);
   clampHorizontalInParent(selfBox, parentBox, anchorFrom);
-  clampBattleActorPlateToViewport(selfBox, el, viewport);
+  applyViewportClamp(selfBox, el, viewport, opts);
 
   // Right-anchored panels an extension asked to cap (a wide %y-derived
   // host otherwise paints a slab). Inset so an overflowing child stays on
@@ -519,21 +517,11 @@ function layoutAnchored(
     childNodes = layoutControls(el.controls, childLayoutBox, viewport, opts);
   }
 
-  // Plate buttons: portraits hang past the 90×42 host — clamp AABB after kids.
-  if (
-    el.name === "opponent_actor_details_button_check_id" ||
-    el.name === "ally_actor_details_button_check_id" ||
-    (Array.isArray(el.props.size) &&
-      el.props.size[0] === 90 &&
-      el.props.size[1] === 42 &&
-      (el.name.includes("actor") || el.name.includes("battle_actor")))
-  ) {
-    clampLayoutTreeToViewport(
-      { element: el, box: selfBox, children: childNodes, layer, visible },
-      viewport,
-      4,
-    );
-  }
+  clampMatchingSubtrees(
+    { element: el, box: selfBox, children: childNodes, layer, visible },
+    viewport,
+    opts,
+  );
 
   return {
     element: el,
@@ -593,10 +581,10 @@ function layoutStack(
     const h = parseSize(sz[1]);
     const overlayGutter =
       orientation === "horizontal" && isHorizontalOverlayGutter(c.element);
-    // Horizontal stacks: bare `100%` beside fixed *flow* siblings = fill
-    // remainder (battle plate description next to 40px icon). Overlay gutters
-    // (px × %c icon hosts) do not shrink a `100%` / `fill` sibling — ActionForm
-    // icons sit ON the full-width button.
+    // Horizontal stacks: bare `100%` beside fixed *flow* siblings fills the
+    // remainder. Treating it as 100% of the parent overflows the fixed sibling.
+    // Overlay gutters (px × %c) do not shrink a `100%` / `fill` sibling —
+    // icons sit on the full-width button.
     if (
       orientation === "horizontal" &&
       !overlayGutter &&
@@ -737,15 +725,14 @@ function layoutStack(
     const anchorFrom = readAnchor(el.props.anchor_from, "center");
     clipRightOverflow(selfBox, parentBox, anchorFrom);
     clampHorizontalInParent(selfBox, parentBox, anchorFrom);
-    clampBattleActorPlateToViewport(selfBox, el, viewport);
+    applyViewportClamp(selfBox, el, viewport, opts);
   }
 
   // Final pass: place children along the stack.
   //
   // Resolve `%` against the *stack* box, then translate into the flow slot.
   // Re-resolving `%` against a slot that is already the percentage slice
-  // double-applies: actor columns (`25%`→~6%) and HP bars (`21%` of 40 →
-  // `21%` of 8.4 → green hairline across the battle bar).
+  // double-applies (a `21%` bar of a `21%` column collapses to a hairline).
   const outChildren: LayoutNode[] = [];
   // Include invisible controls at their natural anchored position with no flow cost.
   const visibleIds = new Set(childEls.map((c) => c.id));
@@ -818,16 +805,16 @@ function layoutStack(
     }
 
     // Viewport clamps during child layout use pre-shift coords. Re-clamp
-    // battle plates after flow translation so right-column ally plates stay
-    // inside the viewport.
-    clampBattlePlatesInTree(stacked, viewport);
+    // `clampToViewport` subtrees after flow translation.
+    clampMatchingSubtrees(stacked, viewport, opts);
 
     outChildren.push(stacked);
   }
 
-  clampBattlePlatesInTree(
+  clampMatchingSubtrees(
     { element: el, box: selfBox, children: outChildren, layer, visible },
     viewport,
+    opts,
   );
 
   return {
@@ -840,14 +827,19 @@ function layoutStack(
 }
 
 /**
- * True when factory children are `grid_button` panels whose per-slot
- * `$offset` Y values only resolve to a 2×2 when each child is stacked.
+ * True when a factory child is listed in `stackFactoryChildNames`. Those
+ * `$offset` Y values only land correctly when each child is stacked.
  *
  * @param el - Factory collection host (already expanded).
  * @returns whether layout must use {@link layoutStack} instead of overlay.
  */
-function factoryUsesStackCompensatedOffsets(el: ResolvedElement): boolean {
-  return el.controls.some((c) => c.element.name === "grid_button");
+function factoryUsesStackCompensatedOffsets(
+  el: ResolvedElement,
+  opts: LayoutOptions,
+): boolean {
+  const names = opts.rules?.stackFactoryChildNames;
+  if (!names?.length) return false;
+  return el.controls.some((c) => names.includes(c.element.name));
 }
 
 /**
@@ -928,7 +920,7 @@ function layoutFactoryOverlay(
     const anchorFrom = readAnchor(el.props.anchor_from, "center");
     clipRightOverflow(selfBox, parentBox, anchorFrom);
     clampHorizontalInParent(selfBox, parentBox, anchorFrom);
-    clampBattleActorPlateToViewport(selfBox, el, viewport);
+    applyViewportClamp(selfBox, el, viewport, opts);
   }
   const children = layoutControls(el.controls, selfBox, viewport, opts);
   return { element: el, box: selfBox, children, layer, visible };
@@ -1097,8 +1089,8 @@ function layoutGrid(
 }
 
 /**
- * Grid item `%` sizes are authored relative to the grid (e.g. starter
- * `pokemon.button` width `15%` with 6 columns), but cells are the layout
+ * Grid item `%` sizes are authored relative to the grid (a `15%` cell
+ * width with 6 columns), but cells are the layout
  * parent. Scale plain `%` specs by cols/rows so `15%` → `90%` of a cell.
  *
  * @param item - Grid child element.
@@ -1416,13 +1408,12 @@ function clipRightOverflow(
 
 /**
  * Shift a non-right-anchored box back inside its parent when more than half
- * of it hangs off. Small intentional overhangs (bag/run `-50%` of a 40px
- * chip) stay put — actor plates are clamped separately via
- * {@link clampBattleActorPlateToViewport}.
+ * of it hangs off. Small overhangs (about half a 40px chip) stay put.
+ * `clampToViewport` rules pull named elements in separately.
  *
- * Full-width (or wider) children are skipped: battle `move_selection_button`
- * host is `size: ["100%","100%"]` with `offset: ["55%","20%"]` — clamping
- * that back to `x=0` drops the pokéball on top of the move list (run-44).
+ * Full-width (or wider) children are skipped: a `["100%","100%"]` host
+ * with a positive offset must keep that offset. Clamping it to `x=0`
+ * stacks it on its siblings.
  *
  * @param box - Positioned box (mutated in place when clamped).
  * @param parent - Parent layout box.
@@ -1449,37 +1440,55 @@ function clampHorizontalInParent(
 }
 
 /**
- * Keep battle name-plates fully on-screen. Pack `opponent/ally_actor_details_button`
- * uses offset ±50% inside the edge 25% columns; that hangs ~half the plate past
- * the viewport in our layout (real client keeps both plates + HP arcs visible).
- * Do NOT use this for bag/run chips — those overhangs are intentional.
+ * True when an extension layout rule applies to this element.
+ *
+ * @param rule - Matcher from {@link LayoutQuirkRules}.
+ * @param el - Element being laid out.
+ * @returns whether every set field matches.
+ */
+function ruleMatches(
+  rule: {
+    namespace?: string;
+    name?: string;
+    nameIncludes?: string;
+    size?: readonly [number, number];
+  },
+  el: ResolvedElement,
+): boolean {
+  if (rule.namespace && rule.namespace !== el.namespace) return false;
+  if (rule.name && rule.name !== el.name) return false;
+  if (rule.nameIncludes && !el.name.includes(rule.nameIncludes)) return false;
+  if (rule.size) {
+    const sz = el.props.size;
+    if (
+      !Array.isArray(sz) ||
+      Number(sz[0]) !== rule.size[0] ||
+      Number(sz[1]) !== rule.size[1]
+    ) {
+      return false;
+    }
+  }
+  return Boolean(rule.namespace || rule.name || rule.nameIncludes || rule.size);
+}
+
+/**
+ * Pull a box inside the viewport when a `clampToViewport` rule matches.
  *
  * @param box - Positioned box (mutated when clamped).
  * @param el - Element being laid out.
- * @param viewport - Form viewport in gui pixels.
+ * @param viewport - Viewport in gui pixels.
+ * @param opts - Layout options.
  */
-function isBattleActorPlateName(name: string): boolean {
-  return (
-    name === "opponent_actor_details_button" ||
-    name === "ally_actor_details_button" ||
-    name === "opponent_actor_details_button_check_id" ||
-    name === "ally_actor_details_button_check_id" ||
-    name === "opponent_actors" ||
-    name === "ally_actors"
-  );
-}
-
-function clampBattleActorPlateToViewport(
+function applyViewportClamp(
   box: LayoutBox,
   el: ResolvedElement,
   viewport: Viewport,
+  opts: LayoutOptions,
 ): void {
-  const name = el.name;
-  const size = el.props.size;
-  const isPlateButton = Array.isArray(size) && size[0] === 90 && size[1] === 42;
-  if (!isBattleActorPlateName(name) && !isPlateButton) return;
+  const rule = opts.rules?.clampToViewport?.find((r) => ruleMatches(r, el));
+  if (!rule) return;
   if (box.w <= 0 || box.w > viewport.width) return;
-  const inset = 4;
+  const inset = rule.inset;
   if (box.x < inset) box.x = inset;
   if (box.x + box.w > viewport.width - inset) {
     box.x = Math.max(inset, viewport.width - inset - box.w);
@@ -1487,26 +1496,22 @@ function clampBattleActorPlateToViewport(
 }
 
 /**
- * Walk a laid-out subtree and clamp battle name-plate AABBs to the viewport.
+ * Shift subtrees whose `clampToViewport` rule sets `subtree`.
  *
  * @param node - Subtree root.
- * @param viewport - Form viewport in gui pixels.
+ * @param viewport - Viewport in gui pixels.
+ * @param opts - Layout options.
  */
-function clampBattlePlatesInTree(node: LayoutNode, viewport: Viewport): void {
-  if (isBattleActorPlateName(node.element.name)) {
-    clampLayoutTreeToViewport(node, viewport, 4);
-  }
-  const size = node.element.props.size;
-  if (
-    Array.isArray(size) &&
-    size[0] === 90 &&
-    size[1] === 42 &&
-    (node.element.name.includes("actor") ||
-      node.element.name.includes("battle_actor"))
-  ) {
-    clampLayoutTreeToViewport(node, viewport, 4);
-  }
-  for (const c of node.children) clampBattlePlatesInTree(c, viewport);
+function clampMatchingSubtrees(
+  node: LayoutNode,
+  viewport: Viewport,
+  opts: LayoutOptions,
+): void {
+  const rule = opts.rules?.clampToViewport?.find(
+    (r) => r.subtree && ruleMatches(r, node.element),
+  );
+  if (rule) clampLayoutTreeToViewport(node, viewport, rule.inset);
+  for (const c of node.children) clampMatchingSubtrees(c, viewport, opts);
 }
 
 /**
@@ -1525,7 +1530,7 @@ function shiftLayoutTree(node: LayoutNode, dx: number, dy: number): void {
 
 /**
  * Translate a laid-out subtree so its visible AABB stays inside the viewport
- * with a small inset (battle plates + hanging portraits).
+ * with a small inset (hanging children included).
  *
  * @param node - Subtree root (box may be a skinny host; children can overhang).
  * @param viewport - Form viewport in gui pixels.
@@ -1676,7 +1681,7 @@ function parseSizeAtom(s: string): ParsedSize {
   if (t === "default") return parseSize("default");
   if (t === "fill") return parseSize("fill");
 
-  // Leading `-` required for battle offsets ("-45.5%", "-13%").
+  // Leading `-` required for negative offsets ("-45.5%", "-13%").
   let m = /^(-?[0-9.]+)px$/i.exec(t);
   if (m) {
     const n = Number(m[1]);

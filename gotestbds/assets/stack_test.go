@@ -51,10 +51,9 @@ func TestSubpackMemoryPerformanceTier(t *testing.T) {
 	}
 }
 
-// Sidebar ball + species sprite URLs the viewer builds
-// (`textures/ui/sidebar/balls/poke.png`, `textures/sprites/default/bulbasaur.png`)
-// must resolve from the pack ROOT — some packs keep 2D sprites outside subpacks/3d.
-func TestSidebarSpritePathsResolveFromPackRoot(t *testing.T) {
+// Flat sprite URLs must resolve from the pack ROOT — some packs keep 2D
+// sprites outside subpacks/3d.
+func TestFlatSpritePathsResolveFromPackRoot(t *testing.T) {
 	dir := t.TempDir()
 	write := func(rel, body string) {
 		t.Helper()
@@ -67,25 +66,25 @@ func TestSidebarSpritePathsResolveFromPackRoot(t *testing.T) {
 		}
 	}
 	write("manifest.json", `{"format_version":2,"header":{"name":"t","uuid":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","version":[1,0,0]},"modules":[{"type":"resources","uuid":"bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb","version":[1,0,0]}]}`)
-	write("textures/sprites/default/bulbasaur.png", "SPRITE")
-	write("textures/ui/sidebar/balls/poke.png", "BALL")
-	// 3D subpack must not be required for 2D sidebar art.
-	write("subpacks/3d/textures/sprites/default/bulbasaur.png", "WRONG")
+	write("textures/sprites/default/critter.png", "SPRITE")
+	write("textures/ui/icons/badge.png", "BALL")
+	// A 3D subpack must not be required for flat art.
+	write("subpacks/3d/textures/sprites/default/critter.png", "WRONG")
 
 	st, err := BuildStack([]StackEntry{{ID: "pb", Dir: dir}}, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, path := range []string{
-		"textures/sprites/default/bulbasaur.png",
-		"textures/ui/sidebar/balls/poke.png",
+		"textures/sprites/default/critter.png",
+		"textures/ui/icons/badge.png",
 	} {
 		_, data, _, err := st.Resolve(path)
 		if err != nil {
 			t.Fatalf("Resolve(%s): %v", path, err)
 		}
 		want := "SPRITE"
-		if strings.Contains(path, "balls") {
+		if strings.Contains(path, "icons") {
 			want = "BALL"
 		}
 		if string(data) != want {

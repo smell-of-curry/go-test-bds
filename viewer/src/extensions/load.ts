@@ -60,6 +60,16 @@ export function mergeViewerExtensions(
     iconHosts: modules.flatMap((m) => m.layoutRules?.iconHosts ?? []),
     capRight: modules.flatMap((m) => m.layoutRules?.capRight ?? []),
     clipDock: modules.flatMap((m) => m.layoutRules?.clipDock ?? []),
+    maxWidth: modules.flatMap((m) => m.layoutRules?.maxWidth ?? []),
+    layoutHiddenChildren: modules.flatMap(
+      (m) => m.layoutRules?.layoutHiddenChildren ?? [],
+    ),
+    stackFactoryChildNames: modules.flatMap(
+      (m) => m.layoutRules?.stackFactoryChildNames ?? [],
+    ),
+    clampToViewport: modules.flatMap(
+      (m) => m.layoutRules?.clampToViewport ?? [],
+    ),
   };
   const titleTokenClearDelayMs: Record<string, number> = {};
   for (const m of modules) {

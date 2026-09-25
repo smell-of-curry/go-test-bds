@@ -160,7 +160,7 @@ export function buildResolver(
     if (Array.isArray(controlsRaw)) {
       for (const entry of controlsRaw) {
         // Pass alias-resolved vars so children see `$var_index: 2`, not
-        // `$var_index: "$pokemon_id_index"` (sidebar empty-plate leak).
+        // `$var_index: "$slot_index"` (alias leak).
         const child = resolveControlEntry(entry, namespace, vars, resolving);
         if (child) controls.push(child);
       }
@@ -260,8 +260,8 @@ export function buildResolver(
       overrideVars[`$${varName}`] = substituteVars(v, parentVars);
     }
     // Parent scope $vars must flow into the child (sidebar `$var_size`, etc.).
-    // Re-resolve aliases so `$var_index: "$pokemon_id_index"` becomes a number
-    // once the instance supplies `$pokemon_id_index`.
+    // Re-resolve aliases so `$var_index: "$slot_index"` becomes a number
+    // once the instance supplies `$slot_index`.
     const childVars = resolveVarAliases({ ...parentVars, ...overrideVars });
     // Non-$ instance props also override after child resolve — pass as var-less
     // property overrides by re-merging onto the resolved child.
@@ -635,10 +635,10 @@ function collectVariablesFromProps(
 }
 
 /**
- * Chase `$alias` values in a var map (`$var_index` → `$pokemon_id_index` → 2).
+ * Chase `$alias` values in a var map (`$var_index` → `$slot_index` → 2).
  *
- * Template props often set `$var_index: "$pokemon_id_index"` while the instance
- * supplies the numeric `$pokemon_id_index`. Without this, children inherit the
+ * Template props often set `$var_index: "$slot_index"` while the instance
+ * supplies the numeric `$slot_index`. Without this, children inherit the
  * literal alias string and every slot parses field 0.
  *
  * @param vars - Raw variable map.

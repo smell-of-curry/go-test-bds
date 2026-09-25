@@ -457,18 +457,14 @@ function boundPaintKey(
  */
 function walkBoundProps(el: ResolvedElement, parts: string[]): void {
   const p = el.props;
-  for (const k of [
-    "visible",
-    "text",
-    "texture",
-    "sidebar",
-    "phone",
-    "battleLog",
-    "preserved_text",
-    "clip_ratio",
-    "var",
-  ]) {
-    if (k in p) parts.push(`${el.name}.${k}=${String(p[k])}`);
+  for (const [k, v] of Object.entries(p)) {
+    if (
+      typeof v === "string" ||
+      typeof v === "number" ||
+      typeof v === "boolean"
+    ) {
+      parts.push(`${el.name}.${k}=${String(v)}`);
+    }
   }
   for (const c of el.controls) walkBoundProps(c.element, parts);
 }

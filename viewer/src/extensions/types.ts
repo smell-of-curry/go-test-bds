@@ -123,6 +123,21 @@ export interface HudScreenMount {
 }
 
 /**
+ * Namespace and/or name filter. A field that is omitted does not constrain.
+ * At least one of `namespace`, `name`, `nameIncludes`, or `size` must be set
+ * or the rule matches nothing.
+ */
+export interface LayoutMatch {
+  namespace?: string;
+  /** Exact element name. */
+  name?: string;
+  /** Substring of the element name. */
+  nameIncludes?: string;
+  /** Authored `size` pair, both numbers (e.g. `[90, 42]`). */
+  size?: readonly [number, number];
+}
+
+/**
  * Pack layout corrections the generic engine applies by namespace + name.
  * Absent rules change nothing.
  */
@@ -147,6 +162,30 @@ export interface LayoutQuirkRules {
    * children keep the full authored box.
    */
   clipDock?: ReadonlyArray<{ namespace: string; name: string }>;
+  /**
+   * Cap width to `min(maxPx, max(minPx, viewportWidth * viewportRatio))`.
+   * For chips authored at 100% of a wide parent.
+   */
+  maxWidth?: ReadonlyArray<
+    LayoutMatch & { maxPx: number; minPx: number; viewportRatio: number }
+  >;
+  /**
+   * Hidden elements that still lay out (and paint) their children.
+   * Every other hidden element is a zero-size stub with no children.
+   */
+  layoutHiddenChildren?: ReadonlyArray<LayoutMatch>;
+  /**
+   * Factory child names that must flow in a stack. Their `$offset` values
+   * compensate for stack index; overlaying them on one origin overlaps.
+   */
+  stackFactoryChildNames?: readonly string[];
+  /**
+   * Pull the element inside the viewport by `inset` gui px.
+   * `subtree: true` also shifts the laid-out children so overhanging art stays in.
+   */
+  clampToViewport?: ReadonlyArray<
+    LayoutMatch & { inset: number; subtree?: boolean }
+  >;
 }
 
 /** Still gate the capture harness consults when `noSettle` is set. */

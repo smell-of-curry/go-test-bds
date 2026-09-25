@@ -244,17 +244,14 @@ function paintNode(
   opts: RenderOptions,
   parentOrigin: { x: number; y: number },
 ): void {
-  // Invisible hosts usually drop the subtree (battle factory / empty slots).
-  // Exception: sidebar `ball_icon` wraps `pokemon_icon` — keep the mon head
-  // when the empty-ball host is hidden.
+  // Hidden hosts drop their own paint. Visible children are painted when
+  // layout kept them (`layoutHiddenChildren`).
   if (!node.visible) {
-    if (node.element.name === "ball_icon") {
-      const kids = [...node.children]
-        .filter((c) => c.visible)
-        .sort((a, b) => a.layer - b.layer);
-      for (const child of kids) {
-        paintNode(child, parentEl, opts, parentOrigin);
-      }
+    const kids = node.children
+      .filter((c) => c.visible)
+      .sort((a, b) => a.layer - b.layer);
+    for (const child of kids) {
+      paintNode(child, parentEl, opts, parentOrigin);
     }
     return;
   }
@@ -285,9 +282,8 @@ function paintNode(
 
   // Bedrock `alpha` tints the control's own paint (image face / label glyphs).
   // It must NOT become CSS opacity on the container — packs set `alpha: 0` on
-  // image hosts (`pokemon.button_panel`, `battle.button_grid_middle`) to hide
-  // the chrome texture while children stay fully opaque. Container opacity
-  // would wipe the starter grid / move buttons (run-41 live regressions).
+  // image hosts to hide the chrome texture while children stay fully opaque.
+  // Container opacity would hide those children too.
   applyClip(el, node.element.props);
 
   switch (node.element.type) {
