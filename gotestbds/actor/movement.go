@@ -245,6 +245,12 @@ func (a *Actor) Immobile() bool {
 
 // fillMovementBitset ...
 func (a *Actor) fillMovementBitset() {
+	a.movementBitset.Set(packet.InputFlagBlockBreakingDelayEnabled)
+	if a.OnGround() {
+		a.movementBitset.Set(packet.InputFlagVerticalCollision)
+	} else {
+		a.movementBitset.Unset(packet.InputFlagVerticalCollision)
+	}
 	if a.Sneaking() {
 		a.movementBitset.Set(packet.InputFlagSneaking)
 	}

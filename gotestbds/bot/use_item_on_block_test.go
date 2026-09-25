@@ -29,6 +29,9 @@ func TestLookAtSynchronisesRotationBeforeAction(t *testing.T) {
 	if auth.Yaw != -90 || auth.InteractYaw != -90 {
 		t.Fatalf("yaw = %v, interact yaw = %v, want -90", auth.Yaw, auth.InteractYaw)
 	}
+	if !auth.InputData.Load(packet.InputFlagBlockBreakingDelayEnabled) {
+		t.Fatal("auth input missing block-breaking delay flag")
+	}
 }
 
 // TestUseItemOnBlockSendsAcceptedClick covers the fields BDS silently rejects
