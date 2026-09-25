@@ -356,6 +356,7 @@ jobs:
           done
 
           echo "result line: ${RESULT:-<missing>}"
+          grep 'GOTESTBDS_E2E_CASE:' bds.log || echo "no E2E case diagnostics found"
           if [ -z "$RESULT" ]; then
             echo "GOTESTBDS_E2E_RESULT never appeared" >&2
             exit 1

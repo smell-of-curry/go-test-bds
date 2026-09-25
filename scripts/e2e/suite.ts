@@ -16,6 +16,73 @@ import {
 /** Name of the first bot. Must match the Go binary `--name` / GOTESTBDS_BOT_NAME. */
 export const BOT_NAME = "TestBot";
 
+/** Script events observed for one block-interaction control case. */
+export interface InteractionDiagnostics {
+  beforeBlock: boolean;
+  afterBlock: boolean;
+  beforeItemUse: boolean;
+  afterItemUse: boolean;
+}
+
+/** Event observations printed by the CI fixture after the run. */
+export const interactionDiagnostics = new Map<string, InteractionDiagnostics>();
+
+function observeBlockInteraction(
+  ctx: TestContext,
+  testName: string,
+  support: { x: number; y: number; z: number },
+): void {
+  const observed: InteractionDiagnostics = {
+    beforeBlock: false,
+    afterBlock: false,
+    beforeItemUse: false,
+    afterItemUse: false,
+  };
+  interactionDiagnostics.set(testName, observed);
+
+  const isSubjectBlock = (location: {
+    x: number;
+    y: number;
+    z: number;
+  }): boolean =>
+    location.x === support.x &&
+    location.y === support.y &&
+    location.z === support.z;
+  const beforeBlock = world.beforeEvents.playerInteractWithBlock.subscribe(
+    (event) => {
+      if (
+        event.player.id === ctx.bot.player.id &&
+        isSubjectBlock(event.block.location)
+      ) {
+        observed.beforeBlock = true;
+      }
+    },
+  );
+  const afterBlock = world.afterEvents.playerInteractWithBlock.subscribe(
+    (event) => {
+      if (
+        event.player.id === ctx.bot.player.id &&
+        isSubjectBlock(event.block.location)
+      ) {
+        observed.afterBlock = true;
+      }
+    },
+  );
+  const beforeItemUse = world.beforeEvents.itemUse.subscribe((event) => {
+    if (event.source.id === ctx.bot.player.id) observed.beforeItemUse = true;
+  });
+  const afterItemUse = world.afterEvents.itemUse.subscribe((event) => {
+    if (event.source.id === ctx.bot.player.id) observed.afterItemUse = true;
+  });
+
+  ctx.track(() => {
+    world.beforeEvents.playerInteractWithBlock.unsubscribe(beforeBlock);
+    world.afterEvents.playerInteractWithBlock.unsubscribe(afterBlock);
+    world.beforeEvents.itemUse.unsubscribe(beforeItemUse);
+    world.afterEvents.itemUse.unsubscribe(afterItemUse);
+  });
+}
+
 async function prepareBlockInteraction(
   ctx: TestContext,
   itemType?: string,
@@ -209,6 +276,7 @@ export const protocolSuite: TestSuite = defineSuite({
     {
       name: "places a held block on a block",
       async run(ctx) {
+        const testName = "places a held block on a block";
         const { support } = await prepareBlockInteraction(
           ctx,
           "minecraft:dirt",
@@ -218,6 +286,7 @@ export const protocolSuite: TestSuite = defineSuite({
           ctx.bot.player.dimension.getBlock(placed)?.setType("minecraft:air"),
         );
 
+        observeBlockInteraction(ctx, testName, support);
         await ctx.bot.interactWithBlock(support);
         await assertEventually(
           () =>
@@ -233,6 +302,7 @@ export const protocolSuite: TestSuite = defineSuite({
     {
       name: "uses a spawn egg on a block",
       async run(ctx) {
+        const testName = "uses a spawn egg on a block";
         const dimension = ctx.bot.player.dimension;
         for (const pig of dimension.getEntities({ type: "minecraft:pig" })) {
           pig.remove();
@@ -247,6 +317,7 @@ export const protocolSuite: TestSuite = defineSuite({
           ctx,
           "minecraft:pig_spawn_egg",
         );
+        observeBlockInteraction(ctx, testName, support);
         await ctx.bot.interactWithBlock(support);
         await assertEventually(
           () =>
@@ -265,6 +336,7 @@ export const protocolSuite: TestSuite = defineSuite({
     {
       name: "empty-hand block interaction reaches before event",
       async run(ctx) {
+        const testName = "empty-hand block interaction reaches before event";
         const { support } = await prepareBlockInteraction(ctx);
         let seen = false;
         const sub = world.beforeEvents.playerInteractWithBlock.subscribe(
@@ -285,6 +357,7 @@ export const protocolSuite: TestSuite = defineSuite({
           world.beforeEvents.playerInteractWithBlock.unsubscribe(sub),
         );
 
+        observeBlockInteraction(ctx, testName, support);
         await ctx.bot.interactWithBlock(support);
         await assertEventually(() => seen, {
           timeoutMs: seconds(15),
