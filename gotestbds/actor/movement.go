@@ -244,6 +244,7 @@ func (a *Actor) Immobile() bool {
 // fillMovementBitset ...
 func (a *Actor) fillMovementBitset() {
 	a.movementBitset.Set(packet.InputFlagBlockBreakingDelayEnabled)
+	a.movementBitset.Set(packet.InputFlagClientAckServerData)
 	if a.OnGround() {
 		a.movementBitset.Set(packet.InputFlagVerticalCollision)
 	} else {

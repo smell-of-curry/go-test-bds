@@ -54,6 +54,7 @@ func (c Config) New() (actor *Actor) {
 	}
 
 	data.movementBitset = protocol.NewInputFlags(packet.InputFlagCount)
+	data.tick = uint64(gameData.Time)
 
 	data.mc = &physics.Computer{
 		Gravity:           0.08,

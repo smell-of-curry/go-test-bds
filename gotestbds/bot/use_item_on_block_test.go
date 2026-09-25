@@ -13,6 +13,17 @@ import (
 	gw "github.com/smell-of-curry/go-test-bds/gotestbds/world"
 )
 
+func TestActorPreparationOnlyFinishesLoading(t *testing.T) {
+	_, conn := newRecordingActor(t)
+	if len(conn.written) != 1 {
+		t.Fatalf("preparation packets = %d, want 1", len(conn.written))
+	}
+	loading, ok := conn.written[0].(*packet.ServerBoundLoadingScreen)
+	if !ok || loading.Type != packet.LoadingScreenTypeEnd {
+		t.Fatalf("preparation packet = %#v, want loading-screen end", conn.written[0])
+	}
+}
+
 func TestLookAtSynchronisesRotationBeforeAction(t *testing.T) {
 	a, conn := newRecordingActor(t)
 	conn.written = nil
@@ -31,6 +42,9 @@ func TestLookAtSynchronisesRotationBeforeAction(t *testing.T) {
 	}
 	if !auth.InputData.Load(packet.InputFlagBlockBreakingDelayEnabled) {
 		t.Fatal("auth input missing block-breaking delay flag")
+	}
+	if !auth.InputData.Load(packet.InputFlagClientAckServerData) {
+		t.Fatal("auth input missing server-data acknowledgement")
 	}
 	if auth.InputMode != packet.InputModeMouse ||
 		auth.InteractionModel != packet.InteractionModelTouch {
