@@ -89,12 +89,23 @@ func TestUseItemOnBlockSendsAcceptedClick(t *testing.T) {
 	conn.written = nil
 	a.Tick()
 	var stop *packet.PlayerAction
+	var auth *packet.PlayerAuthInput
 	for _, pk := range conn.written {
 		if action, ok := pk.(*packet.PlayerAction); ok && action.ActionType == protocol.PlayerActionStopItemUseOn {
 			stop = action
 		}
+		if input, ok := pk.(*packet.PlayerAuthInput); ok {
+			auth = input
+		}
 	}
 	if stop == nil {
 		t.Fatal("next tick did not stop item use")
+	}
+	if auth == nil || !auth.InputData.Load(packet.InputFlagPerformItemInteraction) {
+		t.Fatal("next tick did not carry item interaction")
+	}
+	authUse, ok := auth.ItemInteractionData.Value()
+	if !ok || authUse.BlockPosition != use.BlockPosition {
+		t.Fatalf("auth item interaction = %#v, want click at %v", authUse, use.BlockPosition)
 	}
 }

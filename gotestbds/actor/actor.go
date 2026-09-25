@@ -345,6 +345,7 @@ func (a *Actor) LookAt(point mgl64.Vec3) {
 	// Item interactions are checked against the last rotation BDS received.
 	// Flush the new aim before the caller sends its click transaction.
 	a.SendMovement()
+	a.tick++
 }
 
 // LookAtBlock makes Actor look at the block position passed.
@@ -600,6 +601,7 @@ func (a *Actor) UseItemOnBlock(pos cube.Pos, face cube.Face, clickPos mgl64.Vec3
 	if err := a.useItem(action); err != nil {
 		return err
 	}
+	a.pendingItemUse = action
 	// Real clients wait for the server's result before stopping item use. Keep
 	// the start active through this tick so BDS can process the transaction.
 	a.pendingItemUseStop = &packet.PlayerAction{
