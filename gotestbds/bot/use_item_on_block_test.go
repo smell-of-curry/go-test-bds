@@ -32,6 +32,10 @@ func TestLookAtSynchronisesRotationBeforeAction(t *testing.T) {
 	if !auth.InputData.Load(packet.InputFlagBlockBreakingDelayEnabled) {
 		t.Fatal("auth input missing block-breaking delay flag")
 	}
+	if auth.InputMode != packet.InputModeMouse ||
+		auth.InteractionModel != packet.InteractionModelCrosshair {
+		t.Fatalf("input mode = %d, interaction model = %d", auth.InputMode, auth.InteractionModel)
+	}
 }
 
 // TestUseItemOnBlockSendsAcceptedClick covers the fields BDS silently rejects
