@@ -54,20 +54,12 @@ func TestUseItemOnBlockSendsAcceptedClick(t *testing.T) {
 	if err := a.UseItemOnBlock(pos, cube.FaceUp, click); err != nil {
 		t.Fatal(err)
 	}
-	if len(conn.written) != 3 {
-		t.Fatalf("packets = %d, want start, transaction, stop", len(conn.written))
+	if len(conn.written) != 1 {
+		t.Fatalf("packets = %d, want one InventoryTransaction", len(conn.written))
 	}
-	start, ok := conn.written[0].(*packet.PlayerAction)
-	if !ok || start.ActionType != protocol.PlayerActionStartItemUseOn {
-		t.Fatalf("first packet = %#v, want start item use", conn.written[0])
-	}
-	tx, ok := conn.written[1].(*packet.InventoryTransaction)
+	tx, ok := conn.written[0].(*packet.InventoryTransaction)
 	if !ok {
-		t.Fatalf("second packet = %T, want InventoryTransaction", conn.written[1])
-	}
-	stop, ok := conn.written[2].(*packet.PlayerAction)
-	if !ok || stop.ActionType != protocol.PlayerActionStopItemUseOn {
-		t.Fatalf("third packet = %#v, want stop item use", conn.written[2])
+		t.Fatalf("packet = %T, want InventoryTransaction", conn.written[0])
 	}
 
 	use, ok := tx.TransactionData.(*protocol.UseItemTransactionData)

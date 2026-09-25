@@ -599,23 +599,9 @@ func (a *Actor) UseItemOnBlock(pos cube.Pos, face cube.Face, clickPos mgl64.Vec3
 		BlockRuntimeID:   blockRuntimeID,
 		ClientPrediction: protocol.ClientPredictionSuccess,
 	}
-	if err := a.conn.WritePacket(&packet.PlayerAction{
-		EntityRuntimeID: a.RuntimeID(),
-		ActionType:      protocol.PlayerActionStartItemUseOn,
-		BlockPosition:   posToProtocol(pos),
-		ResultPosition:  posToProtocol(pos.Side(face)),
-		BlockFace:       int32(face),
-	}); err != nil {
-		return err
-	}
-	if err := a.useItem(action); err != nil {
-		return err
-	}
-	return a.conn.WritePacket(&packet.PlayerAction{
-		EntityRuntimeID: a.RuntimeID(),
-		ActionType:      protocol.PlayerActionStopItemUseOn,
-		BlockPosition:   posToProtocol(pos),
-	})
+	// A real block click is one UseItem inventory transaction. Start/stop item
+	// actions describe holding a usable item and make BDS discard this click.
+	return a.useItem(action)
 }
 
 // ReleaseItem stops using held item.
