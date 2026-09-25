@@ -3,7 +3,6 @@ package actor
 import (
 	"fmt"
 	"iter"
-	"log/slog"
 	"math"
 	"time"
 	_ "unsafe"
@@ -613,25 +612,6 @@ func (a *Actor) UseItemOnBlock(pos cube.Pos, face cube.Face, clickPos mgl64.Vec3
 	// A separate StartItemUseOn beforehand makes BDS treat that auth input as
 	// a hold-repeat (isFirstEvent false), and the claim handler cancels it.
 	a.pendingItemUse = action
-	slog.Info("use-item-on-block",
-		"net", action.HeldItem.Stack.ItemType.NetworkID,
-		"meta", action.HeldItem.Stack.ItemType.MetadataValue,
-		"stack", action.HeldItem.StackNetworkID,
-		"count", action.HeldItem.Stack.Count,
-		"block", action.BlockRuntimeID,
-		"trigger", action.TriggerType,
-		"pred", action.ClientPrediction,
-		"item", a.ItemName(action.HeldItem.Stack.ItemType.NetworkID),
-		"slot", action.HotBarSlot,
-		"face", action.BlockFace,
-		"yaw", a.Rotation().Yaw(),
-		"pitch", a.Rotation().Pitch(),
-		"hit", hitPos,
-		"hitFace", hitFace,
-		"pos", action.Position,
-		"click", action.ClickedPosition,
-		"bpos", action.BlockPosition,
-	)
 	return a.useItem(action)
 }
 
