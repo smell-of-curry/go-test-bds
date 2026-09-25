@@ -342,6 +342,9 @@ func (a *Actor) NearestEntity(filter func(e world.Entity) bool) (world.Entity, f
 // LookAt makes Actor look at the point.
 func (a *Actor) LookAt(point mgl64.Vec3) {
 	a.Move(a.Position(), mcmath.VectorToRotation(point.Sub(a.EyePos())))
+	// Item interactions are checked against the last rotation BDS received.
+	// Flush the new aim before the caller sends its click transaction.
+	a.SendMovement()
 }
 
 // LookAtBlock makes Actor look at the block position passed.

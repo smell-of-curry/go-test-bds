@@ -13,6 +13,24 @@ import (
 	gw "github.com/smell-of-curry/go-test-bds/gotestbds/world"
 )
 
+func TestLookAtSynchronisesRotationBeforeAction(t *testing.T) {
+	a, conn := newRecordingActor(t)
+	conn.written = nil
+
+	a.LookAt(a.EyePos().Add(mgl64.Vec3{1, 0, 0}))
+
+	if len(conn.written) != 1 {
+		t.Fatalf("packets = %d, want one PlayerAuthInput", len(conn.written))
+	}
+	auth, ok := conn.written[0].(*packet.PlayerAuthInput)
+	if !ok {
+		t.Fatalf("packet = %T, want PlayerAuthInput", conn.written[0])
+	}
+	if auth.Yaw != -90 || auth.InteractYaw != -90 {
+		t.Fatalf("yaw = %v, interact yaw = %v, want -90", auth.Yaw, auth.InteractYaw)
+	}
+}
+
 // TestUseItemOnBlockSendsAcceptedClick covers the fields BDS silently rejects
 // when they stay at their zero value: an unknown trigger, a predicted failure,
 // a player at the origin, and block runtime id 0 (air). A rejected click never
