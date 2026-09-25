@@ -23,18 +23,19 @@ func (g *GetState) Run(ctx context.Context, b *bot.Bot) error {
 		pos := a.Position()
 		yaw, pitch := a.Rotation().Elem()
 		g.result = map[string]any{
-			"name":      a.Name(),
-			"xuid":      a.XUID(),
-			"runtimeId": a.RuntimeID(),
-			"position":  Vec3JSON{X: pos.X(), Y: pos.Y(), Z: pos.Z()},
-			"rotation":  RotationJSON{Yaw: yaw, Pitch: pitch},
-			"health":    a.Health(),
-			"maxHealth": a.MaxHealth(),
-			"onGround":  a.OnGround(),
-			"gameMode":  a.Gamemode(),
-			"dimension": a.Dimension(),
-			"heldSlot":  a.HeldSlot(),
-			"sneaking":  a.Sneaking(),
+			"name":            a.Name(),
+			"xuid":            a.XUID(),
+			"runtimeId":       a.RuntimeID(),
+			"position":        Vec3JSON{X: pos.X(), Y: pos.Y(), Z: pos.Z()},
+			"rotation":        RotationJSON{Yaw: yaw, Pitch: pitch},
+			"health":          a.Health(),
+			"maxHealth":       a.MaxHealth(),
+			"onGround":        a.OnGround(),
+			"gameMode":        a.Gamemode(),
+			"dimension":       a.Dimension(),
+			"heldSlot":        a.HeldSlot(),
+			"sneaking":        a.Sneaking(),
+			"vehicleUniqueId": a.VehicleUniqueID(),
 		}
 		return nil
 	})

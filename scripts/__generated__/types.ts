@@ -89,6 +89,17 @@ export interface GetNearbyEntities {
 /** GetState returns the bot's current actor state. */
 export interface GetState {}
 
+/** HoldInput holds stick and buttons for Ticks actor ticks (20 Hz). While riding, the ticks steer the vehicle instead of walking the player. */
+export interface HoldInput {
+  forward: boolean;
+  back: boolean;
+  left: boolean;
+  right: boolean;
+  jump: boolean;
+  sneak: boolean;
+  ticks: number;
+}
+
 /** HoverFormButton visually hovers one open-form button in the attached viewer, then waits Ms milliseconds so a recording shows the choice settling before it is clicked. Hovering is presentation only: with no viewer attached the instruction validates the form and returns immediately (no wait, no error), so suites that run headless pay nothing for it. */
 export interface HoverFormButton {
   index: number;
@@ -103,6 +114,11 @@ export interface InteractWithBlock {
   pos: Pos;
   face: Face;
   clickPos: Vec3;
+}
+
+/** InteractWithEntity right-clicks an entity by runtime ID (mount, use item). */
+export interface InteractWithEntity {
+  entityRuntimeID: number;
 }
 
 /** InventoryAction performs inventory action. */
@@ -199,6 +215,11 @@ export interface SetHeldSlot {
   slot: number;
 }
 
+/** SetSneaking starts or stops sneaking. The next PlayerAuthInput carries the flag. */
+export interface SetSneaking {
+  sneaking: boolean;
+}
+
 /** StopBreakingBlock aborts the current block breaking action. */
 export interface StopBreakingBlock {}
 
@@ -257,9 +278,11 @@ export type InstructionAction =
   | "getMessages"
   | "getNearbyEntities"
   | "getState"
+  | "holdInput"
   | "hoverFormButton"
   | "interact"
   | "interactWithBlock"
+  | "interactWithEntity"
   | "inventoryAction"
   | "jump"
   | "lookAtBlock"
@@ -277,6 +300,7 @@ export type InstructionAction =
   | "runCommand"
   | "screenshot"
   | "setHeldSlot"
+  | "setSneaking"
   | "stopBreakingBlock"
   | "stopNavigating"
   | "stopUsingItem"
@@ -303,9 +327,11 @@ export interface InstructionParametersByAction {
   getMessages: GetMessages;
   getNearbyEntities: GetNearbyEntities;
   getState: GetState;
+  holdInput: HoldInput;
   hoverFormButton: HoverFormButton;
   interact: Interact;
   interactWithBlock: InteractWithBlock;
+  interactWithEntity: InteractWithEntity;
   inventoryAction: InventoryAction;
   jump: Jump;
   lookAtBlock: LookAtBlock;
@@ -323,6 +349,7 @@ export interface InstructionParametersByAction {
   runCommand: RunCommand;
   screenshot: Screenshot;
   setHeldSlot: SetHeldSlot;
+  setSneaking: SetSneaking;
   stopBreakingBlock: StopBreakingBlock;
   stopNavigating: StopNavigating;
   stopUsingItem: StopUsingItem;
@@ -350,9 +377,11 @@ export type InstructionPayload =
   | { action: "getMessages"; parameters: GetMessages }
   | { action: "getNearbyEntities"; parameters: GetNearbyEntities }
   | { action: "getState"; parameters: GetState }
+  | { action: "holdInput"; parameters: HoldInput }
   | { action: "hoverFormButton"; parameters: HoverFormButton }
   | { action: "interact"; parameters: Interact }
   | { action: "interactWithBlock"; parameters: InteractWithBlock }
+  | { action: "interactWithEntity"; parameters: InteractWithEntity }
   | { action: "inventoryAction"; parameters: InventoryAction }
   | { action: "jump"; parameters: Jump }
   | { action: "lookAtBlock"; parameters: LookAtBlock }
@@ -370,6 +399,7 @@ export type InstructionPayload =
   | { action: "runCommand"; parameters: RunCommand }
   | { action: "screenshot"; parameters: Screenshot }
   | { action: "setHeldSlot"; parameters: SetHeldSlot }
+  | { action: "setSneaking"; parameters: SetSneaking }
   | { action: "stopBreakingBlock"; parameters: StopBreakingBlock }
   | { action: "stopNavigating"; parameters: StopNavigating }
   | { action: "stopUsingItem"; parameters: StopUsingItem }

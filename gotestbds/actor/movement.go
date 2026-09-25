@@ -1,6 +1,7 @@
 package actor
 
 import (
+	"fmt"
 	"math"
 	"time"
 
@@ -65,6 +66,18 @@ type movementData struct {
 	navBestDist        float64 // closest distToNavTarget this leg (0 = unset)
 	navNoProgressTicks int     // ticks since navBestDist last improved
 	physicsSkipStreak  int     // consecutive ticks physics was skipped (any time)
+
+	// vehicleUniqueID is the unique id of the entity this actor is riding.
+	// 0 means not riding. Set from SetActorLink.
+	vehicleUniqueID int64
+	holdInput       movement.Input
+	holdTicks       int
+	holdDone        chan struct{}
+	// rideMove is the local stick vector while holding input on a vehicle.
+	// Player physics must not walk the rider; the server moves the vehicle
+	// from this vector plus the directional input flags.
+	rideMove    mgl32.Vec2
+	rideMoveSet bool
 
 	mc *physics.Computer
 }
@@ -259,6 +272,11 @@ func (a *Actor) SendMovement() {
 		rotated := mcmath.RotateVec2(mgl64.Vec2{src.X(), src.Z()}, -a.Rotation().Yaw())
 		moveVector = mgl32.Vec2{float32(rotated.X()), float32(rotated.Y())}
 	}
+	// Riding: the stick is already in local space. Do not rebuild it from a
+	// walk delta the rider did not take.
+	if a.vehicleUniqueID != 0 && a.rideMoveSet {
+		moveVector = a.rideMove
+	}
 
 	a.fillMovementBitset()
 	pk := &packet.PlayerAuthInput{
@@ -280,13 +298,104 @@ func (a *Actor) SendMovement() {
 	if actions := a.blockActions(); len(actions) > 0 {
 		pk.BlockActions = protocol.Option(actions)
 	}
+	if a.vehicleUniqueID != 0 {
+		pk.InputData.Set(packet.InputFlagClientPredictedVehicle)
+		pk.ClientPredictedVehicle = protocol.Option(a.vehicleUniqueID)
+		pk.VehicleRotation = protocol.Option(mgl32.Vec2{pitch, yaw})
+	}
 	_ = a.conn.WritePacket(pk)
 }
 
+// VehicleUniqueID returns the ridden entity's unique id, or 0 when not riding.
+func (a *Actor) VehicleUniqueID() int64 {
+	return a.vehicleUniqueID
+}
+
+// SetVehicle marks the actor as riding the entity with the given unique id.
+//
+// @param uniqueID Ridden entity unique id from SetActorLink.
+func (a *Actor) SetVehicle(uniqueID int64) {
+	a.vehicleUniqueID = uniqueID
+}
+
+// ClearVehicle marks the actor as not riding.
+func (a *Actor) ClearVehicle() {
+	a.vehicleUniqueID = 0
+	a.rideMoveSet = false
+}
+
+// StartHold applies input once per tick for ticks ticks, then signals done.
+// The returned channel has buffer 1 and is written exactly once.
+//
+// @param input Stick and buttons to hold.
+// @param ticks How many actor ticks to apply it. Clamped to 1..600.
+// @returns A channel that receives when the hold finishes or is stopped.
+func (a *Actor) StartHold(input movement.Input, ticks int) (<-chan struct{}, error) {
+	if ticks < 1 || ticks > 20*30 {
+		return nil, fmt.Errorf("hold ticks out of range: %d", ticks)
+	}
+	if a.holdDone != nil {
+		return nil, fmt.Errorf("already holding input")
+	}
+	done := make(chan struct{}, 1)
+	a.holdInput = input
+	a.holdTicks = ticks
+	a.holdDone = done
+	return done, nil
+}
+
+// StopHold ends an in-progress hold and signals its waiter.
+func (a *Actor) StopHold() {
+	a.finishHold()
+}
+
+// finishHold signals the hold waiter. Must run on the tick goroutine.
+func (a *Actor) finishHold() {
+	if a.holdDone == nil {
+		return
+	}
+	ch := a.holdDone
+	a.holdDone = nil
+	a.holdTicks = 0
+	select {
+	case ch <- struct{}{}:
+	default:
+	}
+}
+
+// tickHoldInput applies one tick of a StartHold. While riding, it only sets
+// input flags and the vehicle move vector — local walk would desync the rider
+// from the entity the server is moving.
+func (a *Actor) tickHoldInput() {
+	if a.holdTicks <= 0 || a.holdDone == nil {
+		return
+	}
+	input := a.holdInput
+	if a.vehicleUniqueID != 0 {
+		a.fillInput(input)
+		a.moving = true
+		mv := input.MoveVector()
+		a.rideMove = mgl32.Vec2{float32(mv.X()), float32(mv.Y())}
+		a.rideMoveSet = mv.LenSqr() > 0
+	} else {
+		_ = a.MoveRawInput(input, cube.Rotation{})
+	}
+	a.holdTicks--
+	if a.holdTicks <= 0 {
+		a.finishHold()
+	}
+}
+
 // tickPhysicsOnly runs gravity/collision without sending AuthInput or clearing
-// the walk bitset. Actor.Tick sends movement after navigation so the packet
-// includes this tick's MoveRawInput delta.
+// the walk bitset. Actor.Tick sends movement after navigation and any held
+// input so the packet includes this tick's walk delta.
 func (a *Actor) tickPhysicsOnly() {
+	// A ridden player does not simulate their own walk. The server moves the
+	// vehicle from auth input; local physics would fall the rider off it.
+	if a.vehicleUniqueID != 0 {
+		a.SetVelocity(mgl64.Vec3{})
+		return
+	}
 	// Simulating against a missing OR incomplete column reads air (World.Block),
 	// so gravity walks the bot into the void / into solids that appear later.
 	// Pathfinding already treats incomplete as bedrock (pathSource) — physics
@@ -481,8 +590,13 @@ func (a *Actor) fillInput(input movement.Input) {
 	if input.Jump {
 		a.Jump()
 	}
-	if input.Sneak && !a.Sneaking() {
-		a.StartSneaking()
+	// Sneak is level-held, not a one-tick toggle. The previous else-if stopped
+	// sneaking on the tick after it started, so a hold never stayed crouched.
+	if input.Sneak {
+		if !a.Sneaking() {
+			a.StartSneaking()
+		}
+		a.movementBitset.Set(packet.InputFlagSneakDown)
 	} else if a.Sneaking() {
 		a.StopSneaking()
 	}
@@ -510,5 +624,6 @@ func (a *Actor) fillInput(input movement.Input) {
 func (a *Actor) clearMovement() {
 	a.moving = false
 	a.delta = mgl64.Vec3{}
+	a.rideMoveSet = false
 	a.movementBitset = protocol.NewInputFlags(packet.InputFlagCount)
 }

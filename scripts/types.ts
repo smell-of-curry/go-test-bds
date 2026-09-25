@@ -33,6 +33,13 @@ export interface BotState {
   gameMode: string;
   dimension: string;
   heldSlot: number;
+  /** True while the bot is sneaking. */
+  sneaking?: boolean;
+  /**
+   * Unique id of the entity the bot is riding, or 0 when not riding.
+   * Set from the server's `SetActorLink`.
+   */
+  vehicleUniqueId?: number;
 }
 
 /** One inventory slot, as the bot sees it. */

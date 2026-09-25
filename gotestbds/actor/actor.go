@@ -302,14 +302,15 @@ func (a *Actor) SetHeldItems(main, off item.Stack) error {
 
 // Tick - simulates client tick.
 //
-// Order: physics first (gravity/collision), then navigation MoveRawInput so
-// walk has the last word on position this tick, then AuthInput carries that
-// walk delta (tickMovement used to SendMovement before nav, so the packet
-// always lagged one tick and looked idle to BDS → Correct spam).
+// Order: physics first (gravity/collision), then navigation MoveRawInput, then
+// a held stick (StartHold), then AuthInput carries that walk delta
+// (tickMovement used to SendMovement before nav, so the packet always lagged
+// one tick and looked idle to BDS → Correct spam).
 func (a *Actor) Tick() {
 	a.Handler().HandleTick(a, a.CurrentTick())
 	a.tickPhysicsOnly()
 	a.tickNavigating()
+	a.tickHoldInput()
 	a.SendMovement()
 	a.clearMovement()
 	a.tick++
@@ -628,11 +629,13 @@ func (a *Actor) UseItemOnEntity(e world.Entity) error {
 	heldItem, _ := a.Inventory().ItemInstance(a.heldSlot)
 	action := &protocol.UseItemOnEntityTransactionData{
 		TargetEntityRuntimeID: e.RuntimeID(),
-		ActionType:            protocol.UseItemOnEntityActionAttack,
-		HotBarSlot:            int32(a.heldSlot),
-		HeldItem:              heldItem,
-		Position:              mcmath.Vec64To32(a.Position()),
-		ClickedPosition:       mcmath.Vec64To32(clickPos),
+		// Right-click. AttackEntity owns UseItemOnEntityActionAttack; sending
+		// Attack here made interact a punch, so rideables never mounted.
+		ActionType:      protocol.UseItemOnEntityActionInteract,
+		HotBarSlot:      int32(a.heldSlot),
+		HeldItem:        heldItem,
+		Position:        mcmath.Vec64To32(a.Position()),
+		ClickedPosition: mcmath.Vec64To32(clickPos),
 	}
 
 	return a.useItem(action)

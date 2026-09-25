@@ -26,6 +26,7 @@ import type {
   ScreenshotResult,
   TestArtifact,
   Vec3,
+  MovementInput,
   ViewerMarkParams,
 } from "./types";
 import { TimeoutError, waitForValue, type WaitOptions } from "./wait";
@@ -248,6 +249,91 @@ export class Bot {
         clickPos: options?.clickPos ?? [0.5, 1, 0.5],
       },
       this.opts(options),
+    );
+  }
+
+  /**
+   * Right-clicks an entity (mount a rideable, use the held item on it).
+   *
+   * @param runtimeId Entity runtime id from {@link Bot.getNearbyEntities}.
+   * @param options Timeout overrides.
+   * @returns A promise resolving once the bot confirms the action.
+   */
+  async interactWithEntity(
+    runtimeId: number,
+    options?: RunActionOptions,
+  ): Promise<void> {
+    await runAction(
+      this.player,
+      "interactWithEntity",
+      { entityRuntimeID: runtimeId },
+      this.opts(options),
+    );
+  }
+
+  /**
+   * Left-clicks an entity.
+   *
+   * @param runtimeId Entity runtime id from {@link Bot.getNearbyEntities}.
+   * @param options Timeout overrides.
+   * @returns A promise resolving once the bot confirms the action.
+   */
+  async attackEntity(
+    runtimeId: number,
+    options?: RunActionOptions,
+  ): Promise<void> {
+    await runAction(
+      this.player,
+      "attackEntity",
+      { entityRuntimeID: runtimeId },
+      this.opts(options),
+    );
+  }
+
+  /**
+   * Starts or stops sneaking. Later movement packets keep the state.
+   *
+   * @param sneaking Whether the bot should be sneaking.
+   * @param options Timeout overrides.
+   * @returns A promise resolving once the bot confirms the action.
+   */
+  async setSneaking(
+    sneaking: boolean,
+    options?: RunActionOptions,
+  ): Promise<void> {
+    await runAction(
+      this.player,
+      "setSneaking",
+      { sneaking },
+      this.opts(options),
+    );
+  }
+
+  /**
+   * Holds movement input for a number of actor ticks (the bot ticks at 20 Hz).
+   * While riding, the input steers the vehicle instead of walking the player.
+   *
+   * @param input Stick and buttons, plus how many ticks to hold them.
+   * @param options Timeout overrides. Defaults to a budget that covers the hold.
+   * @returns A promise resolving once the hold finishes.
+   */
+  async holdInput(
+    input: Partial<MovementInput> & { ticks: number },
+    options?: RunActionOptions,
+  ): Promise<void> {
+    await runAction(
+      this.player,
+      "holdInput",
+      {
+        forward: input.forward ?? false,
+        back: input.back ?? false,
+        left: input.left ?? false,
+        right: input.right ?? false,
+        jump: input.jump ?? false,
+        sneak: input.sneak ?? false,
+        ticks: input.ticks,
+      },
+      { timeoutMs: input.ticks * 100 + 10_000, ...this.opts(options) },
     );
   }
 
