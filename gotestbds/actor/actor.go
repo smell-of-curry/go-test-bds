@@ -312,10 +312,6 @@ func (a *Actor) Tick() {
 	a.tickNavigating()
 	a.tickHoldInput()
 	a.SendMovement()
-	if a.pendingItemUseStop != nil {
-		_ = a.conn.WritePacket(a.pendingItemUseStop)
-		a.pendingItemUseStop = nil
-	}
 	a.clearMovement()
 	a.tick++
 	a.unloadChunks()
@@ -589,26 +585,7 @@ func (a *Actor) UseItemOnBlock(pos cube.Pos, face cube.Face, clickPos mgl64.Vec3
 		BlockRuntimeID:   blockRuntimeID,
 		ClientPrediction: protocol.ClientPredictionSuccess,
 	}
-	if err := a.conn.WritePacket(&packet.PlayerAction{
-		EntityRuntimeID: a.RuntimeID(),
-		ActionType:      protocol.PlayerActionStartItemUseOn,
-		BlockPosition:   posToProtocol(pos),
-		ResultPosition:  posToProtocol(pos.Side(face)),
-		BlockFace:       int32(face),
-	}); err != nil {
-		return err
-	}
-	if err := a.useItem(action); err != nil {
-		return err
-	}
 	a.pendingItemUse = action
-	// Real clients wait for the server's result before stopping item use. Keep
-	// the start active through this tick so BDS can process the transaction.
-	a.pendingItemUseStop = &packet.PlayerAction{
-		EntityRuntimeID: a.RuntimeID(),
-		ActionType:      protocol.PlayerActionStopItemUseOn,
-		BlockPosition:   posToProtocol(pos.Side(face)),
-	}
 	return nil
 }
 

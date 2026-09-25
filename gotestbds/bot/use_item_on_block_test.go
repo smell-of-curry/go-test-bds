@@ -54,23 +54,26 @@ func TestUseItemOnBlockSendsAcceptedClick(t *testing.T) {
 	if err := a.UseItemOnBlock(pos, cube.FaceUp, click); err != nil {
 		t.Fatal(err)
 	}
-	if len(conn.written) != 2 {
-		t.Fatalf("packets = %d, want start and transaction", len(conn.written))
+	if len(conn.written) != 0 {
+		t.Fatalf("packets before auth tick = %d, want 0", len(conn.written))
 	}
-	start, ok := conn.written[0].(*packet.PlayerAction)
-	if !ok || start.ActionType != protocol.PlayerActionStartItemUseOn {
-		t.Fatalf("first packet = %#v, want start item use", conn.written[0])
+
+	a.Tick()
+	var auth *packet.PlayerAuthInput
+	for _, pk := range conn.written {
+		if input, ok := pk.(*packet.PlayerAuthInput); ok {
+			auth = input
+		}
 	}
-	tx, ok := conn.written[1].(*packet.InventoryTransaction)
+	if auth == nil || !auth.InputData.Load(packet.InputFlagPerformItemInteraction) {
+		t.Fatal("next tick did not carry item interaction")
+	}
+	use, ok := auth.ItemInteractionData.Value()
 	if !ok {
-		t.Fatalf("second packet = %T, want InventoryTransaction", conn.written[1])
-	}
-	use, ok := tx.TransactionData.(*protocol.UseItemTransactionData)
-	if !ok {
-		t.Fatalf("transaction = %T", tx.TransactionData)
+		t.Fatal("auth input missing item interaction data")
 	}
 	if use.TriggerType != protocol.TriggerTypePlayerInput || use.BlockRuntimeID != stone {
-		t.Fatalf("use = trigger %d block %d", use.TriggerType, use.BlockRuntimeID)
+		t.Fatalf("auth use = trigger %d block %d", use.TriggerType, use.BlockRuntimeID)
 	}
 	if use.ActionType != protocol.UseItemActionClickBlock {
 		t.Fatalf("action = %d", use.ActionType)
@@ -87,28 +90,5 @@ func TestUseItemOnBlockSendsAcceptedClick(t *testing.T) {
 	eyes := a.EyePos()
 	if use.Position.X() != float32(eyes.X()) || use.Position.Y() != float32(eyes.Y()) || use.Position.Z() != float32(eyes.Z()) {
 		t.Fatalf("position = %v, want eyes %v", use.Position, eyes)
-	}
-
-	conn.written = nil
-	a.Tick()
-	var stop *packet.PlayerAction
-	var auth *packet.PlayerAuthInput
-	for _, pk := range conn.written {
-		if action, ok := pk.(*packet.PlayerAction); ok && action.ActionType == protocol.PlayerActionStopItemUseOn {
-			stop = action
-		}
-		if input, ok := pk.(*packet.PlayerAuthInput); ok {
-			auth = input
-		}
-	}
-	if stop == nil {
-		t.Fatal("next tick did not stop item use")
-	}
-	if auth == nil || !auth.InputData.Load(packet.InputFlagPerformItemInteraction) {
-		t.Fatal("next tick did not carry item interaction")
-	}
-	authUse, ok := auth.ItemInteractionData.Value()
-	if !ok || authUse.BlockPosition != use.BlockPosition {
-		t.Fatalf("auth item interaction = %#v, want click at %v", authUse, use.BlockPosition)
 	}
 }
