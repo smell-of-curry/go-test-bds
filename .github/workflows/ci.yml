@@ -198,6 +198,7 @@ jobs:
           set_prop gamemode creative
           set_prop difficulty peaceful
           set_prop default-player-permission-level member
+          set_prop spawn-protection 0
           set_prop content-log-file-enabled true
           set_prop content-log-console-output-enabled true
           set_prop script-debugger-enabled false
