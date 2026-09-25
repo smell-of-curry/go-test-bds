@@ -608,11 +608,23 @@ func (a *Actor) UseItemOnBlock(pos cube.Pos, face cube.Face, clickPos mgl64.Vec3
 		BlockRuntimeID:   blockRuntimeID,
 		ClientPrediction: protocol.ClientPredictionSuccess,
 	}
-	// The click goes out on the next PlayerAuthInput (PerformItemInteraction).
-	// Sending the same click as a standalone InventoryTransaction makes BDS
-	// treat the auth input as a duplicate and silently discard the interaction.
-	a.pendingItemUse = action
-	return nil
+	if err := a.conn.WritePacket(&packet.PlayerAction{
+		EntityRuntimeID: a.RuntimeID(),
+		ActionType:      protocol.PlayerActionStartItemUseOn,
+		BlockPosition:   posToProtocol(pos),
+		ResultPosition:  posToProtocol(pos.Side(face)),
+		BlockFace:       int32(face),
+	}); err != nil {
+		return err
+	}
+	if err := a.useItem(action); err != nil {
+		return err
+	}
+	return a.conn.WritePacket(&packet.PlayerAction{
+		EntityRuntimeID: a.RuntimeID(),
+		ActionType:      protocol.PlayerActionStopItemUseOn,
+		BlockPosition:   posToProtocol(pos.Side(face)),
+	})
 }
 
 // ReleaseItem stops using held item.

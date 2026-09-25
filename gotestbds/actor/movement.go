@@ -30,10 +30,6 @@ type movementData struct {
 
 	sneaking, sprinting, swimming, crawling, gliding, immobile, onGround bool
 	movementBitset                                                       protocol.InputFlags
-	// pendingItemUse rides the next PlayerAuthInput. BDS 1.26 ignores a
-	// standalone InventoryTransaction click unless that tick's auth input
-	// carries the same UseItem data under PerformItemInteraction.
-	pendingItemUse *protocol.UseItemTransactionData
 
 	path             *pathfind.Path
 	navigationTarget cube.Pos
@@ -256,7 +252,6 @@ func (a *Actor) fillMovementBitset() {
 	if a.BreakingBlock() {
 		a.movementBitset.Set(packet.InputFlagPerformBlockActions)
 	}
-	a.movementBitset.Unset(packet.InputFlagPerformItemInteraction)
 }
 
 // SendMovement sends movement to the server.
@@ -307,12 +302,6 @@ func (a *Actor) SendMovement() {
 		pk.InputData.Set(packet.InputFlagClientPredictedVehicle)
 		pk.ClientPredictedVehicle = protocol.Option(a.vehicleUniqueID)
 		pk.VehicleRotation = protocol.Option(mgl32.Vec2{pitch, yaw})
-	}
-	if a.pendingItemUse != nil {
-		a.pendingItemUse.Position = pk.Position
-		pk.InputData.Set(packet.InputFlagPerformItemInteraction)
-		pk.ItemInteractionData = protocol.Option(*a.pendingItemUse)
-		a.pendingItemUse = nil
 	}
 	_ = a.conn.WritePacket(pk)
 }
