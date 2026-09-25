@@ -588,6 +588,7 @@ func (a *Actor) UseItemOnBlock(pos cube.Pos, face cube.Face, clickPos mgl64.Vec3
 		BlockRuntimeID:   blockRuntimeID,
 		ClientPrediction: protocol.ClientPredictionSuccess,
 	}
+	a.pendingItemUse = action
 	_ = a.useItem(action)
 
 	return a.conn.WritePacket(&packet.PlayerAction{

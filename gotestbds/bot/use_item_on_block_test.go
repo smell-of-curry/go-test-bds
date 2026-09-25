@@ -65,4 +65,29 @@ func TestUseItemOnBlockSendsAcceptedClick(t *testing.T) {
 	if data.BlockPosition.X() != int32(pos.X()) || data.BlockPosition.Y() != int32(pos.Y()) || data.BlockPosition.Z() != int32(pos.Z()) {
 		t.Fatalf("block position = %v", data.BlockPosition)
 	}
+
+	conn.written = nil
+	a.SendMovement()
+	var auth *packet.PlayerAuthInput
+	for _, pk := range conn.written {
+		if got, ok := pk.(*packet.PlayerAuthInput); ok {
+			auth = got
+		}
+	}
+	if auth == nil {
+		t.Fatal("no PlayerAuthInput for the click")
+	}
+	if !auth.InputData.Load(packet.InputFlagPerformItemInteraction) {
+		t.Fatal("missing perform-item-interaction flag")
+	}
+	use, ok := auth.ItemInteractionData.Value()
+	if !ok {
+		t.Fatal("auth input missing item interaction")
+	}
+	if use.TriggerType != protocol.TriggerTypePlayerInput || use.BlockRuntimeID != stone {
+		t.Fatalf("auth use = trigger %d block %d", use.TriggerType, use.BlockRuntimeID)
+	}
+	if use.Position != auth.Position {
+		t.Fatalf("use position %v, auth position %v", use.Position, auth.Position)
+	}
 }
