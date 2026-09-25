@@ -595,7 +595,7 @@ func (a *Actor) UseItemOnBlock(pos cube.Pos, face cube.Face, clickPos mgl64.Vec3
 		BlockPosition:    posToProtocol(pos),
 		BlockFace:        int32(face),
 		ClickedPosition:  mcmath.Vec64To32(clickPos),
-		Position:         mcmath.Vec64To32(a.EyePos()),
+		Position:         mcmath.Vec64To32(a.Position()),
 		BlockRuntimeID:   blockRuntimeID,
 		ClientPrediction: protocol.ClientPredictionSuccess,
 	}

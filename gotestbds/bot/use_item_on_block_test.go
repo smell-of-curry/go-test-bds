@@ -96,8 +96,8 @@ func TestUseItemOnBlockSendsAcceptedClick(t *testing.T) {
 	if use.ClickedPosition.Y() != 1 {
 		t.Fatalf("top-face click y = %v, want 1", use.ClickedPosition.Y())
 	}
-	eyes := a.EyePos()
-	if use.Position.X() != float32(eyes.X()) || use.Position.Y() != float32(eyes.Y()) || use.Position.Z() != float32(eyes.Z()) {
-		t.Fatalf("position = %v, want eyes %v", use.Position, eyes)
+	feet := a.Position()
+	if use.Position.X() != float32(feet.X()) || use.Position.Y() != float32(feet.Y()) || use.Position.Z() != float32(feet.Z()) {
+		t.Fatalf("position = %v, want feet %v", use.Position, feet)
 	}
 }
