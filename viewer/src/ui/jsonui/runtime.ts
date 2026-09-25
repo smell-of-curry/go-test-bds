@@ -2,6 +2,14 @@
  * JSON UI runtime: load pack ui files, mount the HUD, drive frames from WorldState.
  */
 
+import {
+  loadViewerExtensions,
+  type LoadedViewerExtensions,
+} from "../../extensions/load";
+import type {
+  ViewerHudExtension,
+  ViewerOverlayFrame,
+} from "../../extensions/types";
 import { AssetClient } from "../../terrain/assetClient";
 import type { WorldState } from "../../store";
 import { type JsonUiAssets, type TextureInfo } from "./dom";
@@ -11,7 +19,7 @@ import { createHudRenderer, DEFAULT_GUI_SCALE, type HudRenderer } from "./hud";
 import { createFormRenderer, type FormRenderer } from "./forms";
 import type { UiResolver } from "./types";
 
-/** UI textures that must nineslice / UV-crop on first paint. */
+/** Vanilla chrome that must nineslice / UV-crop on first paint. */
 const PRELOAD_TEXTURES = [
   "textures/ui/control",
   "textures/ui/dialog_background_hollow_3",
@@ -21,20 +29,25 @@ const PRELOAD_TEXTURES = [
   "textures/ui/button_borderless_light",
   "textures/ui/focus_border_white",
   "textures/ui/close_button_default",
+  "textures/ui/filled_progress_bar",
+  "textures/ui/Black",
+  "textures/ui/bg32",
+] as const;
+
+/**
+ * Textures the built-in `&_token:` HUD path warms. Skipped when an extension
+ * sets `replaceBuiltins` (that module lists its own `preloadTextures`).
+ */
+const BUILTIN_PACK_TEXTURES = [
   "textures/ui/phud/oak_start",
   "textures/ui/phud/oak_loop",
   "textures/ui/phud/ringing",
   "textures/ui/phud/standby",
   "textures/ui/phud/box_small",
   "textures/ui/phud/box_wide",
-  // Sidebar / XP chrome — warm texture-info before first PHUD paint so
-  // golden screenshots do not race createImageBitmap / .json fetches.
   "textures/ui/sidebar/dock",
   "textures/ui/sidebar/data",
   "textures/ui/sidebar/ring",
-  "textures/ui/filled_progress_bar",
-  "textures/ui/Black",
-  "textures/ui/bg32",
 ] as const;
 
 /** Options for {@link createJsonUiRuntime}. */
@@ -50,6 +63,13 @@ export interface JsonUiRuntimeOptions {
   client?: UiLoadClient;
   /** Host element; default creates `#json-hud` under `document.body`. */
   host?: HTMLElement;
+  /**
+   * Pre-loaded extension hooks. When omitted, the runtime fetches
+   * `/viewer.json` on {@link assetBaseUrl}. Null skips that fetch.
+   */
+  extension?: ViewerHudExtension | null;
+  /** When true, do not fetch `/viewer.json` (tests that inject `extension`). */
+  skipExtensionFetch?: boolean;
 }
 
 /** Public runtime handle (store-subscriber compatible with old PhudHandle). */
@@ -233,11 +253,42 @@ export function createJsonUiRuntime(opts: JsonUiRuntimeOptions): JsonUiRuntime {
   formsHost.style.cssText = "position:absolute;inset:0;pointer-events:none;";
   host.appendChild(formsHost);
 
+  const frameListeners: Array<(frame: ViewerOverlayFrame) => void> = [];
+  let extension: ViewerHudExtension | null = opts.extension ?? null;
+
+  /**
+   * @param state - Latest world state.
+   */
+  function emitOverlay(state: WorldState): void {
+    if (frameListeners.length === 0) return;
+    const frame = overlayFrameFromState(state);
+    for (const fn of frameListeners) fn(frame);
+  }
+
   const ready = (async () => {
+    if (opts.extension === undefined && !opts.skipExtensionFetch && assetBase) {
+      const loaded: LoadedViewerExtensions =
+        await loadViewerExtensions(assetBase);
+      extension = loaded.hud;
+      await loaded.mountAll(host, {
+        onFrame(fn) {
+          frameListeners.push(fn);
+          return () => {
+            const i = frameListeners.indexOf(fn);
+            if (i >= 0) frameListeners.splice(i, 1);
+          };
+        },
+      });
+    }
     const { files, globals, lang } = await loadUiFileSet(client);
     resolver = buildResolver(files, globals);
     // Nineslice / flipbook UV need sync size lookup on first paint.
-    await Promise.all(PRELOAD_TEXTURES.map((p) => preloadTextureInfo(p)));
+    const preload = [
+      ...PRELOAD_TEXTURES,
+      ...(extension?.replaceBuiltins ? [] : BUILTIN_PACK_TEXTURES),
+      ...(extension?.preloadTextures ?? []),
+    ];
+    await Promise.all(preload.map((p) => preloadTextureInfo(p)));
     // Layout viewport tracks the real host size (full window). A fixed
     // 1024x576 letterbox made gui space 512x288 so the sidebar's
     // `222.22%y x 192` dock ate most of the still — live run-43 black slab.
@@ -245,6 +296,7 @@ export function createJsonUiRuntime(opts: JsonUiRuntimeOptions): JsonUiRuntime {
       guiScale,
       assets,
       lang,
+      extension,
     });
     forms = createFormRenderer({
       resolver,
@@ -259,6 +311,7 @@ export function createJsonUiRuntime(opts: JsonUiRuntimeOptions): JsonUiRuntime {
       pendingState = null;
       lastFrameMs = hud.onFrame(state);
       projectForm(state);
+      emitOverlay(state);
     }
   })().catch((err: unknown) => {
     const msg = err instanceof Error ? err.message : String(err);
@@ -301,11 +354,45 @@ export function createJsonUiRuntime(opts: JsonUiRuntimeOptions): JsonUiRuntime {
       }
       lastFrameMs = hud.onFrame(state);
       projectForm(state);
+      emitOverlay(state);
       // Occasional perf breadcrumb (once the cost spikes).
       if (lastFrameMs > 8) {
         host.dataset.jsonuiFrameMs = lastFrameMs.toFixed(2);
       }
     },
+  };
+}
+
+/**
+ * Projection of world state onto the extension frame.
+ *
+ * @param state - Latest world state.
+ * @returns the snapshot an overlay module receives.
+ */
+function overlayFrameFromState(state: WorldState): ViewerOverlayFrame {
+  const form = state.ui?.form;
+  return {
+    title: state.ui?.title ?? "",
+    subtitle: state.ui?.subtitle ?? "",
+    actionBar: state.ui?.actionBar ?? "",
+    tokens: Object.fromEntries(state.phud),
+    form: form
+      ? {
+          type: form.type,
+          title: form.title,
+          content: form.content,
+          buttons: form.buttons,
+          buttonImages: form.buttonImages,
+        }
+      : null,
+    bot: state.actor
+      ? {
+          name: state.actor.name || state.bot,
+          position: state.actor.pos,
+          dimension: state.actor.dimension,
+        }
+      : null,
+    vitals: state.vitals,
   };
 }
 

@@ -56,6 +56,9 @@ type Config struct {
 		Offline bool
 		// MemoryPerformanceTier selects resource-pack subpacks (1–5). Default 5.
 		MemoryPerformanceTier int
+		// ExtensionsDir is a directory of viewer UI modules (manifest.json plus
+		// ES modules). Empty keeps the built-in HUD path.
+		ExtensionsDir string
 	}
 }
 
@@ -228,6 +231,9 @@ func applyEnv(c *Config) {
 			c.Viewer.MemoryPerformanceTier = n
 		}
 	}
+	if v := os.Getenv("GOTESTBDS_VIEWER_EXTENSIONS"); v != "" {
+		c.Viewer.ExtensionsDir = v
+	}
 }
 
 // applyFlags overlays command line flags onto a configuration.
@@ -253,6 +259,7 @@ func applyFlags(c *Config) error {
 	viewerPacks := set.Bool("viewer-packs", c.Viewer.AcceptServerPacks, "download server resource packs when the viewer is enabled")
 	viewerOffline := set.Bool("viewer-offline", c.Viewer.Offline, "use only the existing pack cache; never fetch")
 	viewerMemoryTier := set.Int("viewer-memory-tier", c.Viewer.MemoryPerformanceTier, "memory_performance_tier for subpack selection (1-5)")
+	viewerExtensions := set.String("viewer-extensions", c.Viewer.ExtensionsDir, "directory of viewer UI extension modules (manifest.json + ES modules)")
 
 	if err := set.Parse(os.Args[1:]); err != nil {
 		return err
@@ -280,6 +287,7 @@ func applyFlags(c *Config) error {
 	c.Viewer.AcceptServerPacks = *viewerPacks
 	c.Viewer.Offline = *viewerOffline
 	c.Viewer.MemoryPerformanceTier = *viewerMemoryTier
+	c.Viewer.ExtensionsDir = *viewerExtensions
 	return nil
 }
 

@@ -23,6 +23,11 @@ import type {
   UiResolver,
   Viewport,
 } from "./types";
+import type {
+  ViewerBindContext,
+  ViewerBoundNode,
+  ViewerHudExtension,
+} from "../../extensions/types";
 import type { VitalsFrame } from "../../protocol";
 import type { WorldState } from "../../store";
 import { normalizeSidebarBallType } from "../phud/parse";
@@ -50,6 +55,23 @@ export interface HudRendererOptions {
   measureText?: MeasureText;
   /** Merged pack lang table for `localize: true` labels. */
   lang?: Readonly<Record<string, string>>;
+  /**
+   * Consumer HUD hooks. Absent, or present with `replaceBuiltins: false`,
+   * keeps the built-in `&_token:` quirks. `replaceBuiltins` turns those off.
+   */
+  extension?: ViewerHudExtension | null;
+}
+
+/** Per-frame values threaded through bind for extension hooks. */
+interface BindPass {
+  builtin: boolean;
+  title: string;
+  subtitle: string;
+  actionBar: string;
+  tokens: Readonly<Record<string, string>>;
+  form: ViewerBindContext["form"];
+  bot: ViewerBindContext["bot"];
+  onBind?: ViewerHudExtension["onBind"];
 }
 
 /** Handle returned by {@link createHudRenderer}. */
@@ -145,6 +167,11 @@ export class PhudTitleTracker {
 export function bindingSourceFromState(
   state: WorldState,
   title: string,
+  options?: {
+    /** When false, do not copy the built-in token map onto globals. Default true. */
+    seedPhudTokens?: boolean;
+    seedGlobals?: ViewerHudExtension["seedGlobals"];
+  },
 ): BindingSource {
   const subtitle = state.ui?.subtitle ?? "";
   const vitals = state.vitals;
@@ -207,10 +234,16 @@ export function bindingSourceFromState(
 
   // Seed PHUD token props from the map so a busy title lane (sidebar) cannot
   // starve loadingScreen / phone / etc. when data_control latches lag.
-  for (const [token, value] of state.phud) {
-    const prop = phudTokenProp(token);
-    if (prop) globals[prop] = value;
+  if (options?.seedPhudTokens !== false) {
+    for (const [token, value] of state.phud) {
+      const prop = phudTokenProp(token);
+      if (prop) globals[prop] = value;
+    }
   }
+  const tokenRecord = Object.fromEntries(state.phud);
+  options?.seedGlobals?.(tokenRecord, (key, value) => {
+    globals[key] = value;
+  });
 
   return {
     global(name: string): BindingValue | undefined {
@@ -381,9 +414,50 @@ export function createHudRenderer(
     },
     onFrame(state: WorldState): number {
       const t0 = performance.now();
-      const title = hudTitleString(state, titleTracker.update(state.phud));
-      const source = bindingSourceFromState(state, title);
+      const ext = opts.extension;
+      const builtin = !ext?.replaceBuiltins;
+      const tokens = Object.fromEntries(state.phud);
+      const form = state.ui?.form
+        ? {
+            type: state.ui.form.type,
+            title: state.ui.form.title,
+            content: state.ui.form.content,
+            buttons: state.ui.form.buttons,
+            buttonImages: state.ui.form.buttonImages,
+          }
+        : null;
+      const bot = state.actor
+        ? {
+            name: state.actor.name || state.bot,
+            position: state.actor.pos,
+            dimension: state.actor.dimension,
+          }
+        : null;
+      const title = builtin
+        ? hudTitleString(state, titleTracker.update(state.phud))
+        : (ext?.resolveTitle?.({
+            title: state.ui?.title ?? "",
+            subtitle: state.ui?.subtitle ?? "",
+            actionBar: state.ui?.actionBar ?? "",
+            tokens,
+          }) ??
+          state.ui?.title ??
+          "");
+      const source = bindingSourceFromState(state, title, {
+        seedPhudTokens: builtin,
+        seedGlobals: ext?.seedGlobals,
+      });
       const idIndex = new Map<string, PropertyBag>();
+      const pass: BindPass = {
+        builtin,
+        title,
+        subtitle: state.ui?.subtitle ?? "",
+        actionBar: state.ui?.actionBar ?? "",
+        tokens,
+        form,
+        bot,
+        onBind: ext?.onBind,
+      };
 
       const bound = bindTree(
         baseRoot,
@@ -394,10 +468,18 @@ export function createHudRenderer(
         state.vitals,
         lang,
         state.phud,
+        pass,
       );
-      applyTitleQuirk(bound, title);
-      applyPhudElementTokens(bound, state.phud);
-      applyEmptyChromeQuirks(bound);
+      if (builtin) {
+        applyTitleQuirk(bound, title);
+        applyPhudElementTokens(bound, state.phud);
+        applyEmptyChromeQuirks(bound);
+      }
+      ext?.afterTree?.({
+        root: bound as unknown as ViewerBoundNode,
+        title,
+        tokens,
+      });
 
       // Dirty check: skip layout/paint when bound props + vitals unchanged.
       const paintKey = boundPaintKey(bound, title, state.vitals);
@@ -658,7 +740,9 @@ function bindTree(
   vitals: VitalsFrame | null,
   lang?: Readonly<Record<string, string>>,
   phud?: Map<string, string>,
+  pass?: BindPass,
 ): ResolvedElement {
+  const builtin = pass?.builtin !== false;
   const prev = store.get(path) ?? {};
   const out: PropertyBag = { ...el.props };
 
@@ -711,6 +795,7 @@ function bindTree(
     // `Current Ping: ` (trailing space); older pack extracts omit it and the
     // value (`§a0`) glues to the colon. Preserve the separator space.
     if (
+      builtin &&
       el.name === "label_prefix" &&
       el.namespace === "player_ping" &&
       text.endsWith(":")
@@ -725,7 +810,7 @@ function bindTree(
   // prev.visible=false after an empty frame sticks forever and layout stubs
   // the ball with children:[] so pokemon_icon never paints either.
   // `paintNode` / layout still walk children when the host is hidden.
-  if (el.name === "ball_icon") {
+  if (builtin && el.name === "ball_icon") {
     const rawBall = typeof out.ball_type === "string" ? out.ball_type : "";
     const ball = normalizeSidebarBallType(rawBall);
     if (ball !== rawBall) {
@@ -740,6 +825,7 @@ function bindTree(
   // Pack omits size on ball/ring hosts; never latch a fill size from a prior
   // frame (would disable isSidebarIconHost → mid-plate ring, 0-size icons).
   if (
+    builtin &&
     el.namespace === "phud_sidebar" &&
     (el.name === "pokemon_icon_wrapper" ||
       el.name === "pokemon_selected_indicator")
@@ -750,6 +836,7 @@ function bindTree(
   // icons. When the live map has `&_phone:`, hide/show the 64×64 host with it
   // (always assign — seeding prev.visible=false would stick across setPhud).
   if (
+    builtin &&
     el.namespace === "phud_phone" &&
     el.name === "main" &&
     phud?.has("phone")
@@ -758,7 +845,7 @@ function bindTree(
   }
   // Pack fades oak_talk_bg / oak_loop in via wait→alpha anims we do not run.
   // When talking chrome is shown, force the settled frame (not oak_start ghost).
-  if (el.namespace === "phud_phone") {
+  if (builtin && el.namespace === "phud_phone") {
     const phoneVal = String(phud?.get("phone") ?? out.value ?? "");
     const talking = phoneVal.slice(0, 4) === "loop";
     if (el.name === "oak_talk_bg") out.alpha = 1;
@@ -774,11 +861,17 @@ function bindTree(
   }
   applyRendererSizing(el, out, vitals);
   applyHotbarHangPin(el, out, vitals);
-  applyVisibilityChangedLatch(el, out, source, prev, phud);
+  applyVisibilityChangedLatch(
+    el,
+    out,
+    source,
+    prev,
+    builtin ? phud : undefined,
+  );
   // Prefer live phud map on the elements panel before children bind, so
   // loadingScreen/phone see tokens even when title-lane latches lag. Clear
   // absent overlay tokens so a bad sibling latch cannot keep dirt painted.
-  if (el.name === "elements" && el.namespace === "phud") {
+  if (builtin && el.name === "elements" && el.namespace === "phud") {
     // Pack omits size; Bedrock fills the parent. Our `default` size is content
     // AABB + center anchors → live dump (193,92) 894×536 inset ("squished HUD").
     out.size = ["100%", "100%"];
@@ -854,6 +947,24 @@ function bindTree(
     if (!(vitals.xpLevel > 0 || vitals.xpProgress > 0)) out.visible = false;
   }
 
+  if (pass?.onBind) {
+    pass.onBind({
+      name: el.name,
+      namespace: el.namespace,
+      type: el.type,
+      props: out,
+      authored: el.props,
+      bindings: el.bindings,
+      title: pass.title,
+      subtitle: pass.subtitle,
+      actionBar: pass.actionBar,
+      tokens: pass.tokens,
+      form: pass.form,
+      bot: pass.bot,
+      vitals,
+    });
+  }
+
   store.set(path, { ...out });
   // Index by leaf id for source_control_name lookups.
   const leaf = path.includes("/")
@@ -873,6 +984,7 @@ function bindTree(
       vitals,
       lang,
       phud,
+      pass,
     ),
   }));
 
@@ -893,6 +1005,7 @@ function bindTree(
         vitals,
         lang,
         phud,
+        pass,
       ),
     });
   }

@@ -90,6 +90,7 @@ func main() {
 			ColumnBudget:  config.Viewer.ColumnBudget,
 			ArtifactDir:   config.Viewer.ArtifactDir,
 			AppDir:        config.Viewer.AppDir,
+			ExtensionsDir: config.Viewer.ExtensionsDir,
 			Assets:        assetM,
 			Logger:        logger.With("src", "viewer"),
 		})
@@ -98,7 +99,7 @@ func main() {
 			os.Exit(1)
 		}
 		defer hub.Close()
-		logger.Info("viewer listening", "address", hub.Addr(), "cache", cacheDir, "baseline", baselineTag)
+		logger.Info("viewer listening", "address", hub.Addr(), "cache", cacheDir, "baseline", baselineTag, "extensions", config.Viewer.ExtensionsDir)
 	}
 
 	logger.Info("starting bots",

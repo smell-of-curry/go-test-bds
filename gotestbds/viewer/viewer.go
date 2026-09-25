@@ -32,8 +32,12 @@ type Options struct {
 	ColumnBudget int
 	ArtifactDir  string // where artefacts are written
 	AppDir       string // built viewer app to serve at "/", optional
-	Assets       *assets.Manager
-	Logger       *slog.Logger
+	// ExtensionsDir is a directory of viewer UI modules served at
+	// /extensions/ and advertised by GET /viewer.json. Empty disables it;
+	// the web app then keeps its built-in HUD behaviour.
+	ExtensionsDir string
+	Assets        *assets.Manager
+	Logger        *slog.Logger
 	// EncodeEveryTick disables the world-projection throttle so tests can
 	// drive Tick faster than wall time. Production keeps the throttle: a
 	// full-rate projection starved the bot loop below the client tick rate.

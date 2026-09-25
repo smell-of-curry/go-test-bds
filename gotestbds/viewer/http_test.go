@@ -69,6 +69,103 @@ func TestHTTPServesAppAssets(t *testing.T) {
 	}
 }
 
+func TestViewerExtensionsHTTP(t *testing.T) {
+	dir := t.TempDir()
+	mod := "export const viewerExtension = { replaceBuiltins: true };\n"
+	if err := os.WriteFile(filepath.Join(dir, "overlay.mjs"), []byte(mod), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	manifest := []byte(`{"modules":["./overlay.mjs"]}` + "\n")
+	if err := os.WriteFile(filepath.Join(dir, "manifest.json"), manifest, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	hub, err := New(Options{
+		EncodeEveryTick: true,
+		Address:         "127.0.0.1:0",
+		ArtifactDir:     t.TempDir(),
+		ExtensionsDir:   dir,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer hub.Close()
+
+	base := "http://" + hub.Addr()
+	res, err := http.Get(base + "/viewer.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(res.Body)
+	res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("viewer.json status %d body %s", res.StatusCode, body)
+	}
+	if !strings.Contains(string(body), `"/extensions/"`) {
+		t.Fatalf("viewer.json = %s", body)
+	}
+
+	res, err = http.Get(base + "/extensions/manifest.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ = io.ReadAll(res.Body)
+	res.Body.Close()
+	if res.StatusCode != http.StatusOK || !strings.Contains(string(body), "overlay.mjs") {
+		t.Fatalf("manifest status %d body %s", res.StatusCode, body)
+	}
+
+	res, err = http.Get(base + "/extensions/overlay.mjs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ = io.ReadAll(res.Body)
+	res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("module status %d", res.StatusCode)
+	}
+	if ct := res.Header.Get("Content-Type"); !strings.Contains(ct, "javascript") {
+		t.Fatalf("module content-type %q", ct)
+	}
+	if !strings.Contains(string(body), "replaceBuiltins") {
+		t.Fatalf("module body %s", body)
+	}
+
+	res, err = http.Get(base + "/extensions/../../etc/passwd")
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode == http.StatusOK {
+		t.Fatal("path traversal served a file")
+	}
+}
+
+func TestViewerConfigWithoutExtensions(t *testing.T) {
+	hub, err := New(Options{EncodeEveryTick: true, Address: "127.0.0.1:0", ArtifactDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer hub.Close()
+	res, err := http.Get("http://" + hub.Addr() + "/viewer.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	body, _ := io.ReadAll(res.Body)
+	if !strings.Contains(string(body), `"extensions":""`) && !strings.Contains(string(body), `"extensions": ""`) {
+		t.Fatalf("viewer.json = %s", body)
+	}
+	res2, err := http.Get("http://" + hub.Addr() + "/extensions/manifest.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	res2.Body.Close()
+	if res2.StatusCode != http.StatusNotFound {
+		t.Fatalf("extensions status %d, want 404", res2.StatusCode)
+	}
+}
+
 // TestHTTPStreamAndArtifact covers GET /stream hello+keyframe and POST /artifact.
 func TestHTTPStreamAndArtifact(t *testing.T) {
 	dir := t.TempDir()

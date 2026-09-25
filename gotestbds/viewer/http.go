@@ -6,7 +6,9 @@ import (
 	"io"
 	"net/http"
 	"net/http/pprof"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -19,6 +21,8 @@ func (h *Hub) routes() http.Handler {
 	mux.HandleFunc("GET /packs/index", h.handlePacksIndex)
 	mux.HandleFunc("GET /pack/{packId}/{path...}", h.handlePackFile)
 	mux.HandleFunc("GET /asset/{path...}", h.handleAsset)
+	mux.HandleFunc("GET /viewer.json", h.handleViewerConfig)
+	mux.HandleFunc("GET /extensions/{path...}", h.handleExtensionFile)
 	mux.HandleFunc("GET /", h.handleRoot)
 	mux.HandleFunc("POST /artifact", h.handleArtifact)
 	mux.HandleFunc("POST /capture/{id}/error", h.handleCaptureError)
@@ -188,6 +192,49 @@ func (h *Hub) handleCaptureError(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusOK)
+}
+
+// handleViewerConfig tells the web app where extension modules live.
+//
+// An empty extensions field means "no directory was configured" — the app
+// keeps its built-in HUD path. The field is a path on this hub, not a
+// filesystem path.
+func (h *Hub) handleViewerConfig(w http.ResponseWriter, _ *http.Request) {
+	ext := ""
+	if h.opts.ExtensionsDir != "" {
+		ext = "/extensions/"
+	}
+	writeJSON(w, map[string]any{"v": SchemaVersion, "extensions": ext})
+}
+
+// handleExtensionFile serves one file from Options.ExtensionsDir.
+//
+// .js and .mjs are forced to text/javascript so the browser will dynamic-import them.
+func (h *Hub) handleExtensionFile(w http.ResponseWriter, r *http.Request) {
+	if h.opts.ExtensionsDir == "" {
+		http.NotFound(w, r)
+		return
+	}
+	rel := r.PathValue("path")
+	if rel == "" || strings.Contains(rel, "..") {
+		http.NotFound(w, r)
+		return
+	}
+	root, err := filepath.Abs(h.opts.ExtensionsDir)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	full := filepath.Join(root, filepath.FromSlash(rel))
+	relFull, err := filepath.Rel(root, full)
+	if err != nil || strings.HasPrefix(relFull, "..") {
+		http.NotFound(w, r)
+		return
+	}
+	if strings.HasSuffix(full, ".mjs") || strings.HasSuffix(full, ".js") {
+		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+	}
+	http.ServeFile(w, r, full)
 }
 
 func writeJSON(w http.ResponseWriter, v any) {

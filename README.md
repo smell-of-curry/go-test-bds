@@ -210,6 +210,44 @@ Adding an instruction means adding it in `gotestbds/instruction/`, registering i
 in `pull.go`, regenerating, and — if it is worth a friendlier signature — adding a
 method to `Bot`.
 
+## Viewer extensions
+
+The viewer paints a server's resource-pack JSON UI (`ui/*.json` from the pack
+stack) without any per-pack code. Pack-specific overlays and bind quirks live
+in a directory of ES modules the bot loads at runtime.
+
+```bash
+go run . --viewer --viewer-extensions ./my-ui
+# or
+GOTESTBDS_VIEWER_EXTENSIONS=./my-ui
+```
+
+The directory needs a `manifest.json`:
+
+```json
+{ "modules": ["./overlay.mjs"] }
+```
+
+The hub serves it at `GET /extensions/…` and advertises it from `GET /viewer.json`
+(`{"extensions":"/extensions/"}`). An empty `extensions` string — the default
+when the flag is unset — keeps the built-in HUD path, including the historical
+`&_token:` title-channel quirks. A module that sets `replaceBuiltins: true`
+turns those quirks off and must supply whatever its pack still needs.
+
+Each module exports `viewerExtension` (or a default object):
+
+| Field | Role |
+|---|---|
+| `preloadTextures` | Pack texture paths (no extension) warmed before first paint |
+| `resolveTitle(input)` | Raw `#hud_title_text_string`. First module that defines it wins. `input` is `{ title, subtitle, actionBar, tokens }` |
+| `seedGlobals(tokens, set)` | Extra JSON UI globals (`set("#prop", value)`) before bind |
+| `onBind(ctx)` | Mutate `ctx.props` after generic bind. `ctx` carries `name`, `namespace`, `authored` (`$variables`), `bindings`, `title`, `subtitle`, `actionBar`, `tokens`, `form`, `bot`, `vitals` |
+| `afterTree({ root, title, tokens })` | Walk the bound HUD tree once per frame, before layout |
+| `mount(host, api)` | DOM overlay. `api.onFrame(frame)` receives the same lanes: title, subtitle, actionBar, `tokens` (control-token map — custom sidebars arrive here, not as a vanilla scoreboard), `form`, `bot` (`name`, `position`, `dimension`), `vitals` |
+| `replaceBuiltins` | Skip built-in `&_token:` quirks |
+
+`tokens` is the latest `&_token:value` title write per token name (the `phud` stream event). Packs that do not use that convention see `{}`.
+
 ## License
 
 ...
