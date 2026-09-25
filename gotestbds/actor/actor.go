@@ -341,20 +341,7 @@ func (a *Actor) NearestEntity(filter func(e world.Entity) bool) (world.Entity, f
 
 // LookAt makes Actor look at the point.
 func (a *Actor) LookAt(point mgl64.Vec3) {
-	pos := a.EyePos()
-	horizontal := math.Sqrt(math.Pow(point.X()-pos.X(), 2) + math.Pow(point.Z()-pos.Z(), 2))
-	vertical := point.Y() - (pos.Y())
-	pitch := -math.Atan2(vertical, horizontal) * 180 / math.Pi
-
-	xDist := point.X() - pos.X()
-	zDist := point.Z() - pos.Z()
-
-	yaw := math.Atan2(zDist, xDist)*180/math.Pi - 90
-	if yaw < 0 {
-		yaw += 360.0
-	}
-
-	a.Move(a.Position(), cube.Rotation{yaw, pitch})
+	a.Move(a.Position(), mcmath.VectorToRotation(point.Sub(a.EyePos())))
 }
 
 // LookAtBlock makes Actor look at the block position passed.
