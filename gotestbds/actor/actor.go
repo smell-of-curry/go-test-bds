@@ -559,17 +559,6 @@ func (a *Actor) UseItem() error {
 	return a.useItem(action)
 }
 
-// clampClick keeps a face coordinate strictly inside the block.
-func clampClick(v float64) float64 {
-	if v <= 0 {
-		return 0.01
-	}
-	if v >= 1 {
-		return 0.99
-	}
-	return v
-}
-
 // UseItemOnBlock uses item in heldSlot on the block.
 func (a *Actor) UseItemOnBlock(pos cube.Pos, face cube.Face, clickPos mgl64.Vec3) error {
 	_, err := a.AbleToInteractWithBlock(a.world.Block(pos), pos)
@@ -592,9 +581,6 @@ func (a *Actor) UseItemOnBlock(pos cube.Pos, face cube.Face, clickPos mgl64.Vec3
 		face = hitFace
 		clickPos = hitPoint.Sub(pos.Vec3())
 	}
-	// A click exactly on the block boundary (y=1 on the top face) is rejected
-	// by BDS and never becomes playerInteractWithBlock.
-	clickPos = mgl64.Vec3{clampClick(clickPos[0]), clampClick(clickPos[1]), clampClick(clickPos[2])}
 	blockRuntimeID, _ := a.world.NetworkBlockRuntimeID(pos, 0)
 	action := &protocol.UseItemTransactionData{
 		HotBarSlot:       int32(a.heldSlot),
