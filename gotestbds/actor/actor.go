@@ -588,16 +588,11 @@ func (a *Actor) UseItemOnBlock(pos cube.Pos, face cube.Face, clickPos mgl64.Vec3
 		BlockRuntimeID:   blockRuntimeID,
 		ClientPrediction: protocol.ClientPredictionSuccess,
 	}
+	// The click goes out on the next PlayerAuthInput (PerformItemInteraction).
+	// A separate StartItemUseOn beforehand makes BDS treat that auth input as
+	// a hold-repeat (isFirstEvent false), and the claim handler cancels it.
 	a.pendingItemUse = action
-	_ = a.useItem(action)
-
-	return a.conn.WritePacket(&packet.PlayerAction{
-		EntityRuntimeID: a.RuntimeID(),
-		ActionType:      protocol.PlayerActionStartItemUseOn,
-		BlockPosition:   posToProtocol(pos),
-		ResultPosition:  posToProtocol(pos.Side(face)),
-		BlockFace:       int32(face),
-	})
+	return a.useItem(action)
 }
 
 // ReleaseItem stops using held item.
