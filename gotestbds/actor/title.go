@@ -23,17 +23,17 @@ type ScreenTitle struct {
 }
 
 // titleWriteRingCap bounds retained title-channel writes for the viewer's
-// phud lane. Generous: PokeBedrock's HUD feeders write a handful of tokens per
+// title-token lane. Generous: a HUD feeder can write a handful of tokens per
 // tick and the stream drains every tick it runs.
 const titleWriteRingCap = 256
 
 type titleState struct {
 	mu sync.Mutex
 	ScreenTitle
-	// writes retains every title-channel set action. PokeBedrock smuggles HUD
-	// state through SetTitle ("&_token:value"), and several writes can land
-	// between stream ticks — the latest-state ScreenTitle snapshot alone would
-	// lose all but the last.
+	// writes retains every title-channel set action. Packs may smuggle HUD
+	// state through SetTitle (prefix + token + value), and several writes can
+	// land between stream ticks — the latest-state ScreenTitle snapshot alone
+	// would lose all but the last.
 	writes    []string
 	writeSeqs []uint64
 	writeSeq  uint64
@@ -85,10 +85,9 @@ func (a *Actor) TitleWriteSeq() uint64 {
 // TitleWritesFromSeq returns buffered title-channel writes with sequence >
 // afterSeq, oldest first, plus the highest sequence included in the batch.
 // Callers must advance their cursor to that returned seq (not TitleWriteSeq):
-// advancing to the live counter races new writes and drops them forever —
-// live showcase-07 lost `&_loadingScreen:TUTORIAL COMPLETE` under sidebar flood.
+// advancing to the live counter races new writes and drops them forever.
 //
-// Subtitle/action-bar sets are not recorded — the PokeBedrock HUD convention
+// Subtitle/action-bar sets are not recorded — the title-token convention
 // rides the title channel only.
 //
 // @param afterSeq The last sequence the caller has already consumed.

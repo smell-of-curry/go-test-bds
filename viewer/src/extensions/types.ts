@@ -42,7 +42,7 @@ import type { VitalsFrame } from "../protocol";
  *
  * Party / custom sidebar text is not a separate scoreboard lane. Packs that
  * smuggle it through the title channel expose the latest value on `tokens`
- * (token name → raw string, no `&_token:` prefix).
+ * (token name → raw string, prefix already stripped).
  */
 export interface ViewerOverlayFrame {
   /** Plain title lane (already filtered of control tokens by the hub). */
@@ -50,8 +50,8 @@ export interface ViewerOverlayFrame {
   subtitle: string;
   actionBar: string;
   /**
-   * Latest control-token map from the `phud` stream event
-   * (`&_token:value` title writes). Empty object when the server sends none.
+   * Latest control-token map from the `titleToken` stream event.
+   * Empty object when no prefix is configured or the server sends none.
    */
   tokens: Readonly<Record<string, string>>;
   form: {
@@ -107,16 +107,79 @@ export interface ViewerTitleInput {
   tokens: Readonly<Record<string, string>>;
 }
 
+/** Extra `root_panel` screen the HUD should mount. */
+export interface HudScreenMount {
+  /** Child id on `hud.root_panel`, or the id used when mounting a fallback. */
+  id: string;
+  /** Resolve this screen when `id` is not already a `root_panel` child. */
+  namespace?: string;
+  /** Element name inside {@link namespace}. */
+  name?: string;
+  /**
+   * Wrap the fallback in a top-left vertical stack (`chat_stack`).
+   * Used for a slim ping host the pruned root would otherwise drop.
+   */
+  wrapStack?: boolean;
+}
+
+/**
+ * Pack layout corrections the generic engine applies by namespace + name.
+ * Absent rules change nothing.
+ */
+export interface LayoutQuirkRules {
+  /** Treat omitted size as content and default anchors as left_middle. */
+  iconHosts?: ReadonlyArray<{ namespace: string; name: string }>;
+  /**
+   * Right-anchored elements whose width is capped to a fraction of the
+   * viewport, then inset from the parent's right edge.
+   */
+  capRight?: ReadonlyArray<{
+    namespace: string;
+    name: string;
+    /** Max width as a fraction of viewport width (0.25 = 25%). */
+    maxWidthRatio: number;
+    /** Inset = max(minInset, width * insetRatio). */
+    insetRatio: number;
+    minInset: number;
+  }>;
+  /**
+   * Right-anchored elements whose paint box clips at the parent while
+   * children keep the full authored box.
+   */
+  clipDock?: ReadonlyArray<{ namespace: string; name: string }>;
+}
+
+/** Still gate the capture harness consults when `noSettle` is set. */
+export interface ViewerCaptureGate {
+  /** Case-insensitive substring of the capture label that arms the gate. */
+  labelIncludes: string;
+  /**
+   * @param tokens - Live title-token map.
+   * @param root - Document (or host) to query for painted text.
+   * @returns true when the still is safe to shoot.
+   */
+  ready(tokens: Readonly<Record<string, string>>, root: ParentNode): boolean;
+}
+
 /**
  * Object an extension module exports as `viewerExtension` (or as default).
  */
 export interface ViewerExtensionModule {
   /**
-   * When true, skip the built-in `&_token:` HUD quirks. The module must
-   * supply any pack-specific title, token, and chrome behaviour itself.
-   * Default false: quirks still run, and these hooks run in addition.
+   * Reserved. Pack-specific title and chrome behaviour belongs in the hooks
+   * below. The engine does not ship a second copy of those quirks.
    */
   replaceBuiltins?: boolean;
+  /** Extra HUD screens to keep or mount. Default: survival vitals + title only. */
+  hudScreens?: readonly HudScreenMount[];
+  /** Namespace/name layout corrections. Default: none. */
+  layoutRules?: LayoutQuirkRules;
+  /**
+   * Milliseconds to hold a token after an empty clear, keyed by token name.
+   */
+  titleTokenClearDelayMs?: Readonly<Record<string, number>>;
+  /** Capture still gates. */
+  captureGates?: readonly ViewerCaptureGate[];
   /**
    * Invisible title-flag → `namespace.name` screen. First match wins.
    * Packs that route ActionForms this way supply the table here.
@@ -184,6 +247,10 @@ export interface ViewerHudExtension {
   replaceBuiltins: boolean;
   formRoutes: ReadonlyArray<{ flag: string; screen: string }>;
   preloadTextures: readonly string[];
+  hudScreens: readonly HudScreenMount[];
+  layoutRules: LayoutQuirkRules;
+  titleTokenClearDelayMs: Readonly<Record<string, number>>;
+  captureGates: readonly ViewerCaptureGate[];
   resolveTitle?: ViewerExtensionModule["resolveTitle"];
   seedGlobals?: ViewerExtensionModule["seedGlobals"];
   onBind?: ViewerExtensionModule["onBind"];

@@ -53,7 +53,7 @@ func TestSubpackMemoryPerformanceTier(t *testing.T) {
 
 // Sidebar ball + species sprite URLs the viewer builds
 // (`textures/ui/sidebar/balls/poke.png`, `textures/sprites/default/bulbasaur.png`)
-// must resolve from the pack ROOT — PokeBedrock keeps 2D sprites outside subpacks/3d.
+// must resolve from the pack ROOT — some packs keep 2D sprites outside subpacks/3d.
 func TestSidebarSpritePathsResolveFromPackRoot(t *testing.T) {
 	dir := t.TempDir()
 	write := func(rel, body string) {

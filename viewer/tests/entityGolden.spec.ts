@@ -4,7 +4,7 @@
  *
  * - Bulbasaur (custom pack geometry) scrambled into a voxel mess because
  *   animation poses rotated bones about the model origin instead of the bone
- *   pivot. Rendered here from the real pokebedrock-res assets (fixtures under
+ *   pivot. Rendered here from copied entity fixtures (fixtures under
  *   `testdata/entity/bulbasaur/`) with a pack animation applied.
  * - The bot player rendered as a degenerate blob instead of the Steve
  *   humanoid. Rendered here from the bedrock-samples baseline (skipped when no
@@ -337,7 +337,7 @@ test.describe("entity model goldens (browser)", () => {
         {
           id: "server",
           priority: 1,
-          name: "pokebedrock",
+          name: "sample",
           files: bulbasaurPack(),
         },
       ]);
@@ -347,7 +347,7 @@ test.describe("entity model goldens (browser)", () => {
         ent: {
           type: "pokemon:bulbasaur",
           player: false,
-          props: { "pokeb:shiny": 0, "pokeb:skin_index": 0 },
+          props: { "pack:shiny": 0, "pack:skin_index": 0 },
           flags: {},
         },
         // Idle keyframe mid-cycle: head dips, vine whips rotate — exercises the

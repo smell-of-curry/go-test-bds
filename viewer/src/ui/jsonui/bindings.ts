@@ -3,16 +3,16 @@
  *
  * ## Standard global bindings the engine expects (wire later from SSE/title)
  *
- * From vanilla `testdata/jsonui/vanilla/hud_screen.json` + PokeBedrock PHUD:
+ * From vanilla `testdata/jsonui/vanilla/hud_screen.json` + title tokens:
  *
  * | Role | Real binding name | Notes |
  * |---|---|---|
- * | Title text | `#hud_title_text_string` | PHUD control channel (`&_…`) |
+ * | Title text | `#hud_title_text_string` | title-token channel when a prefix is configured |
  * | Subtitle text | `#hud_subtitle_text_string` | |
  * | Hotbar selection | `#slot_selected` | **collection** on `$hotbar_collection_name`, not a scalar `#hotbar_selected_slot` |
  * | Hearts | *(none — `heart_renderer`)* | Custom renderer; no `#player_health` in hud_screen |
  * | Hunger | *(none — `hunger_renderer`)* | Custom renderer; no `#hunger` / `#food` scalar |
- * | Title visibility helpers | — | PokeBedrock derives via view expr on title string |
+ * | Title visibility helpers | — | a pack may derive via a view expr on the title string |
  * | Common HUD toggles | `#hotbar_visible`, `#show_survival_ui`, `#hud_visible_centered`, … | |
  * | Hotbar item slots | collection `hotbar_items` / `#inventory_stack_count`, … | collection bindings — not implemented here |
  * | Player position / days | `#player_position_text`, `#number_of_days_played_text` | |
@@ -21,7 +21,7 @@
  * | Hotbar mode | `#hotbar_with_xp_bar` / `#hotbar_no_xp_bar` / `#hotbar_with_locator_bar` | mutually exclusive |
  * | Touch ellipses | `#hotbar_elipses_left_visible` / `#hotbar_elipses_right_visible` | off on desktop |
  *
- * PokeBedrock also synthesizes view-scoped properties (`#sidebar`, `#phone`,
+ * A pack may also synthesize view-scoped properties (`#sidebar`, `#phone`,
  * `#player_ping_text`) by slicing `#hud_title_text_string` upstream of these
  * elements — integration owns that fan-out.
  */
@@ -309,7 +309,7 @@ export function applyBindings(
 
     const condition =
       (raw.binding_condition as BindingCondition | undefined) ?? "always";
-    // PHUD data_control copies title → #preserved_text only on
+    // A data_control copies title → #preserved_text only on
     // visibility_changed. Treating it as always overwrites every latch with
     // the current title (usually &_sidebar:), so
     // `(#preserved_text - '&_loadingScreen:')` stays non-empty and the

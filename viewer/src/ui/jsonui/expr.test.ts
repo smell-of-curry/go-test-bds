@@ -110,16 +110,16 @@ describe("parseExpr / evalExpr operators", () => {
   it("tolerates extra trailing ) (oak_icon texture)", () => {
     assert.equal(
       ev(
-        "('textures/ui/phud/oak_' + $name))",
+        "('textures/ui/widgets/oak_' + $name))",
         scope({ vars: { name: "start" } }),
       ),
-      "textures/ui/phud/oak_start",
+      "textures/ui/widgets/oak_start",
     );
   });
 });
 
-describe("currency.json pad split (real phud_currency bindings)", () => {
-  // From pokebedrock-res ui/phud/currency.json — banner padded to 80 with `_`,
+describe("currency.json pad split (padded banner bindings)", () => {
+  // Banner padded to 80 with `_`,
   // then coin+amount. Quest takes first 80 and strips EVERY `_`; currency takes
   // the remainder. (Pre-fix: string `-` only removed the first `_`, leaving
   // literal pad underscores in the top HUD.)
@@ -140,7 +140,7 @@ describe("currency.json pad split (real phud_currency bindings)", () => {
 });
 
 describe("sidebar field extraction (real $string_parser)", () => {
-  // From pokebedrock-res ui/_global_variables.json + sidebar.json $var_size: 121
+  // Field width 120 + separator, $var_size: 121
   const STRING_PARSER =
     "((('%.' + $var_size + 's') * (#string - (('%.' + ($var_size * $var_index) + 's') * #string))) - '|')";
 
@@ -188,7 +188,7 @@ describe("sidebar field extraction (real $string_parser)", () => {
   });
 
   it("fainted BEH slot: field 6 is clip 100, field 4 is poke", () => {
-    // Exact order from pokebedrock-beh sidebar.ts for a fainted Lv.5 Bulbasaur.
+    // Packed sidebar fields for a fainted Lv.5 sample.
     const fields = [
       "§7Fainted§r§f Lv. 5",
       "§fBulbasaur",

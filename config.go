@@ -57,8 +57,12 @@ type Config struct {
 		// MemoryPerformanceTier selects resource-pack subpacks (1–5). Default 5.
 		MemoryPerformanceTier int
 		// ExtensionsDir is a directory of viewer UI modules (manifest.json plus
-		// ES modules). Empty keeps the built-in HUD path.
+		// ES modules). Empty disables extensions. The same manifest may set
+		// bot.titleTokenPrefix when TitleTokenPrefix is empty.
 		ExtensionsDir string
+		// TitleTokenPrefix splits SetTitle control tokens onto the titleToken
+		// lane. Empty defers to the extensions manifest, then stays off.
+		TitleTokenPrefix string
 	}
 }
 
@@ -234,6 +238,9 @@ func applyEnv(c *Config) {
 	if v := os.Getenv("GOTESTBDS_VIEWER_EXTENSIONS"); v != "" {
 		c.Viewer.ExtensionsDir = v
 	}
+	if v := os.Getenv("GOTESTBDS_TITLE_TOKEN_PREFIX"); v != "" {
+		c.Viewer.TitleTokenPrefix = v
+	}
 }
 
 // applyFlags overlays command line flags onto a configuration.
@@ -260,6 +267,7 @@ func applyFlags(c *Config) error {
 	viewerOffline := set.Bool("viewer-offline", c.Viewer.Offline, "use only the existing pack cache; never fetch")
 	viewerMemoryTier := set.Int("viewer-memory-tier", c.Viewer.MemoryPerformanceTier, "memory_performance_tier for subpack selection (1-5)")
 	viewerExtensions := set.String("viewer-extensions", c.Viewer.ExtensionsDir, "directory of viewer UI extension modules (manifest.json + ES modules)")
+	titleTokenPrefix := set.String("title-token-prefix", c.Viewer.TitleTokenPrefix, "SetTitle control-token prefix (empty: read extensions manifest, else off)")
 
 	if err := set.Parse(os.Args[1:]); err != nil {
 		return err
@@ -288,6 +296,7 @@ func applyFlags(c *Config) error {
 	c.Viewer.Offline = *viewerOffline
 	c.Viewer.MemoryPerformanceTier = *viewerMemoryTier
 	c.Viewer.ExtensionsDir = *viewerExtensions
+	c.Viewer.TitleTokenPrefix = *titleTokenPrefix
 	return nil
 }
 

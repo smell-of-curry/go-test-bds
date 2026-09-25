@@ -3,6 +3,7 @@
  */
 
 import type {
+  LayoutQuirkRules,
   ViewerExtensionModule,
   ViewerHudExtension,
   ViewerOverlayFrame,
@@ -55,11 +56,26 @@ export function mergeViewerExtensions(
 ): ViewerHudExtension | null {
   if (modules.length === 0) return null;
   const resolveTitle = modules.find((m) => m.resolveTitle)?.resolveTitle;
+  const layoutRules: LayoutQuirkRules = {
+    iconHosts: modules.flatMap((m) => m.layoutRules?.iconHosts ?? []),
+    capRight: modules.flatMap((m) => m.layoutRules?.capRight ?? []),
+    clipDock: modules.flatMap((m) => m.layoutRules?.clipDock ?? []),
+  };
+  const titleTokenClearDelayMs: Record<string, number> = {};
+  for (const m of modules) {
+    Object.assign(titleTokenClearDelayMs, m.titleTokenClearDelayMs);
+  }
   return {
     replaceBuiltins: modules.some((m) => m.replaceBuiltins === true),
     formRoutes: modules.flatMap((m) => (m.formRoutes ? [...m.formRoutes] : [])),
     preloadTextures: modules.flatMap((m) =>
       m.preloadTextures ? [...m.preloadTextures] : [],
+    ),
+    hudScreens: modules.flatMap((m) => (m.hudScreens ? [...m.hudScreens] : [])),
+    layoutRules,
+    titleTokenClearDelayMs,
+    captureGates: modules.flatMap((m) =>
+      m.captureGates ? [...m.captureGates] : [],
     ),
     resolveTitle,
     seedGlobals(tokens, set) {

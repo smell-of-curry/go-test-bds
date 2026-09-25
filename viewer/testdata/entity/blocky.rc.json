@@ -9,7 +9,7 @@
       },
       "geometry": "Geometry.default",
       "materials": [{ "*": "Material.default" }],
-      "textures": ["Array.skins[query.property('pokeb:skin_index')]"]
+      "textures": ["Array.skins[query.property('pack:skin_index')]"]
     }
   }
 }

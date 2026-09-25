@@ -1,7 +1,7 @@
 {
   "blocks": [
     {
-      "name": "pokeb:apricorn_log",
+      "name": "pack:log",
       "components": {
         "geometry": "geometry.pokeb.apricorn_log",
         "materialInstances": {
@@ -21,7 +21,7 @@
       }
     },
     {
-      "name": "pokeb:red_apricorn_leaves",
+      "name": "pack:leaves",
       "components": {
         "geometry": "geometry.pokeb.apricorn_leaves",
         "materialInstances": {
@@ -33,7 +33,7 @@
       }
     },
     {
-      "name": "pokeb:red_apricorn",
+      "name": "pack:fruit",
       "components": {
         "geometry": "geometry.pokeb.apricorn",
         "materialInstances": {
@@ -45,13 +45,13 @@
       }
     },
     {
-      "name": "pokeb:pc",
+      "name": "pack:machine",
       "components": {
         "unitCube": true
       }
     },
     {
-      "name": "pokeb:berry_plant",
+      "name": "pack:crop",
       "components": {
         "geometry": "geometry.pokeb.berry_plant",
         "materialInstances": {

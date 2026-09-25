@@ -11,6 +11,23 @@ import type { PropertyBag, ResolvedChild, ResolvedElement } from "./types";
 
 const VP = { width: 200, height: 100 };
 
+const sideRules = {
+  iconHosts: [
+    { namespace: "side_panel", name: "pokemon_icon_wrapper" },
+    { namespace: "side_panel", name: "pokemon_selected_indicator" },
+  ],
+  capRight: [
+    {
+      namespace: "side_panel",
+      name: "main",
+      maxWidthRatio: 0.25,
+      insetRatio: 0.5,
+      minInset: 12,
+    },
+  ],
+  clipDock: [{ namespace: "side_panel", name: "dock" }],
+};
+
 const measureStub: MeasureText = (text, fontScale) => {
   const lines = text.length ? text.split("\n") : [""];
   let maxLen = 0;
@@ -708,14 +725,14 @@ describe("layoutTree self-axis %x/%y", () => {
     assert.ok(Math.abs(tree.box.w - 2.2222 * 192) < 0.01);
   });
 
-  it("caps right-anchored phud_sidebar.main at 25% viewport width", () => {
+  it("caps a right-anchored panel when a layout rule asks", () => {
     // Capture frames are ~640gui wide; authored 427gui main + dock offset
     // painted the tall black slab. Clamp keeps plate art on-screen.
     const wide = { width: 640, height: 360 };
     const main: ResolvedElement = {
       type: "panel",
       name: "main",
-      namespace: "phud_sidebar",
+      namespace: "side_panel",
       props: {
         size: ["222.22%y", 192],
         anchor_from: "top_right",
@@ -724,7 +741,10 @@ describe("layoutTree self-axis %x/%y", () => {
       controls: [],
       bindings: [],
     };
-    const tree = layoutTree(main, wide, { measureText: measureStub });
+    const tree = layoutTree(main, wide, {
+      measureText: measureStub,
+      rules: sideRules,
+    });
     assert.equal(tree.box.h, 192);
     assert.ok(tree.box.w <= wide.width * 0.25 + 0.5);
     assert.ok(tree.box.x + tree.box.w <= wide.width - 1);
@@ -757,7 +777,7 @@ describe("layoutTree self-axis %x/%y", () => {
     const row: ResolvedElement = {
       type: "panel",
       name: "pokemon_sidebar_pokemon",
-      namespace: "phud_sidebar",
+      namespace: "side_panel",
       props: {
         size: [160, 32],
         anchor_from: "top_left",
@@ -768,7 +788,7 @@ describe("layoutTree self-axis %x/%y", () => {
         child("pokemon_icon_wrapper", {
           type: "panel",
           name: "pokemon_icon_wrapper",
-          namespace: "phud_sidebar",
+          namespace: "side_panel",
           // Latched fill size must not disable left/content host treatment.
           props: { size: ["100%", "100%"] },
           bindings: [],
@@ -776,7 +796,7 @@ describe("layoutTree self-axis %x/%y", () => {
             child("ball_icon", {
               type: "image",
               name: "ball_icon",
-              namespace: "phud_sidebar",
+              namespace: "side_panel",
               props: {
                 size: ["100%y", "100%"],
                 anchor_from: "top_left",
@@ -792,7 +812,7 @@ describe("layoutTree self-axis %x/%y", () => {
     const tree = layoutTree(
       row,
       { width: 640, height: 360 },
-      { measureText: measureStub },
+      { measureText: measureStub, rules: sideRules },
     );
     const host = tree.children[0]!;
     assert.ok(
@@ -809,7 +829,7 @@ describe("layoutTree self-axis %x/%y", () => {
     const ball: ResolvedElement = {
       type: "image",
       name: "ball_icon",
-      namespace: "phud_sidebar",
+      namespace: "side_panel",
       props: {
         size: [32, 32],
         visible: false,
@@ -821,7 +841,7 @@ describe("layoutTree self-axis %x/%y", () => {
         child("pokemon_icon", {
           type: "image",
           name: "pokemon_icon",
-          namespace: "phud_sidebar",
+          namespace: "side_panel",
           props: {
             size: [24, 24],
             anchor_from: "top_left",
@@ -846,7 +866,7 @@ describe("layoutTree self-axis %x/%y", () => {
     const main: ResolvedElement = {
       type: "panel",
       name: "main",
-      namespace: "phud_sidebar",
+      namespace: "side_panel",
       props: {
         size: [160, 192],
         anchor_from: "top_right",
@@ -857,7 +877,7 @@ describe("layoutTree self-axis %x/%y", () => {
         child("dock", {
           type: "image",
           name: "dock",
-          namespace: "phud_sidebar",
+          namespace: "side_panel",
           props: {
             size: ["100%", "100%"],
             offset: ["47%", "0%"],
@@ -869,7 +889,7 @@ describe("layoutTree self-axis %x/%y", () => {
             child("marker", {
               type: "panel",
               name: "marker",
-              namespace: "phud_sidebar",
+              namespace: "side_panel",
               props: {
                 size: [20, 20],
                 anchor_from: "left_middle",
@@ -885,7 +905,7 @@ describe("layoutTree self-axis %x/%y", () => {
     const tree = layoutTree(
       main,
       { width: 200, height: 200 },
-      { measureText: measureStub },
+      { measureText: measureStub, rules: { clipDock: sideRules.clipDock } },
     );
     const dock = tree.children[0]!;
     const marker = dock.children[0]!;

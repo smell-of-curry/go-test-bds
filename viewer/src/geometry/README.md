@@ -27,7 +27,7 @@ Bedrock geometry is authored in **model units** where **16 units = 1 block**.
 Output positions are in **three.js block units** (`/ 16`).
 
 **Evidence:** Microsoft creator docs (`texture_width` described in texels;
-Blockbench Bedrock guide); every entity model in pokebedrock-res uses this scale
+Blockbench Bedrock guide); entity models commonly use this scale
 (e.g. a 16×16×16 cube is one block).
 
 ### 2. Handedness / axis conversion
@@ -141,7 +141,7 @@ authored corners into the hand-computed displayed positions.
 
 ## Seen in real packs, not handled yet
 
-Read-only survey of pokebedrock-res `models/entity/**/*.geo.json`:
+Read-only survey of a server resource pack `models/entity/**/*.geo.json`:
 
 | Seen | Status |
 |---|---|

@@ -167,7 +167,7 @@ export function buildResolver(
     }
 
     // Keep `$…` keys on props — binding-time expressions (sidebar `$string_parser`,
-    // PHUD `$update_string`) read them via ExprScope.variable().
+    // `$update_string`) read them via ExprScope.variable().
     const props = elementProps(substituted, vars);
     delete props.controls;
     delete props.bindings;

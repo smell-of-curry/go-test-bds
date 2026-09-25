@@ -159,12 +159,12 @@ test("failing test mark is exposed on captionText and the debug pane", async ({
       suite: "machines",
       test: "places a crate",
       status: "failed",
-      message: "expected pokeb:crate, got minecraft:air",
+      message: "expected pack:crate, got minecraft:air",
       elapsedMs: 3412,
     });
 
     await page.waitForFunction(
-      () => (window.__viewer?.captionText ?? "").includes("pokeb:crate"),
+      () => (window.__viewer?.captionText ?? "").includes("pack:crate"),
       undefined,
       { timeout: 10_000 },
     );
@@ -174,7 +174,7 @@ test("failing test mark is exposed on captionText and the debug pane", async ({
     expect(text).toContain("places a crate");
     expect(text).toMatch(/3\.4s|3412ms/);
     expect(text).toContain("FAILED");
-    expect(text).toContain("expected pokeb:crate, got minecraft:air");
+    expect(text).toContain("expected pack:crate, got minecraft:air");
 
     // Bottom caption strip is gone — mark lives in the top-left debug pane.
     const ui = await page.evaluate(() => ({
@@ -218,11 +218,11 @@ test("block highlights appear on delta and expire after fade", async ({
 
     // Read count inside the wait predicate — a separate evaluate can race the
     // 1s fade + RAF tickHighlights and see 0 after a true wait.
-    const live = await page.waitForFunction(
-      () => window.__viewer?.highlightCount ?? 0,
-      undefined,
-      { timeout: 10_000 },
-    ).then((h) => h.jsonValue());
+    const live = await page
+      .waitForFunction(() => window.__viewer?.highlightCount ?? 0, undefined, {
+        timeout: 10_000,
+      })
+      .then((h) => h.jsonValue());
     expect(live).toBeGreaterThan(0);
 
     await page.evaluate(() => {

@@ -29,7 +29,7 @@ test.describe("isInvisible", () => {
     expect(isInvisible(block("minecraft:stone"))).toBe(false);
     expect(isInvisible(block("minecraft:glass"))).toBe(false);
     // A custom block whose id merely contains "barrier" is not invisible.
-    expect(isInvisible(block("pokeb:barrier_reef"))).toBe(false);
+    expect(isInvisible(block("pack:barrier"))).toBe(false);
   });
 });
 

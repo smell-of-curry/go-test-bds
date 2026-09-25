@@ -7,7 +7,7 @@
  *
  * Defaults:
  *   VANILLA_PACK  ../.cache/baseline/<baseline.tag>/resource_pack
- *   SERVER_PACK   pokebedrock-res development_resource_packs path (if present)
+ *   SERVER_PACK   optional server resource pack path (if present)
  *
  * Skips (exit 0) when the vanilla pack is missing — CI without the cache stays green.
  *
@@ -56,7 +56,7 @@ const defaultServerCandidates = [
     "games",
     "com.mojang",
     "development_resource_packs",
-    "pokebedrock-res",
+    "server-pack",
   ),
   join(
     process.env.LOCALAPPDATA ?? "",
@@ -66,7 +66,7 @@ const defaultServerCandidates = [
     "games",
     "com.mojang",
     "development_resource_packs",
-    "pokebedrock-res",
+    "server-pack",
   ),
 ];
 const defaultServer =
@@ -143,7 +143,7 @@ if (existsSync(join(serverDir, "blocks.json"))) {
   packs.push({
     id: "server-pack",
     priority: 1,
-    name: "pokebedrock-res",
+    name: "server-pack",
     dir: serverDir,
   });
 } else {

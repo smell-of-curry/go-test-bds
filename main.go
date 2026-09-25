@@ -84,15 +84,16 @@ func main() {
 			assetM = nil
 		}
 		hub, err = viewer.New(viewer.Options{
-			Address:       config.Viewer.Address,
-			Radius:        config.Viewer.Radius,
-			SectionRadius: config.Viewer.SectionRadius,
-			ColumnBudget:  config.Viewer.ColumnBudget,
-			ArtifactDir:   config.Viewer.ArtifactDir,
-			AppDir:        config.Viewer.AppDir,
-			ExtensionsDir: config.Viewer.ExtensionsDir,
-			Assets:        assetM,
-			Logger:        logger.With("src", "viewer"),
+			Address:          config.Viewer.Address,
+			Radius:           config.Viewer.Radius,
+			SectionRadius:    config.Viewer.SectionRadius,
+			ColumnBudget:     config.Viewer.ColumnBudget,
+			ArtifactDir:      config.Viewer.ArtifactDir,
+			AppDir:           config.Viewer.AppDir,
+			ExtensionsDir:    config.Viewer.ExtensionsDir,
+			TitleTokenPrefix: config.Viewer.TitleTokenPrefix,
+			Assets:           assetM,
+			Logger:           logger.With("src", "viewer"),
 		})
 		if err != nil {
 			slog.Error("starting viewer", "error", err)

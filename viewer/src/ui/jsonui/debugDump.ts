@@ -30,8 +30,8 @@ export interface JsonUiDumpElement {
 export interface JsonUiDump {
   tick: number;
   viewport: { w: number; h: number };
-  /** Live PHUD token → value map from the SSE store. */
-  phud: Record<string, string>;
+  /** Live title-token map from the SSE store. */
+  titleTokens: Record<string, string>;
   /** Visible JSON UI nodes, largest area first (easier black-box hunting). */
   elements: JsonUiDumpElement[];
 }
@@ -41,20 +41,20 @@ export interface JsonUiDump {
  *
  * @param host - `.jsonui-hud-host` (or `#json-hud`) root.
  * @param tick - Current world tick.
- * @param phud - Live PHUD map.
+ * @param titleTokens - Live title-token map.
  * @returns dump payload.
  */
 export function collectJsonUiDump(
   host: HTMLElement | null,
   tick: number,
-  phud: ReadonlyMap<string, string>,
+  titleTokens: ReadonlyMap<string, string>,
 ): JsonUiDump {
-  const phudObj: Record<string, string> = {};
-  for (const [k, v] of phud) phudObj[k] = v;
+  const tokenObj: Record<string, string> = {};
+  for (const [k, v] of titleTokens) tokenObj[k] = v;
 
   const viewport = { w: window.innerWidth, h: window.innerHeight };
   if (!host) {
-    return { tick, viewport, phud: phudObj, elements: [] };
+    return { tick, viewport, titleTokens: tokenObj, elements: [] };
   }
 
   const elements: JsonUiDumpElement[] = [];
@@ -124,7 +124,7 @@ export function collectJsonUiDump(
   }
 
   elements.sort((a, b) => b.rect.w * b.rect.h - a.rect.w * a.rect.h);
-  return { tick, viewport, phud: phudObj, elements };
+  return { tick, viewport, titleTokens: tokenObj, elements };
 }
 
 /**

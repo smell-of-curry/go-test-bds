@@ -72,7 +72,7 @@ export type BindingValue = string | number | boolean;
 
 /**
  * Live game state the binding engine reads. Implemented over the SSE lanes
- * (title/phud/actor state); the engine itself stays pure.
+ * (title/token/actor state); the engine itself stays pure.
  */
 export interface BindingSource {
   /**

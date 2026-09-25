@@ -29,10 +29,8 @@ import type {
   ViewerHudExtension,
 } from "../../extensions/types";
 import type { VitalsFrame } from "../../protocol";
+import type { HudScreenMount } from "../../extensions/types";
 import type { WorldState } from "../../store";
-
-/** PHUD control-token title (`&_sidebar:…`). */
-export const PHUD_TITLE_RE = /^&_[A-Za-z]+:/;
 
 /** Default gui scale (1280×720 capture → 640×360 gui px). */
 export const DEFAULT_GUI_SCALE = 2;
@@ -54,16 +52,12 @@ export interface HudRendererOptions {
   measureText?: MeasureText;
   /** Merged pack lang table for `localize: true` labels. */
   lang?: Readonly<Record<string, string>>;
-  /**
-   * Consumer HUD hooks. Absent, or present with `replaceBuiltins: false`,
-   * keeps the built-in `&_token:` quirks. `replaceBuiltins` turns those off.
-   */
+  /** Consumer HUD hooks. Absent keeps the generic survival HUD only. */
   extension?: ViewerHudExtension | null;
 }
 
 /** Per-frame values threaded through bind for extension hooks. */
 interface BindPass {
-  builtin: boolean;
   title: string;
   subtitle: string;
   actionBar: string;
@@ -161,7 +155,7 @@ export function bindingSourceFromState(
     globals["#is_armor_visible"] = false;
   }
 
-  const tokenRecord = Object.fromEntries(state.phud);
+  const tokenRecord = Object.fromEntries(state.titleTokens);
   options?.seedGlobals?.(tokenRecord, (key, value) => {
     globals[key] = value;
   });
@@ -301,7 +295,7 @@ export function createHudRenderer(
   let lastPaintKey = "";
 
   // Resolve once; re-bind props each frame.
-  const baseRoot = buildHudRoot(resolver);
+  const baseRoot = buildHudRoot(resolver, opts.extension?.hudScreens);
 
   const handle: HudRenderer = {
     root: host,
@@ -311,7 +305,7 @@ export function createHudRenderer(
     onFrame(state: WorldState): number {
       const t0 = performance.now();
       const ext = opts.extension;
-      const tokens = Object.fromEntries(state.phud);
+      const tokens = Object.fromEntries(state.titleTokens);
       const form = state.ui?.form
         ? {
             type: state.ui.form.type,
@@ -341,7 +335,6 @@ export function createHudRenderer(
       });
       const idIndex = new Map<string, PropertyBag>();
       const pass: BindPass = {
-        builtin: !ext?.replaceBuiltins,
         title,
         subtitle: state.ui?.subtitle ?? "",
         actionBar: state.ui?.actionBar ?? "",
@@ -359,10 +352,8 @@ export function createHudRenderer(
         idIndex,
         state.vitals,
         lang,
-        state.phud,
         pass,
       );
-      if (!ext?.replaceBuiltins) applyTitleQuirk(bound, title);
       ext?.afterTree?.({
         root: bound as unknown as ViewerBoundNode,
         title,
@@ -398,7 +389,10 @@ export function createHudRenderer(
         width: cssW / guiScale,
         height: cssH / guiScale,
       };
-      const layout = layoutTree(bound, viewport, { measureText });
+      const layout = layoutTree(bound, viewport, {
+        measureText,
+        rules: ext?.layoutRules,
+      });
 
       host.replaceChildren();
       const paintRoot = renderTree(layout, host, {
@@ -483,15 +477,23 @@ function walkBoundProps(el: ResolvedElement, parts: string[]): void {
  * Build a pruned HUD root from `root_panel` children we actually paint.
  *
  * Full vanilla `root_panel` includes editor/customization chrome (~1s/frame).
- * Keep: PokeBedrock `phud`, survival vitals strip, desktop hotbar host, title.
+ * Keep: survival vitals strip, desktop hotbar host, title, plus any
+ * screens the extension lists.
  *
  * @param resolver - UI resolver.
+ * @param screens - Extra root children / fallback screens from an extension.
  * @returns root element.
  */
-function buildHudRoot(resolver: UiResolver): ResolvedElement {
+function buildHudRoot(
+  resolver: UiResolver,
+  screens?: readonly HudScreenMount[],
+): ResolvedElement {
   const root = resolver.resolve("hud", "root_panel");
   // Keep the tree small: full root_panel is ~1s/frame of customization chrome.
-  const want = new Set(["phud", "centered_gui_elements_at_bottom_middle"]);
+  const want = new Set([
+    "centered_gui_elements_at_bottom_middle",
+    ...(screens ?? []).map((s) => s.id),
+  ]);
 
   const controls: ResolvedChild[] = [];
   if (root) {
@@ -517,20 +519,22 @@ function buildHudRoot(resolver: UiResolver): ResolvedElement {
     controls.push({ id: "hud_title_text", element: title });
   }
 
-  // Fallback: resolve phud directly when root_panel mods didn't land.
-  if (!controls.some((c) => c.id === "phud")) {
-    const phud = resolver.resolve("phud", "main");
-    if (phud) controls.push({ id: "phud", element: phud });
-  }
-
-  // Pack: `root_panel/chat_stack` insert_after `player_position` → player_ping.
-  // Pruned HUD drops the full chat stack; mount a slim top-left stack so ping
-  // inherits authored flow. Do NOT force tip `bottom_middle` — those anchors
-  // belong to the label row *inside* playerPing.json, not the host.
-  if (!controls.some((c) => c.id === "chat_stack" || c.id === "player_ping")) {
-    const ping = resolver.resolve("player_ping", "main");
-    if (ping) {
-      const el = applyPathKeyOverrides(resolver, "player_ping", "main", ping);
+  // Fallback mounts for screens the pack did not insert on root_panel.
+  for (const screen of screens ?? []) {
+    if (!screen.namespace || !screen.name) continue;
+    if (controls.some((c) => c.id === screen.id)) continue;
+    const resolved = resolver.resolve(screen.namespace, screen.name);
+    if (!resolved) continue;
+    const el = applyPathKeyOverrides(
+      resolver,
+      screen.namespace,
+      screen.name,
+      resolved,
+    );
+    if (screen.wrapStack) {
+      if (controls.some((c) => c.id === "chat_stack" || c.id === screen.id)) {
+        continue;
+      }
       controls.push({
         id: "chat_stack",
         element: {
@@ -544,10 +548,12 @@ function buildHudRoot(resolver: UiResolver): ResolvedElement {
             anchor_to: "top_left",
           },
           bindings: [],
-          controls: [{ id: "player_ping", element: el }],
+          controls: [{ id: screen.id, element: el }],
         },
       });
+      continue;
     }
+    controls.push({ id: screen.id, element: el });
   }
 
   return {
@@ -627,10 +633,8 @@ function bindTree(
   idIndex: Map<string, PropertyBag>,
   vitals: VitalsFrame | null,
   lang?: Readonly<Record<string, string>>,
-  phud?: Map<string, string>,
   pass?: BindPass,
 ): ResolvedElement {
-  const builtin = pass?.builtin !== false;
   const prev = store.get(path) ?? {};
   const out: PropertyBag = { ...el.props };
 
@@ -638,7 +642,7 @@ function bindTree(
   // Do NOT carry resolved `text`/`texture` — those start as `#ref` templates
   // on `el.props` and must be re-resolved via applyPropertyRefs each frame
   // after view bindings refresh `#var` / `#string`. Seeding "" from an earlier
-  // empty PHUD frame permanently blocks re-resolution.
+  // empty token frame permanently blocks re-resolution.
   // Same trap for view-binding targets: makeScope prefers `out` over
   // source_control_name sibling lookup, so a seeded empty `#player_ping_text`
   // (etc.) hides the fresh sibling value and leaves `#visible` false.
@@ -683,13 +687,7 @@ function bindTree(
   }
   applyRendererSizing(el, out, vitals);
   applyHotbarHangPin(el, out, vitals);
-  applyVisibilityChangedLatch(
-    el,
-    out,
-    source,
-    prev,
-    builtin ? phud : undefined,
-  );
+  applyVisibilityChangedLatch(el, out, source, prev);
   // Hotbar grid uses grid_item_template; HUD seeds dimensions. Form grids
   // (starter picker) expand via collections.expandCollections.
   // Size the host and inject one full-width hotbar_renderer stub instead.
@@ -779,7 +777,6 @@ function bindTree(
       idIndex,
       vitals,
       lang,
-      phud,
       pass,
     ),
   }));
@@ -800,7 +797,6 @@ function bindTree(
         idIndex,
         vitals,
         lang,
-        phud,
         pass,
       ),
     });
@@ -877,21 +873,19 @@ function applyElementBindings(
 /**
  * Latch `#preserved_text` when the title matches `$update_string`.
  * Honours `binding_condition: visibility_changed` (skipped in applyBindings).
- * Also mirrors the live phud map so a token stays latched while another
- * token owns the title channel (sidebar flooding).
+ * Token-map mirroring (a token that no longer owns the title channel) belongs
+ * in an extension `onBind`.
  *
  * @param el - Element (may carry `$update_string`).
  * @param out - Bound props.
  * @param source - Globals.
  * @param prev - Previous frame props.
- * @param phud - Live PHUD token map.
  */
 function applyVisibilityChangedLatch(
   el: ResolvedElement,
   out: PropertyBag,
   source: BindingSource,
   prev: PropertyBag,
-  phud?: Map<string, string>,
 ): void {
   const update =
     typeof el.props.$update_string === "string"
@@ -909,21 +903,8 @@ function applyVisibilityChangedLatch(
   );
   if (!hadVisibilityChanged) return;
 
-  const token =
-    update.startsWith("&_") && update.endsWith(":") ? update.slice(2, -1) : "";
-
   if (title.includes(update)) {
     out.preserved_text = title;
-  } else if (token && phud?.has(token)) {
-    // Empty string is a deliberate clear (`setPhudToken(..., '')`) — do not
-    // latch `&_loadingScreen:` alone or the card stays "visible" with no text.
-    const value = phud.get(token) ?? "";
-    if (value) out.preserved_text = `${update}${value}`;
-    else delete out.preserved_text;
-  } else if (token && phud && !phud.has(token)) {
-    // Token dropped from the map — clear the latch (do not keep prev sidebar
-    // / title junk that would keep loadingScreen dirt painted).
-    delete out.preserved_text;
   } else if (typeof prev.preserved_text === "string") {
     out.preserved_text = prev.preserved_text;
   } else {
@@ -952,7 +933,7 @@ function applyPropertyRefs(out: PropertyBag): void {
       }
       continue;
     }
-    // Pack textures like `('textures/ui/phud/' + $name)` stay as exprs until
+    // Pack textures like `('textures/ui/widgets/' + $name)` stay as exprs until
     // bind time — evaluate so a missing texture path is a real 404, not a
     // literal `(` URL that paints a broken framed box.
     const trimmed = v.trim();
@@ -1039,7 +1020,7 @@ function applyRendererSizing(
       out.size = [ICON * HEART_COUNT, ICON];
       const bubbleOff = rtlRowOffsetFromAuthored(el);
       if (bubbleOff) out.offset = bubbleOff;
-      // Pack (pokebedrock hud_screen) binds bubbles to `#is_not_riding`, which
+      // Some packs bind bubbles to `#is_not_riding`, which
       // stays true on land — native Bedrock still only paints when air < max.
       if (!vitals || !airBubblesVisible(vitals)) out.visible = false;
       break;
@@ -1085,71 +1066,6 @@ function applyHotbarHangPin(
   out.anchor_from = "bottom_middle";
   out.anchor_to = "bottom_middle";
   out.offset = [4, 0];
-}
-
-/**
- * Force-hide vanilla title/subtitle when title is a PHUD control token.
- *
- * Pack expression uses `%.1s` (off-by-one vs `'&_'`); real client still hides.
- * Keep pack bindings intact so a fixed pack can take over; this is the safety net.
- *
- * @param root - Bound tree.
- * @param title - Raw title string.
- */
-export function applyTitleQuirk(root: ResolvedElement, title: string): void {
-  // PHUD tokens: pack's `%.1s = '&_'` never matches (1 vs 2 chars) → chrome leaks.
-  // Empty title: pb hud_title_text is sized 100%×100% so tip backgrounds become
-  // giant translucent black rectangles mid-screen.
-  if (!title || PHUD_TITLE_RE.test(title)) {
-    hideTitleSubtree(root);
-    return;
-  }
-  unhideTitleSubtree(root);
-}
-
-/**
- * @param el - Tree node.
- */
-
-/**
- * @param el - Tree node.
- */
-function unhideTitleSubtree(el: ResolvedElement): void {
-  const n = el.name;
-  if (
-    n === "hud_title_text" ||
-    n === "title_frame" ||
-    n === "title_background" ||
-    n === "title" ||
-    n === "subtitle_frame" ||
-    n === "subtitle" ||
-    n === "subtitle_background" ||
-    n.endsWith("title_background") ||
-    n.endsWith("subtitle_background")
-  ) {
-    el.props.visible = true;
-    if (el.props.alpha === 0) el.props.alpha = 1;
-  }
-  for (const c of el.controls) unhideTitleSubtree(c.element);
-}
-
-function hideTitleSubtree(el: ResolvedElement): void {
-  const n = el.name;
-  if (
-    n === "hud_title_text" ||
-    n === "title_frame" ||
-    n === "title_background" ||
-    n === "title" ||
-    n === "subtitle_frame" ||
-    n === "subtitle" ||
-    n === "subtitle_background" ||
-    n.endsWith("title_background") ||
-    n.endsWith("subtitle_background")
-  ) {
-    el.props.visible = false;
-    el.props.alpha = 0;
-  }
-  for (const c of el.controls) hideTitleSubtree(c.element);
 }
 
 /**

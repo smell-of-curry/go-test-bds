@@ -52,7 +52,7 @@ export const shrineSuite = defineSuite({
       name: "using the orb on a frozen shrine spawns its Pokémon",
       async run(ctx) {
         const shrine = { x: 2, y: 60, z: 0 };
-        ctx.bot.player.dimension.setBlockType(shrine, "pokeb:frozen_shrine");
+        ctx.bot.player.dimension.setBlockType(shrine, "pack:custom_block");
         ctx.track(() =>
           ctx.bot.player.dimension.setBlockType(shrine, "minecraft:air"),
         );
@@ -225,31 +225,39 @@ GOTESTBDS_VIEWER_EXTENSIONS=./my-ui
 The directory needs a `manifest.json`:
 
 ```json
-{ "modules": ["./overlay.mjs"] }
+{
+  "modules": ["./overlay.mjs"],
+  "bot": { "titleTokenPrefix": "@@" }
+}
 ```
 
-The hub serves it at `GET /extensions/…` and advertises it from `GET /viewer.json`
-(`{"extensions":"/extensions/"}`). An empty `extensions` string — the default
-when the flag is unset — hides `&_token:` titles on the plain HUD and paints
-JSON UI from the server's resource pack. Pack-specific title synthesis, bind
-quirks, and form-title routes belong in a module (`resolveTitle`, `onBind`,
-`formRoutes`). `replaceBuiltins: true` also skips the built-in control-token
-title hide so the module owns that chrome.
+`bot.titleTokenPrefix` (or `--title-token-prefix` / `GOTESTBDS_TITLE_TOKEN_PREFIX`)
+splits SetTitle writes of the form `prefix + token + ":" + value` onto the
+`titleToken` SSE event and hides them from the plain title lane. Empty prefix
+(the default) leaves every title as plain text and emits no token frames.
+Flag and env win over the manifest.
+
+The hub serves the directory at `GET /extensions/…` and advertises it from
+`GET /viewer.json`. JSON UI still comes from the server's resource pack.
+Pack-specific screens, layout, and title chrome belong in a module.
 
 Each module exports `viewerExtension` (or a default object):
 
 | Field | Role |
 |---|---|
+| `hudScreens` | Extra `root_panel` children to keep, or `{ id, namespace, name, wrapStack? }` fallbacks to mount |
+| `layoutRules` | Namespace+name corrections: `iconHosts`, `capRight`, `clipDock`. Absent rules change nothing |
+| `titleTokenClearDelayMs` | Token name → ms to hold a non-empty value after an empty clear |
+| `captureGates` | `{ labelIncludes, ready(tokens, root) }` still gates for `noSettle` captures |
 | `preloadTextures` | Pack texture paths (no extension) warmed before first paint |
 | `resolveTitle(input)` | Raw `#hud_title_text_string`. First module that defines it wins. `input` is `{ title, subtitle, actionBar, tokens }` |
 | `seedGlobals(tokens, set)` | Extra JSON UI globals (`set("#prop", value)`) before bind |
 | `onBind(ctx)` | Mutate `ctx.props` after generic bind. `ctx` carries `name`, `namespace`, `authored` (`$variables`), `bindings`, `title`, `subtitle`, `actionBar`, `tokens`, `form`, `bot`, `vitals` |
 | `afterTree({ root, title, tokens })` | Walk the bound HUD tree once per frame, before layout |
-| `mount(host, api)` | DOM overlay. `api.onFrame(frame)` receives the same lanes: title, subtitle, actionBar, `tokens` (control-token map — custom sidebars arrive here, not as a vanilla scoreboard), `form`, `bot` (`name`, `position`, `dimension`), `vitals` |
+| `mount(host, api)` | DOM overlay. `api.onFrame(frame)` receives title, subtitle, actionBar, `tokens`, `form`, `bot`, `vitals` |
 | `formRoutes` | `{ flag, screen }` pairs. First title-flag match picks a JSON UI screen (`namespace.name`). Absent → vanilla long/custom form |
-| `replaceBuiltins` | Skip the built-in hide of `&_token:` title chrome. The module's `afterTree` / `resolveTitle` own that pack |
 
-`tokens` is the latest `&_token:value` title write per token name (the `phud` stream event). Packs that do not use that convention see `{}`.
+`tokens` is the latest prefixed title write per token name (the `titleToken` stream event). No prefix → `{}`.
 
 ## License
 

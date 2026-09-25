@@ -25,14 +25,11 @@ describe("resolveImageUv", () => {
   });
 
   it("falls back to [0,0] when uv is an unresolved @ref and uv_size exists", () => {
-    assert.deepEqual(
-      resolveImageUv("@phud_phone.anim__oak_talk_start", true),
-      [0, 0],
-    );
+    assert.deepEqual(resolveImageUv("@widget.anim__talk_start", true), [0, 0]);
   });
 
   it("returns null without uv_size", () => {
-    assert.equal(resolveImageUv("@phud_phone.anim__ringing", false), null);
+    assert.equal(resolveImageUv("@widget.anim__ringing", false), null);
   });
 });
 
@@ -93,9 +90,9 @@ describe("lookupTextureInfo", () => {
   });
 
   it("merges legacy textureSizes when assets miss", () => {
-    const info = lookupTextureInfo("textures/ui/phud/oak_loop", {
+    const info = lookupTextureInfo("textures/ui/widgets/loop", {
       assets: { textureUrl: (p) => p },
-      textureSizes: { "textures/ui/phud/oak_loop": { w: 512, h: 64 } },
+      textureSizes: { "textures/ui/widgets/loop": { w: 512, h: 64 } },
     });
     assert.equal(info?.w, 512);
     assert.equal(info?.h, 64);

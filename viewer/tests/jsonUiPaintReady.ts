@@ -33,7 +33,7 @@ type JsonUiPaintWindow = Window & {
 export async function waitForJsonUiPaintReady(page: Page): Promise<Buffer> {
   // Positive gate: at least one texture face requested/painted, and no
   // in-flight texture-info preload. Empty pending alone is NOT enough —
-  // pending is 0 before the first applyImage runs after setPhud/bind.
+  // pending is 0 before the first applyImage runs after a token bind.
   await page.waitForFunction(
     () => {
       const w = window as unknown as JsonUiPaintWindow;

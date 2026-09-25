@@ -15,7 +15,7 @@ export type BlocksJson = Record<string, BlockDef>;
  *
  * Mojang's vanilla `blocks.json` uses bare ids (`stone`); the network /
  * snapshot always sends `minecraft:stone`. Keys that already contain `:`
- * (e.g. `pokeb:apricorn_planks`) are left alone.
+ * (e.g. `pack:custom_planks`) are left alone.
  *
  * @param id - Raw key from blocks.json.
  * @returns namespaced block identifier.

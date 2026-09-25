@@ -1,15 +1,9 @@
 /**
  * Ensure `testdata/jsonui/live-v2.18.5/_extract` exists (gitignored).
- * Phone flipbook / PHUD chrome textures are served from that tree.
+ * Optional live resource-pack textures are served from that tree.
  */
 import { execSync } from "node:child_process";
-import {
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -18,25 +12,8 @@ const viewerRoot = join(here, "..");
 const zipPath = join(viewerRoot, "testdata/jsonui/live-v2.18.5.zip");
 const destRoot = join(viewerRoot, "testdata/jsonui/live-v2.18.5");
 const extractRoot = join(destRoot, "_extract");
-/** Sentinel texture required by phone flipbook / PHUD chrome tests. */
-const sentinel = join(extractRoot, "textures/ui/phud/oak_loop.png");
-
-/**
- * Zip ships `phud.playerPing.label=Current Ping:` without the trailing space
- * RES authors for the label + §-colored value pair. Ensure the space exists.
- *
- * @param root - `_extract` directory.
- */
-function patchPlayerPingLabelSpace(root: string): void {
-  const langPath = join(root, "texts", "en_US.lang");
-  if (!existsSync(langPath)) return;
-  const text = readFileSync(langPath, "utf8");
-  const next = text.replace(
-    /^phud\.playerPing\.label=Current Ping:\s*$/m,
-    "phud.playerPing.label=Current Ping: ",
-  );
-  if (next !== text) writeFileSync(langPath, next);
-}
+/** Pack manifest proves the zip extracted. */
+const sentinel = join(extractRoot, "manifest.json");
 
 /**
  * Extract the live pack zip when the gitignored `_extract` tree is missing.
@@ -46,7 +23,6 @@ function patchPlayerPingLabelSpace(root: string): void {
  */
 export function ensureLiveExtract(): string {
   if (existsSync(sentinel)) {
-    patchPlayerPingLabelSpace(extractRoot);
     return extractRoot;
   }
   if (!existsSync(zipPath)) {
@@ -70,14 +46,13 @@ export function ensureLiveExtract(): string {
       `live pack extract finished but sentinel missing: ${sentinel}`,
     );
   }
-  patchPlayerPingLabelSpace(extractRoot);
   return extractRoot;
 }
 
 /**
  * Soft check for tests that can skip when extract/zip are both absent.
  *
- * @returns true when oak_loop (or extractable zip) is available.
+ * @returns true when the extract (or the zip) is available.
  */
 export function liveExtractAvailable(): boolean {
   return existsSync(sentinel) || existsSync(zipPath);

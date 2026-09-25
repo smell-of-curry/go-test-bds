@@ -418,7 +418,7 @@ export function buildRealisticPackStack(): PackFixture[] {
       format_version: "1.21.40",
       "minecraft:stone": { sound: "stone" },
       "minecraft:grass_block": { sound: "grass" },
-      "pokeb:apricorn_planks": { textures: "apricorn_planks", sound: "wood" },
+      "pack:planks": { textures: "apricorn_planks", sound: "wood" },
     }),
   );
   server.set(
@@ -442,7 +442,7 @@ export function buildRealisticPackStack(): PackFixture[] {
     {
       id: "server-pack",
       priority: 1,
-      name: "pokebedrock",
+      name: "sample",
       files: server,
     },
   ];

@@ -27,8 +27,8 @@ func TestEncodeUIFiltersProtocolChatNoise(t *testing.T) {
 }
 
 func TestFlattenRawtext(t *testing.T) {
-	// The battle sidebar title as PokeBedrock actually sends it: translate
-	// keys with nested-rawtext "with" args, mixed with plain text parts.
+	// A sidebar title as a pack actually sends it: translate keys with
+	// nested-rawtext "with" args, mixed with plain text parts.
 	battle := `{"rawtext":[{"translate":"models.player.battleSide.turn","with":{"rawtext":[{"text":"18"}]}},{"text":"\n\n"},{"translate":"models.player.battleSide.noTerrain"}]}`
 	got := flattenRawtext(battle)
 	want := "models.player.battleSide.turn 18\n\nmodels.player.battleSide.noTerrain"
@@ -57,7 +57,8 @@ func TestFlattenRawtext(t *testing.T) {
 
 func TestFilterHudControlText(t *testing.T) {
 	cases := map[string]string{
-		// Control tokens are hidden. An extension reads them on the phud lane.
+		// Control tokens are hidden when a prefix is configured. An extension
+		// reads the split values on the titleToken lane.
 		"&_loadingScreen:§l§6TUTORIAL COMPLETE!": "",
 		"&_currency:Go see Professor Oak":        "",
 		"&_battleWait:Bulbasaur used Growl":      "",
@@ -69,14 +70,17 @@ func TestFilterHudControlText(t *testing.T) {
 		"":                                       "",
 	}
 	for in, want := range cases {
-		if got := filterHudControlText(in); got != want {
+		if got := filterHudControlText(in, "&_"); got != want {
 			t.Fatalf("filterHudControlText(%q)=%q want %q", in, got, want)
 		}
+	}
+	if got := filterHudControlText("&_phone:ring", ""); got != "&_phone:ring" {
+		t.Fatalf("empty prefix must not strip, got %q", got)
 	}
 
 	// Flattened rawtext that starts a control token stays off the plain title.
 	wire := `{"rawtext":[{"text":"&_battleWait:"},{"translate":"models.showdown.move.used","with":{"rawtext":[{"text":"Bulbasaur"},{"text":"Growl"}]}}]}`
-	got := filterHudControlText(flattenRawtext(wire))
+	got := filterHudControlText(flattenRawtext(wire), "&_")
 	if got != "" {
 		t.Fatalf("control-token title=%q", got)
 	}

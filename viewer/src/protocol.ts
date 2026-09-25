@@ -9,7 +9,7 @@ export type FrameType =
   | "capture"
   | "chat"
   | "title"
-  | "phud"
+  | "titleToken"
   | "formHover"
   | "vitals";
 
@@ -431,12 +431,13 @@ export interface ParticleFrame {
 }
 
 /**
- * Event-lane raw PHUD write: one `&_<token>:<value>` SetTitle, token split
- * off and the value lang-resolved. `value === ""` clears/hides the element.
+ * Event-lane title-token write. The hub splits `prefix + token + ":" + value`
+ * when a title-token prefix is configured. `value === ""` clears the token.
+ * Packs that do not configure a prefix never see this frame.
  */
-export interface PhudFrame {
+export interface TitleTokenFrame {
   v: number;
-  type: "phud";
+  type: "titleToken";
   bot: string;
   tick: number;
   token: string;
@@ -491,7 +492,7 @@ export type Frame =
   | ChatFrame
   | TitleFrame
   | ParticleFrame
-  | PhudFrame
+  | TitleTokenFrame
   | FormHoverFrame
   | VitalsFrame;
 

@@ -172,7 +172,7 @@ const hud = initHud({
   particles,
   getParticleRegistry: () => particleRegistry,
 });
-// Pack-driven JSON UI HUD (vanilla vitals + PokeBedrock PHUD). Textures /
+// Pack-driven JSON UI HUD (vanilla vitals + extension screens). Textures /
 // ui/*.json come from the hub's /packs + /pack/{id}/{path} + /asset routes.
 let jsonUiAssetBase = "";
 try {
@@ -180,7 +180,14 @@ try {
 } catch {
   /* fixture streams may be relative */
 }
-const jsonUi = createJsonUiRuntime({ assetBaseUrl: jsonUiAssetBase });
+const jsonUi = createJsonUiRuntime({
+  assetBaseUrl: jsonUiAssetBase,
+  onExtensions(loaded) {
+    store.setTitleTokenClearDelay(loaded?.titleTokenClearDelayMs ?? {});
+    const handle = window.__viewer;
+    if (handle) handle.captureGates = [...(loaded?.captureGates ?? [])];
+  },
+});
 const waypointStrip = initWaypointStrip();
 document.body.classList.add("jsonui-hud-active");
 // The JSON UI runtime renders server forms through the pack's own screens;

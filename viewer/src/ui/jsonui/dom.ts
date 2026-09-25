@@ -263,7 +263,7 @@ function paintNode(
   el.className = `jsonui jsonui-${cssType(node.element.type)}`;
   el.dataset.uiName = node.element.name;
   el.dataset.uiType = node.element.type;
-  // Stable Playwright hook: "namespace.element" (e.g. phud_sidebar.dock).
+  // Stable Playwright hook: "namespace.element" (e.g. sidebar.dock).
   if (node.element.namespace) {
     el.dataset.jsonuiName = `${node.element.namespace}.${node.element.name}`;
   }

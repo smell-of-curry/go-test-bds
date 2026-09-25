@@ -99,8 +99,8 @@ export function handleJsonUiPackRequest(
     const packs: { id: string; priority: number }[] = [
       { id: "vanilla", priority: 0 },
     ];
-    if (existsSync(join(fixturesRoot, "pokebedrock"))) {
-      packs.push({ id: "pokebedrock", priority: 1 });
+    if (existsSync(join(fixturesRoot, "addon"))) {
+      packs.push({ id: "addon", priority: 1 });
     }
     res.end(JSON.stringify(packs));
     return true;

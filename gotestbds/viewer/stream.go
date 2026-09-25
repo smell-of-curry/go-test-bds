@@ -55,11 +55,11 @@ type Stream struct {
 	lastVitalsAt   time.Time
 	lastVitalsData []byte
 
-	// lastPhud is the latest value per PHUD token (bot goroutine writes;
-	// attach/keyframe replay reads under mu). EventSource reconnects wipe the
-	// client's map; without replay, `&_loadingScreen:TUTORIAL COMPLETE` is
-	// gone forever once the write ring has been drained.
-	lastPhud map[string]string
+	// lastTitleTokens is the latest value per title-token (bot goroutine
+	// writes; attach/keyframe replay reads under mu). EventSource reconnects
+	// wipe the client's map; without replay a drained write ring loses the
+	// last value of a short-lived token.
+	lastTitleTokens map[string]string
 
 	// lastEncodeAt throttles the world projection — bot goroutine only.
 	lastEncodeAt time.Time
@@ -357,10 +357,12 @@ func newStream(h *Hub, name string, radius, sectionRadius, columnBudget int) *St
 	if columnBudget <= 0 {
 		columnBudget = DefaultColumnBudget
 	}
+	enc := newEncoder(name, radius, sectionRadius)
+	enc.titleTokenPrefix = h.opts.TitleTokenPrefix
 	return &Stream{
 		hub:            h,
 		name:           name,
-		enc:            newEncoder(name, radius, sectionRadius),
+		enc:            enc,
 		columnBudget:   columnBudget,
 		subs:           make(map[*subscriber]struct{}),
 		encodeInterval: worldEncodeInterval,
@@ -389,10 +391,10 @@ func (s *Stream) Tick(a *actor.Actor) {
 	if nsubs == 0 {
 		// Nobody watching: skip encode entirely. A later attach sets resync so
 		// the next Tick emits a fresh keyframe — the run must behave the same
-		// whether or not a viewer is attached. Still refresh vitals + PHUD so
-		// attach can replay the latest survival/HUD state without waiting for
-		// a change (and so the title-write cursor does not stall until the
-		// ring overflows and drops &_loadingScreen).
+		// whether or not a viewer is attached. Still refresh vitals and title
+		// tokens so attach can replay the latest HUD state without waiting
+		// for a change (and so the title-write cursor does not stall until
+		// the ring overflows and drops a short-lived token).
 		s.cacheVitals(a)
 		s.emitHudEvents(a)
 		return
@@ -411,8 +413,8 @@ func (s *Stream) Tick(a *actor.Actor) {
 		if s.hub.log != nil {
 			s.hub.log.Error("viewer encode", "bot", s.name, "error", err)
 		}
-		// Still drain HUD — a meshing/project failure must not strand PHUD
-		// tokens (showcase-07 lost TUTORIAL COMPLETE while encode errored).
+		// Still drain HUD — a meshing/project failure must not strand title
+		// tokens.
 		s.emitHudEvents(a)
 		return
 	}
@@ -448,7 +450,7 @@ func (s *Stream) Tick(a *actor.Actor) {
 		if keyframe {
 			keyframed = true
 			s.pushVitalsTo(sub)
-			s.pushPhudTo(sub)
+			s.pushTitleTokensTo(sub)
 		}
 	}
 	if keyframed {
@@ -886,41 +888,43 @@ func (s *Stream) emitHudEvents(a *actor.Actor) {
 		s.emitRaw("chat", data)
 	}
 
-	// Raw PHUD lane: every title-channel write that smuggles "&_token:value"
-	// emits one phud frame. The write ring (not the latest-state snapshot)
-	// matters here — PokeBedrock's feeders write several tokens per tick, and
-	// the snapshot keeps only the last one. Cache the latest value per token
-	// so keyframe/attach can replay after an EventSource reconnect.
+	// Title-token lane: every title-channel write that matches the configured
+	// prefix emits one titleToken frame. The write ring (not the latest-state
+	// snapshot) matters here — several tokens can land per tick, and the
+	// snapshot keeps only the last one. An empty prefix emits nothing. Cache
+	// the latest value per token so keyframe/attach can replay after an
+	// EventSource reconnect.
 	writes, lastWrite := a.TitleWritesFromSeq(s.lastTitleWrite)
 	s.lastTitleWrite = lastWrite
+	prefix := s.enc.titleTokenPrefix
 	for _, w := range writes {
-		token, value, ok := parsePhudToken(flattenRawtext(w))
+		token, value, ok := parseTitleToken(flattenRawtext(w), prefix)
 		if !ok {
 			continue
 		}
 		value = resolveLangLines(value)
-		s.rememberPhud(token, value)
-		pf := PhudFrame{
+		s.rememberTitleToken(token, value)
+		pf := TitleTokenFrame{
 			V:     SchemaVersion,
-			Type:  "phud",
+			Type:  "titleToken",
 			Bot:   s.name,
 			Tick:  tick,
 			Token: token,
 			Value: value,
 		}
 		data, _ := json.Marshal(pf)
-		s.emitRaw("phud", data)
+		s.emitRaw("titleToken", data)
 	}
 
 	titleSeq := a.TitleSeq()
 	if titleSeq != 0 && titleSeq != s.lastTitleSeq {
 		s.lastTitleSeq = titleSeq
 		st := a.ScreenTitle()
-		// The event lane must sanitize like encodeUI: run 15 shipped raw
-		// "&_phone:" tokens and rawtext JSON here, and the HUD drew them.
-		title := resolveLangLines(filterHudControlText(flattenRawtext(st.Title)))
-		subtitle := resolveLangLines(filterHudControlText(flattenRawtext(st.Subtitle)))
-		actionBar := resolveLangLines(filterHudControlText(flattenRawtext(st.ActionBar)))
+		// The event lane must sanitize like encodeUI: raw control tokens and
+		// rawtext JSON must not land on the plain title the HUD draws.
+		title := resolveLangLines(filterHudControlText(flattenRawtext(st.Title), prefix))
+		subtitle := resolveLangLines(filterHudControlText(flattenRawtext(st.Subtitle), prefix))
+		actionBar := resolveLangLines(filterHudControlText(flattenRawtext(st.ActionBar), prefix))
 		rawEmpty := st.Title == "" && st.Subtitle == "" && st.ActionBar == ""
 		if !rawEmpty && title == "" && subtitle == "" && actionBar == "" {
 			// Pure control-token traffic: a real client's HUD would not change,
@@ -992,31 +996,33 @@ func (s *Stream) pushVitalsTo(sub *subscriber) {
 	sub.pushEvent(encodedFrame{event: "vitals", data: data})
 }
 
-// rememberPhud stores the latest value for one PHUD token for keyframe replay.
+// rememberTitleToken stores the latest value for one title token so a
+// later keyframe can replay it.
 //
-// @param token PHUD token name (e.g. loadingScreen).
+// @param token Token name.
 // @param value Resolved token body (may be empty for a clear).
-func (s *Stream) rememberPhud(token, value string) {
+func (s *Stream) rememberTitleToken(token, value string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.lastPhud == nil {
-		s.lastPhud = make(map[string]string)
+	if s.lastTitleTokens == nil {
+		s.lastTitleTokens = make(map[string]string)
 	}
-	s.lastPhud[token] = value
+	s.lastTitleTokens[token] = value
 }
 
-// pushPhudTo queues the latest PHUD token snapshot on one subscriber after a
-// keyframe. Reconnects otherwise paint an empty HUD until the next live write.
+// pushTitleTokensTo queues the latest title-token snapshot on one subscriber
+// after a keyframe. Reconnects otherwise paint an empty HUD until the next
+// live write.
 //
 // @param sub Subscriber that just received a keyframe.
-func (s *Stream) pushPhudTo(sub *subscriber) {
+func (s *Stream) pushTitleTokensTo(sub *subscriber) {
 	s.mu.Lock()
-	if len(s.lastPhud) == 0 {
+	if len(s.lastTitleTokens) == 0 {
 		s.mu.Unlock()
 		return
 	}
-	snapshot := make(map[string]string, len(s.lastPhud))
-	for k, v := range s.lastPhud {
+	snapshot := make(map[string]string, len(s.lastTitleTokens))
+	for k, v := range s.lastTitleTokens {
 		snapshot[k] = v
 	}
 	bot := s.name
@@ -1029,16 +1035,16 @@ func (s *Stream) pushPhudTo(sub *subscriber) {
 	}
 	sort.Strings(keys)
 	for _, token := range keys {
-		pf := PhudFrame{
+		pf := TitleTokenFrame{
 			V:     SchemaVersion,
-			Type:  "phud",
+			Type:  "titleToken",
 			Bot:   bot,
 			Tick:  tick,
 			Token: token,
 			Value: snapshot[token],
 		}
 		data, _ := json.Marshal(pf)
-		sub.pushEvent(encodedFrame{event: "phud", data: data})
+		sub.pushEvent(encodedFrame{event: "titleToken", data: data})
 	}
 }
 

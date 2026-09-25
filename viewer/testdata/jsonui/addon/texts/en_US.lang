@@ -1,0 +1,3 @@
+## Later pack overrides shared keys.
+hud.ping.label=ADDON Ping: 
+fixture.shared=addon

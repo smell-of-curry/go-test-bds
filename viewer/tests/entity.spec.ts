@@ -47,7 +47,7 @@ test.describe("entity parsers (node)", () => {
     const pass0 = resolveRenderPasses(def, controllers, {
       type: "test:blocky",
       player: false,
-      props: { "pokeb:skin_index": 0 },
+      props: { "pack:skin_index": 0 },
       flags: {},
     });
     expect(pass0).toHaveLength(1);
@@ -57,7 +57,7 @@ test.describe("entity parsers (node)", () => {
     const pass1 = resolveRenderPasses(def, controllers, {
       type: "test:blocky",
       player: false,
-      props: { "pokeb:skin_index": 1 },
+      props: { "pack:skin_index": 1 },
       flags: {},
     });
     expect(pass1[0]!.texturePaths).toEqual(["textures/entity/blocky_alt"]);
@@ -191,7 +191,7 @@ test.describe("entity model (browser)", () => {
         const model = await registry.getModel({
           type: "test:blocky",
           player: false,
-          props: { "pokeb:skin_index": 0 },
+          props: { "pack:skin_index": 0 },
           flags: {},
         });
         if (!model) return { ok: false, reason: "model null" };

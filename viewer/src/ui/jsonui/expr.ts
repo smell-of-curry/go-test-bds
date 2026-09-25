@@ -1,8 +1,8 @@
 /**
  * Bedrock JSON UI binding-expression parser + evaluator.
  *
- * These are NOT Molang. Real pack usage (pokebedrock-res sidebar / phone /
- * hud_screen) drives string slicing of `#hud_title_text_string` via
+ * These are NOT Molang. Real pack usage (sidebar / phone /
+ * hud screens) drives string slicing of `#hud_title_text_string` via
  * `%.Ns` truncation, concat, remove, int-parse, and comparisons.
  */
 

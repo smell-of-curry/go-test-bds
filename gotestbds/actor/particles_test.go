@@ -9,7 +9,7 @@ import (
 func TestParticleRingFromSeq(t *testing.T) {
 	a := &Actor{}
 	a.RecordParticleSpawn("minecraft:basic_smoke_particle", mgl32.Vec3{1, 2, 3}, 0, -1)
-	a.RecordParticleSpawn("pokeb:shiny_sparkle", mgl32.Vec3{0, 64, 0}, 0, 42)
+	a.RecordParticleSpawn("pack:sparkle", mgl32.Vec3{0, 64, 0}, 0, 42)
 	if a.ParticleSeq() != 2 {
 		t.Fatalf("seq=%d want 2", a.ParticleSeq())
 	}

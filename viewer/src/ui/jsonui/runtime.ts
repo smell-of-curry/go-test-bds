@@ -54,9 +54,15 @@ export interface JsonUiRuntimeOptions {
   extension?: ViewerHudExtension | null;
   /** When true, do not fetch `/viewer.json` (tests that inject `extension`). */
   skipExtensionFetch?: boolean;
+  /**
+   * Called once extension modules have loaded (or immediately when none).
+   *
+   * @param loaded - Merged extension, or null when nothing loaded.
+   */
+  onExtensions?(loaded: ViewerHudExtension | null): void;
 }
 
-/** Public runtime handle (store-subscriber compatible with old PhudHandle). */
+/** Public runtime handle (store subscriber). */
 export interface JsonUiRuntime {
   /** Root HUD host. */
   readonly root: HTMLElement;
@@ -264,6 +270,7 @@ export function createJsonUiRuntime(opts: JsonUiRuntimeOptions): JsonUiRuntime {
         },
       });
     }
+    opts.onExtensions?.(extension);
     const { files, globals, lang } = await loadUiFileSet(client);
     resolver = buildResolver(files, globals);
     // Nineslice / flipbook UV need sync size lookup on first paint.
@@ -359,7 +366,7 @@ function overlayFrameFromState(state: WorldState): ViewerOverlayFrame {
     title: state.ui?.title ?? "",
     subtitle: state.ui?.subtitle ?? "",
     actionBar: state.ui?.actionBar ?? "",
-    tokens: Object.fromEntries(state.phud),
+    tokens: Object.fromEntries(state.titleTokens),
     form: form
       ? {
           type: form.type,

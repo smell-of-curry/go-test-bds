@@ -1,14 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import {
-  airBubblesVisible,
-  applyTitleQuirk,
-  bindingSourceFromState,
-  heartIcons,
-  PHUD_TITLE_RE,
-} from "./hud";
-import type { ResolvedElement } from "./types";
+import { airBubblesVisible, bindingSourceFromState, heartIcons } from "./hud";
 import type { WorldState } from "../../store";
 
 function emptyState(over: Partial<WorldState> = {}): WorldState {
@@ -39,7 +32,7 @@ function emptyState(over: Partial<WorldState> = {}): WorldState {
     fullReset: false,
     time: null,
     camera: null,
-    phud: new Map(),
+    titleTokens: new Map(),
     formHover: null,
     vitals: null,
     waypoint: null,
@@ -52,71 +45,6 @@ describe("bindingSourceFromState", () => {
     const state = emptyState({ ui: { title: "Level Up!" } });
     const src = bindingSourceFromState(state, "Level Up!");
     assert.equal(src.global("#hud_title_text_string"), "Level Up!");
-  });
-});
-
-describe("title quirk", () => {
-  it("matches PHUD control tokens", () => {
-    assert.ok(PHUD_TITLE_RE.test("&_sidebar:x"));
-    assert.ok(PHUD_TITLE_RE.test("&_phone:ring"));
-    assert.equal(PHUD_TITLE_RE.test("Level Up!"), false);
-  });
-
-  it("force-hides title subtree for &_ tokens", () => {
-    const title: ResolvedElement = {
-      type: "label",
-      name: "title",
-      namespace: "hud",
-      props: { visible: true, text: "&_sidebar:x" },
-      controls: [],
-      bindings: [],
-    };
-    const root: ResolvedElement = {
-      type: "stack_panel",
-      name: "hud_title_text",
-      namespace: "hud",
-      props: { visible: true },
-      controls: [{ id: "title", element: title }],
-      bindings: [],
-    };
-    applyTitleQuirk(root, "&_sidebar:x");
-    assert.equal(root.props.visible, false);
-    assert.equal(title.props.visible, false);
-  });
-
-  it("leaves plain titles visible", () => {
-    const root: ResolvedElement = {
-      type: "stack_panel",
-      name: "hud_title_text",
-      namespace: "hud",
-      props: { visible: true },
-      controls: [],
-      bindings: [],
-    };
-    applyTitleQuirk(root, "Level Up!");
-    assert.equal(root.props.visible, true);
-  });
-
-  it("hides title chrome when title string is empty", () => {
-    const bg: ResolvedElement = {
-      type: "image",
-      name: "title_background",
-      namespace: "hud",
-      props: { visible: true },
-      controls: [],
-      bindings: [],
-    };
-    const root: ResolvedElement = {
-      type: "stack_panel",
-      name: "hud_title_text",
-      namespace: "hud",
-      props: { visible: true },
-      controls: [{ id: "title_background", element: bg }],
-      bindings: [],
-    };
-    applyTitleQuirk(root, "");
-    assert.equal(root.props.visible, false);
-    assert.equal(bg.props.visible, false);
   });
 });
 

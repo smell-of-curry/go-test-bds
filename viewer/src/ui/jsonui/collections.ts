@@ -1,7 +1,7 @@
 /**
  * Collection factory expansion + collection-scoped binding application.
  *
- * Vanilla `server_form.long_form_dynamic_buttons_panel` and PokeBedrock
+ * Vanilla `server_form.long_form_dynamic_buttons_panel` and pack screens
  * `battle.button_stack` both use `collection_name` + `factory` to instantiate
  * one control per form button. Per-item bindings (`#form_button_text`,
  * `#form_button_texture`, `#collection_index`) resolve against that item.
@@ -210,7 +210,7 @@ export function resolveGridItemTemplate(
  * Infer `[cols, rows]` when a grid omits `grid_dimensions`.
  *
  * Horizontal grids (starter picker) size cells from the template width
- * percent (`15%` → 6 columns). Falls back to 6×N to match PokeBedrock's
+ * percent (`15%` → 6 columns). Falls back to 6×N to match a wide picker
  * `ButtonsPerRow`.
  *
  * @param host - Grid host props.
@@ -453,7 +453,7 @@ function expandInPlace(
       el.controls = children;
     }
   } else if (collName && typeof el.props.grid_item_template === "string") {
-    // PokeBedrock starter picker: `picker_panel_grid` uses grid_item_template
+    // Starter-style picker: `picker_panel_grid` uses grid_item_template
     // + #maximum_grid_items, not a factory stack.
     const items = collections[collName] ?? [];
     const template = resolveGridItemTemplate(el, resolver);

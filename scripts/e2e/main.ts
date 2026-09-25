@@ -17,7 +17,7 @@ import {
 } from "../index";
 import { BOT_NAME, protocolSuite } from "./suite";
 
-/** Script event that starts a run. Matches pokebedrock-beh / bds-manager. */
+/** Script event that starts a run. Matches the consumer / orchestrator. */
 const RUN_EVENT_ID = "gotestbds:run";
 
 /** Body of the `gotestbds:run` script event. */

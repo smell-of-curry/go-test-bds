@@ -14,7 +14,7 @@ import {
   type KeyframeFrame,
   type MarkFrame,
   type ParticleFrame,
-  type PhudFrame,
+  type TitleTokenFrame,
   type Registries,
   type TitleFrame,
   type UI,
@@ -101,10 +101,10 @@ export interface WorldState {
   /** Server camera override; null = default follow / first-person. */
   camera: CameraWire | null;
   /**
-   * Latest raw PHUD token values from the `phud` event lane
-   * (`&_<token>:<value>` SetTitle writes). `""` = element cleared/hidden.
+   * Latest title-token values from the `titleToken` event lane.
+   * `""` clears that token. Empty map when no prefix is configured.
    */
-  phud: Map<string, string>;
+  titleTokens: Map<string, string>;
   /**
    * Button index being visually hovered on the open form, or null. Cleared
    * whenever the form changes or closes.
@@ -153,7 +153,7 @@ function emptyState(): WorldState {
     fullReset: false,
     time: null,
     camera: null,
-    phud: new Map(),
+    titleTokens: new Map(),
     formHover: null,
     vitals: null,
     waypoint: null,
@@ -250,6 +250,18 @@ export class Store {
   private state = emptyState();
   private listeners = new Set<StoreListener>();
   private sawKeyframe = false;
+  /** Per-token delay before an empty value is applied. Extension-supplied. */
+  private titleTokenClearDelayMs: Record<string, number> = {};
+
+  /**
+   * Hold a cleared token for `ms` so a short-lived card can still be captured.
+   * Empty map applies clears immediately.
+   *
+   * @param delays - Token name → milliseconds.
+   */
+  setTitleTokenClearDelay(delays: Record<string, number>): void {
+    this.titleTokenClearDelayMs = { ...delays };
+  }
 
   getState(): WorldState {
     return this.state;
@@ -295,8 +307,8 @@ export class Store {
       case "particle":
         this.applyParticle(frame);
         break;
-      case "phud":
-        this.applyPhud(frame);
+      case "titleToken":
+        this.applyTitleToken(frame);
         break;
       case "formHover":
         this.applyFormHover(frame);
@@ -351,31 +363,25 @@ export class Store {
   }
 
   /**
-   * Record the latest value for a raw PHUD token.
+   * Record the latest value for one title token.
    *
-   * @param frame - Event-lane phud frame.
+   * @param frame - Event-lane titleToken frame.
    */
-  private applyPhud(frame: PhudFrame): void {
+  private applyTitleToken(frame: TitleTokenFrame): void {
     this.state.tick = frame.tick;
-    // Completion card holds ~4s on the server then clears. Capture stills that
-    // reconnect or drain a late clear mid-wait would otherwise shoot empty —
-    // keep the last non-empty loadingScreen briefly so showcase-07 can paint.
-    if (
-      frame.token === "loadingScreen" &&
-      !frame.value &&
-      (this.state.phud.get("loadingScreen") ?? "")
-    ) {
-      const prev = this.state.phud.get("loadingScreen") ?? "";
+    const delay = this.titleTokenClearDelayMs[frame.token] ?? 0;
+    const prev = this.state.titleTokens.get(frame.token) ?? "";
+    if (!frame.value && delay > 0 && prev) {
       window.setTimeout(() => {
-        if ((this.state.phud.get("loadingScreen") ?? "") === prev) {
-          this.state.phud.set("loadingScreen", "");
+        if ((this.state.titleTokens.get(frame.token) ?? "") === prev) {
+          this.state.titleTokens.set(frame.token, "");
           this.state.revision++;
           this.emit();
         }
-      }, 2500);
+      }, delay);
       return;
     }
-    this.state.phud.set(frame.token, frame.value);
+    this.state.titleTokens.set(frame.token, frame.value);
   }
 
   /**

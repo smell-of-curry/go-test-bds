@@ -2,12 +2,66 @@ package viewer
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 )
 
-func TestParsePhudToken(t *testing.T) {
+func TestTitleTokenPrefixFromManifest(t *testing.T) {
+	dir := t.TempDir()
+	body := []byte(`{"modules":[],"bot":{"titleTokenPrefix":"@@"}}`)
+	if err := os.WriteFile(filepath.Join(dir, "manifest.json"), body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := titleTokenPrefixFromManifest(dir); got != "@@" {
+		t.Fatalf("prefix=%q", got)
+	}
+	hub, err := New(Options{
+		EncodeEveryTick: true,
+		Address:         "127.0.0.1:0",
+		ArtifactDir:     t.TempDir(),
+		ExtensionsDir:   dir,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer hub.Close()
+	if hub.opts.TitleTokenPrefix != "@@" {
+		t.Fatalf("hub prefix=%q", hub.opts.TitleTokenPrefix)
+	}
+	explicit, err := New(Options{
+		EncodeEveryTick:  true,
+		Address:          "127.0.0.1:0",
+		ArtifactDir:      t.TempDir(),
+		ExtensionsDir:    dir,
+		TitleTokenPrefix: "^^",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer explicit.Close()
+	if explicit.opts.TitleTokenPrefix != "^^" {
+		t.Fatalf("explicit prefix=%q", explicit.opts.TitleTokenPrefix)
+	}
+}
+
+func testTokenHub(t *testing.T) *Hub {
+	t.Helper()
+	hub, err := New(Options{
+		EncodeEveryTick:  true,
+		Address:          "127.0.0.1:0",
+		ArtifactDir:      t.TempDir(),
+		TitleTokenPrefix: "&_",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return hub
+}
+
+func TestParseTitleToken(t *testing.T) {
 	cases := []struct {
 		in    string
 		token string
@@ -25,22 +79,22 @@ func TestParsePhudToken(t *testing.T) {
 		{"", "", "", false},
 	}
 	for _, c := range cases {
-		token, value, ok := parsePhudToken(c.in)
+		token, value, ok := parseTitleToken(c.in, "&_")
 		if token != c.token || value != c.value || ok != c.ok {
-			t.Fatalf("parsePhudToken(%q) = (%q, %q, %v), want (%q, %q, %v)",
+			t.Fatalf("parseTitleToken(%q) = (%q, %q, %v), want (%q, %q, %v)",
 				c.in, token, value, ok, c.token, c.value, c.ok)
 		}
 	}
+	if token, value, ok := parseTitleToken("&_sidebar:a", ""); ok || token != "" || value != "" {
+		t.Fatalf("empty prefix parsed (%q, %q, %v)", token, value, ok)
+	}
 }
 
-// Every PHUD write between stream ticks must emit its own phud frame — the
-// feeders write several tokens per tick (sidebar, currency, ping) and the
-// latest-state title snapshot keeps only the last one.
-func TestPhudLaneEmitsEveryTokenWrite(t *testing.T) {
-	hub, err := New(Options{EncodeEveryTick: true, Address: "127.0.0.1:0", ArtifactDir: t.TempDir()})
-	if err != nil {
-		t.Fatal(err)
-	}
+// Every prefixed write between stream ticks must emit its own titleToken
+// frame — feeders write several tokens per tick and the latest-state title
+// snapshot keeps only the last one.
+func TestTitleTokenLaneEmitsEveryWrite(t *testing.T) {
+	hub := testTokenHub(t)
 	defer hub.Close()
 
 	s := hub.Register("HudBot")
@@ -53,14 +107,14 @@ func TestPhudLaneEmitsEveryTokenWrite(t *testing.T) {
 		t.Fatalf("want opening keyframe, got %+v ok=%v", fr, ok)
 	}
 
-	// Three PHUD writes plus one plain title in the same tick.
+	// Three token writes plus one plain title in the same tick.
 	a.ApplyTitleAction(packet.TitleActionSetTitle, "&_playerPing:§a63", 0, 0, 0)
 	a.ApplyTitleAction(packet.TitleActionSetTitle, "&_currency:"+"tip text", 0, 0, 0)
 	a.ApplyTitleAction(packet.TitleActionSetTitle, "&_sidebar:a|b|c", 0, 0, 0)
 	a.ApplyTitleAction(packet.TitleActionSetTitle, "Level Up!", 0, 0, 0)
 	s.Tick(a)
 
-	var phud []PhudFrame
+	var tokens []TitleTokenFrame
 	var titles []TitleFrame
 	for {
 		fr, ok := sub.next()
@@ -68,12 +122,12 @@ func TestPhudLaneEmitsEveryTokenWrite(t *testing.T) {
 			break
 		}
 		switch fr.event {
-		case "phud":
-			var pf PhudFrame
+		case "titleToken":
+			var pf TitleTokenFrame
 			if err := json.Unmarshal(fr.data, &pf); err != nil {
 				t.Fatal(err)
 			}
-			phud = append(phud, pf)
+			tokens = append(tokens, pf)
 		case "title":
 			var tf TitleFrame
 			if err := json.Unmarshal(fr.data, &tf); err != nil {
@@ -83,8 +137,8 @@ func TestPhudLaneEmitsEveryTokenWrite(t *testing.T) {
 		}
 	}
 
-	if len(phud) != 3 {
-		t.Fatalf("phud frames = %+v, want 3", phud)
+	if len(tokens) != 3 {
+		t.Fatalf("titleToken frames = %+v, want 3", tokens)
 	}
 	want := []struct{ token, value string }{
 		{"playerPing", "§a63"},
@@ -92,11 +146,11 @@ func TestPhudLaneEmitsEveryTokenWrite(t *testing.T) {
 		{"sidebar", "a|b|c"},
 	}
 	for i, w := range want {
-		if phud[i].Token != w.token || phud[i].Value != w.value {
-			t.Fatalf("phud[%d] = %+v, want %+v", i, phud[i], w)
+		if tokens[i].Token != w.token || tokens[i].Value != w.value {
+			t.Fatalf("titleToken[%d] = %+v, want %+v", i, tokens[i], w)
 		}
-		if phud[i].Type != "phud" || phud[i].V != SchemaVersion {
-			t.Fatalf("phud[%d] envelope = %+v", i, phud[i])
+		if tokens[i].Type != "titleToken" || tokens[i].V != SchemaVersion {
+			t.Fatalf("titleToken[%d] envelope = %+v", i, tokens[i])
 		}
 	}
 
@@ -113,20 +167,16 @@ func TestPhudLaneEmitsEveryTokenWrite(t *testing.T) {
 		if !ok {
 			break
 		}
-		if fr.event == "phud" {
-			t.Fatalf("duplicate phud frame after cursor advance: %s", fr.data)
+		if fr.event == "titleToken" {
+			t.Fatalf("duplicate titleToken frame after cursor advance: %s", fr.data)
 		}
 	}
 }
 
-// Keyframe/attach must replay the latest PHUD map — EventSource reconnect
-// otherwise paints an empty HUD until the next live write (showcase-07 lost
-// TUTORIAL COMPLETE after the write ring had already been drained).
-func TestPhudReplayOnKeyframeAttach(t *testing.T) {
-	hub, err := New(Options{EncodeEveryTick: true, Address: "127.0.0.1:0", ArtifactDir: t.TempDir()})
-	if err != nil {
-		t.Fatal(err)
-	}
+// Keyframe/attach must replay the latest title-token map — EventSource
+// reconnect otherwise paints an empty HUD until the next live write.
+func TestTitleTokenReplayOnKeyframeAttach(t *testing.T) {
+	hub := testTokenHub(t)
 	defer hub.Close()
 
 	s := hub.Register("HudBot")
@@ -162,10 +212,10 @@ func TestPhudReplayOnKeyframeAttach(t *testing.T) {
 		if !ok {
 			break
 		}
-		if fr.event != "phud" {
+		if fr.event != "titleToken" {
 			continue
 		}
-		var pf PhudFrame
+		var pf TitleTokenFrame
 		if err := json.Unmarshal(fr.data, &pf); err != nil {
 			t.Fatal(err)
 		}
@@ -179,13 +229,10 @@ func TestPhudReplayOnKeyframeAttach(t *testing.T) {
 	}
 }
 
-// The rawtext-wrapped form (battle log rides "&_battleWait:" inside a rawtext
-// envelope) must flatten, parse, and lang-resolve like the other lanes.
-func TestPhudLaneFlattensRawtext(t *testing.T) {
-	hub, err := New(Options{EncodeEveryTick: true, Address: "127.0.0.1:0", ArtifactDir: t.TempDir()})
-	if err != nil {
-		t.Fatal(err)
-	}
+// A rawtext-wrapped control token must flatten, parse, and lang-resolve
+// like the other lanes.
+func TestTitleTokenLaneFlattensRawtext(t *testing.T) {
+	hub := testTokenHub(t)
 	defer hub.Close()
 
 	s := hub.Register("HudBot")
@@ -200,23 +247,23 @@ func TestPhudLaneFlattensRawtext(t *testing.T) {
 	a.ApplyTitleAction(packet.TitleActionSetTitle, wire, 0, 0, 0)
 	s.Tick(a)
 
-	var got *PhudFrame
+	var got *TitleTokenFrame
 	for {
 		fr, ok := sub.next()
 		if !ok {
 			break
 		}
-		if fr.event != "phud" {
+		if fr.event != "titleToken" {
 			continue
 		}
-		var pf PhudFrame
+		var pf TitleTokenFrame
 		if err := json.Unmarshal(fr.data, &pf); err != nil {
 			t.Fatal(err)
 		}
 		got = &pf
 	}
 	if got == nil {
-		t.Fatal("no phud frame emitted for rawtext-wrapped token")
+		t.Fatal("no titleToken frame emitted for rawtext-wrapped token")
 	}
 	if got.Token != "battleWait" {
 		t.Fatalf("token = %q", got.Token)

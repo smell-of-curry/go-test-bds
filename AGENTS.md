@@ -2,7 +2,7 @@
 
 ## Learned User Preferences
 
-- This repo is an **SDK for everyone**, not a PokeBedrock helper library. Anything
+- This repo is an **SDK for everyone**, not a single-addon helper library. Anything
   another addon would plausibly want — a bot action, a wait primitive, an
   assertion, a reporter — belongs here, not in the consuming repo. Only
   project-specific fixtures stay downstream.
@@ -75,11 +75,13 @@
   `scripts/index.ts`, so consumers compile the SDK source with their own bundler.
 - Configuration precedence for the binary is flags → environment
   (`GOTESTBDS_ADDRESS`, `GOTESTBDS_BOT_NAME`, `GOTESTBDS_BOTS`,
-  `GOTESTBDS_LOG_LEVEL`) → `config.toml`. CI and orchestrators use flags/env;
-  `config.toml` is for local runs.
+  `GOTESTBDS_LOG_LEVEL`, `GOTESTBDS_TITLE_TOKEN_PREFIX`) → `config.toml`.
+  CI and orchestrators use flags/env; `config.toml` is for local runs.
+  When the title-token prefix is still empty, the viewer reads
+  `bot.titleTokenPrefix` from the extensions `manifest.json`.
 - Bots have **no Xbox Live identity**, so they must connect to BDS directly
   (`online-mode=false`, allowlist off) — never through a proxy that terminates
-  Xbox auth. In the PokeBedrock deployment that is `instance.port + 2` on
+  Xbox auth. In a typical deployment that is `instance.port + 2` on
   loopback, which is why running tests never requires weakening production auth.
 - The protocol is chat-based because that is the only bidirectional channel a
   Script API addon has to a client: addon → bot as a `[RUN_ACTION]` message,
@@ -116,7 +118,7 @@
   `world.DefaultBlockRegistry.Finalize()`.
 - The `@minecraft/server` dev dependency must track the consumer's version.
   `beforeEvents.chatSend` was removed in 2.3.0 and is present again in the
-  `2.9.0-beta.1.26.33-stable` line that pokebedrock-beh uses; the SDK depends on
+  `2.9.0-beta.1.26.33-stable` line a consumer pins; the SDK depends on
   it for the status channel.
 - Target lib is pre-ES2022: `Array.prototype.at` is unavailable, use
   `arr[arr.length - 1]`.

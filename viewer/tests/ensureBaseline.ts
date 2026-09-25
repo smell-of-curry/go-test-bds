@@ -1,6 +1,6 @@
 /**
  * Ensure the pinned bedrock-samples extract exists at `<repo>/.cache/baseline`.
- * World and PHUD goldens are recorded with real vanilla textures; a wiped
+ * World goldens are recorded with real vanilla textures; a wiped
  * cache silently degrades renders to solid fixtures and fails goldens with
  * confusing diffs, so fetch it back instead.
  */

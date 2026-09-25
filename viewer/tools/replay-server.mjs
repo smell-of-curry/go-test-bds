@@ -13,7 +13,7 @@
  *
  * Env (same defaults as diagnose-terrain-packs.mjs):
  *   VANILLA_PACK  ../.cache/baseline/<baseline.tag>/resource_pack
- *   SERVER_PACK   pokebedrock-res development_resource_packs path (if present)
+ *   SERVER_PACK   optional server resource pack path (if present)
  */
 import { createServer } from "node:http";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
@@ -56,7 +56,7 @@ const defaultServerCandidates = [
     "games",
     "com.mojang",
     "development_resource_packs",
-    "pokebedrock-res",
+    "server-pack",
   ),
 ];
 const vanillaDir = process.env.VANILLA_PACK || defaultVanilla;
@@ -74,7 +74,7 @@ if (serverDir && existsSync(join(serverDir, "blocks.json"))) {
   packs.push({
     id: "server-pack",
     priority: 1,
-    name: "pokebedrock-res",
+    name: "server-pack",
     dir: serverDir,
   });
 }

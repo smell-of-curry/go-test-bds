@@ -50,7 +50,7 @@ test("loadUiFileSet: unions defs, per-pack fetch, pack order", async () => {
     ],
     [
       "server:ui/_ui_defs.json",
-      { ui_defs: ["ui/hud_screen.json", "ui/phud/sidebar.json"] },
+      { ui_defs: ["ui/hud_screen.json", "ui/widgets/sidebar.json"] },
     ],
     [
       "vanilla:ui/hud_screen.json",
@@ -76,7 +76,7 @@ test("loadUiFileSet: unions defs, per-pack fetch, pack order", async () => {
       { namespace: "common", base: { type: "panel" } },
     ],
     [
-      "server:ui/phud/sidebar.json",
+      "server:ui/widgets/sidebar.json",
       { namespace: "sidebar", main: { type: "panel" } },
     ],
   ]);
@@ -102,7 +102,7 @@ test("loadUiFileSet: unions defs, per-pack fetch, pack order", async () => {
     "vanilla:ui/hud_screen.json",
     "vanilla:ui/ui_common.json",
     "server:ui/hud_screen.json",
-    "server:ui/phud/sidebar.json",
+    "server:ui/widgets/sidebar.json",
   ]);
   assert.equal(files[0]!.raw.namespace, "hud");
   assert.equal(files[3]!.raw.namespace, "sidebar");
@@ -182,16 +182,11 @@ test("parseLooseJson: real vanilla _ui_defs fixture", () => {
   assert.ok(doc.ui_defs.some((p) => p.endsWith("hud_screen.json")));
 });
 
-test("parseLooseJson: real _global_variables fixtures", () => {
+test("parseLooseJson: real vanilla _global_variables fixture", () => {
   const vanilla = parseLooseJson<Record<string, unknown>>(
     readFileSync(join(fixtures, "vanilla/_global_variables.json"), "utf8"),
   );
-  const poke = parseLooseJson<Record<string, unknown>>(
-    readFileSync(join(fixtures, "pokebedrock/_global_variables.json"), "utf8"),
-  );
   assert.ok(typeof vanilla.$generic_button_text_color !== "undefined");
-  assert.equal(typeof poke.$string_parser, "string");
-  assert.ok((poke.$string_parser as string).includes("$var_size"));
 });
 
 test("parseLangFile: comments, tab trailers, CRLF", () => {
@@ -212,15 +207,15 @@ test("parseLangFile: comments, tab trailers, CRLF", () => {
 });
 
 test("localizeLabelText: localize true hits / miss unchanged", () => {
-  const lang = { "phud.playerPing.label": "Current Ping: " };
+  const lang = { "hud.ping.label": "Current Ping: " };
   assert.equal(
-    localizeLabelText("phud.playerPing.label", true, lang),
+    localizeLabelText("hud.ping.label", true, lang),
     "Current Ping: ",
   );
   assert.equal(localizeLabelText("missing.key", true, lang), "missing.key");
   assert.equal(
-    localizeLabelText("phud.playerPing.label", false, lang),
-    "phud.playerPing.label",
+    localizeLabelText("hud.ping.label", false, lang),
+    "hud.ping.label",
   );
 });
 
@@ -255,8 +250,8 @@ test("loadUiFileSet: lang merge, later pack wins, 404 ok", async () => {
 
 test("loadUiFileSet: real fixture lang override order", async () => {
   const { lang } = await loadUiFileSet(createFixtureUiClient(fixtures));
-  assert.equal(lang["phud.playerPing.label"], "Current Ping: ");
-  assert.equal(lang["fixture.shared"], "pokebedrock");
+  assert.equal(lang["hud.ping.label"], "ADDON Ping: ");
+  assert.equal(lang["fixture.shared"], "addon");
   assert.equal(lang["fixture.only_vanilla"], "only vanilla");
   assert.equal(lang["fixture.with_tab"], "hello");
 });

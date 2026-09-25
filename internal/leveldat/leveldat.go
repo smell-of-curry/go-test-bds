@@ -14,7 +14,7 @@ import (
 //
 // `gametest` is the "Beta APIs" toggle — without it BDS refuses script modules
 // that depend on beta `@minecraft/server`. The rest mirror the set used by
-// production PokeBedrock worlds (see bds-manager's levelDat helper).
+// production worlds (see bds-manager's levelDat helper).
 var RequiredExperiments = []string{
 	"gametest",
 	"data_driven_biomes",

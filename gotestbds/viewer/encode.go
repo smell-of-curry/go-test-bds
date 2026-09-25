@@ -45,6 +45,10 @@ type encoder struct {
 	// measure the pre-cache cost without checking out old code.
 	skipColCache bool
 
+	// titleTokenPrefix splits SetTitle control tokens. Empty leaves titles as
+	// plain text. Copied from Hub options when the stream is created.
+	titleTokenPrefix string
+
 	prev     *viewState
 	forceKey bool
 }
@@ -951,9 +955,9 @@ func (e *encoder) encodeUI(a *actor.Actor) UI {
 		ui.Messages = append(ui.Messages, renderChatMessage(m))
 	}
 	st := a.ScreenTitle()
-	ui.Title = resolveLangLines(filterHudControlText(flattenRawtext(st.Title)))
-	ui.Subtitle = resolveLangLines(filterHudControlText(flattenRawtext(st.Subtitle)))
-	ui.ActionBar = resolveLangLines(filterHudControlText(flattenRawtext(st.ActionBar)))
+	ui.Title = resolveLangLines(filterHudControlText(flattenRawtext(st.Title), e.titleTokenPrefix))
+	ui.Subtitle = resolveLangLines(filterHudControlText(flattenRawtext(st.Subtitle), e.titleTokenPrefix))
+	ui.ActionBar = resolveLangLines(filterHudControlText(flattenRawtext(st.ActionBar), e.titleTokenPrefix))
 	// Omit default fade timings when nothing is on screen — keeps empty UI `{}`
 	// on the wire instead of always shipping 10/70/20.
 	if st.Title != "" || st.Subtitle != "" || st.ActionBar != "" {

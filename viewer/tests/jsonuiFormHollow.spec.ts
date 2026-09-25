@@ -154,11 +154,11 @@ test("ActionForm hollow fill dims center; form stacks above body nametag", async
       ui: {
         form: {
           type: "action",
-          title: "Welcome to PokeBedrock",
+          title: "Welcome traveler",
           content:
             "It looks like you are new to the server.\nOpen this book for a quick tour.",
           buttons: ["Continue"],
-          buttonImages: ["textures/ui/phud/oak_start"],
+          buttonImages: ["textures/ui/book_writable"],
         },
       },
     } as unknown as JsonlFrame);

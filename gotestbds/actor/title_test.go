@@ -47,7 +47,7 @@ func TestApplyTitleActionSetAndClear(t *testing.T) {
 	}
 }
 
-// Advancing the phud cursor to TitleWriteSeq() (live tip) races writes that
+// Advancing the title-token cursor to TitleWriteSeq() (live tip) races writes that
 // land between the drain and the cursor bump — those writes are skipped forever.
 // TitleWritesFromSeq returns the max seq in the batch so the next drain sees them.
 func TestTitleWritesFromSeqCursorStopsAtBatch(t *testing.T) {

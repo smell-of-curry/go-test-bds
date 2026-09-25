@@ -1,19 +1,12 @@
 /**
- * Cross-frame PHUD latch: sidebar preserved_text survives a later phone token.
+ * Cross-frame latch: preserved_text survives a later title that does not
+ * match the element's `$update_string`.
  */
 import assert from "node:assert/strict";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { describe, it } from "node:test";
 
 import { applyBindings } from "./bindings";
-import { createFixtureUiClient } from "./fixtureClient";
-import { loadUiFileSet } from "./load";
-import { buildResolver } from "./resolve";
 import type { BindingSource, PropertyBag, ResolvedElement } from "./types";
-
-const here = dirname(fileURLToPath(import.meta.url));
-const fixtures = join(here, "../../../testdata/jsonui");
 
 function source(title: string): BindingSource {
   return {
@@ -30,9 +23,9 @@ function source(title: string): BindingSource {
 }
 
 /**
- * Mimic runtime latch for one data_control instance across two titles.
+ * Mimic the runtime latch for one control across two titles.
  *
- * @param el - data_control element with $update_string.
+ * @param el - Element with `$update_string`.
  * @param title1 - First title.
  * @param title2 - Second title.
  * @returns preserved_text after both frames.
@@ -44,7 +37,7 @@ function latchAcross(
 ): string {
   const update =
     typeof el.props.$update_string === "string" ? el.props.$update_string : "";
-  assert.ok(update, "expected $update_string on data_control");
+  assert.ok(update);
 
   let prev: PropertyBag = {};
   for (const title of [title1, title2]) {
@@ -70,7 +63,6 @@ function latchAcross(
         return undefined;
       },
     });
-    // Same as hud.applyVisibilityChangedLatch — undo always-apply overwrite.
     if (title.includes(update)) out.preserved_text = title;
     else if (typeof prev.preserved_text === "string") {
       out.preserved_text = prev.preserved_text;
@@ -82,25 +74,23 @@ function latchAcross(
   return String(prev.preserved_text ?? "");
 }
 
-describe("PHUD latch across frames", () => {
-  it("sidebar control keeps &_sidebar:X after &_phone:ring", async () => {
-    const client = createFixtureUiClient(fixtures);
-    const { files, globals } = await loadUiFileSet(client);
-    const r = buildResolver(files, globals);
-    const phud = r.resolve("phud", "main");
-    assert.ok(phud);
-    const renderers = phud!.controls.find((c) => c.id === "renderers");
-    assert.ok(renderers);
-    const sidebarCtrl = renderers!.element.controls.find(
-      (c) => c.id === "sidebar_control",
-    );
-    assert.ok(sidebarCtrl, "sidebar_control missing");
-
-    const kept = latchAcross(
-      sidebarCtrl!.element,
-      "&_sidebar:X",
-      "&_phone:ring",
-    );
-    assert.equal(kept, "&_sidebar:X");
+describe("title latch across frames", () => {
+  it("keeps the first matching title after a different token arrives", () => {
+    const el: ResolvedElement = {
+      type: "panel",
+      name: "data_control",
+      namespace: "widgets",
+      props: { $update_string: "@@side:" },
+      controls: [],
+      bindings: [
+        {
+          binding_condition: "visibility_changed",
+          binding_name_override: "#preserved_text",
+          binding_name: "#hud_title_text_string",
+        },
+      ],
+    };
+    const kept = latchAcross(el, "@@side:X", "@@phone:ring");
+    assert.equal(kept, "@@side:X");
   });
 });

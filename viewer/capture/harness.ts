@@ -881,31 +881,40 @@ async function handleCapture(
             `capture: scene still meshing after ${SETTLE_GRACE_MS}ms; capturing anyway`,
           );
         });
-    } else if ((frame.label ?? "").includes("complete")) {
-      // Server getPhudToken sees the completion card before the title packet
-      // reaches the bot/viewer. Wait for the SSE lane (or the painted card)
-      // so showcase-07 doesn't shoot an empty loadingScreen clear.
+    } else {
+      // An extension may arm a gate for short-lived HUD tokens (the server
+      // cache sees them before the title packet reaches the viewer). No
+      // matching gate is a no-op.
+      const label = frame.label ?? "";
       await stillsPage
         .waitForFunction(
-          () => {
+          (wanted) => {
             const v = (
               window as unknown as {
-                __viewer?: { phud?: Record<string, string> };
+                __viewer?: {
+                  titleTokens?: Record<string, string>;
+                  captureGates?: Array<{
+                    labelIncludes: string;
+                    ready: (
+                      tokens: Record<string, string>,
+                      root: ParentNode,
+                    ) => boolean;
+                  }>;
+                };
               }
             ).__viewer;
-            const text = v?.phud?.loadingScreen ?? "";
-            if (text.includes("TUTORIAL COMPLETE")) return true;
-            const el = document.querySelector(
-              '[data-jsonui-name="phud_loadingScreen.main"]',
+            const gate = (v?.captureGates ?? []).find((g) =>
+              wanted.toLowerCase().includes(g.labelIncludes.toLowerCase()),
             );
-            return (el?.textContent ?? "").includes("TUTORIAL COMPLETE");
+            if (!gate) return true;
+            return gate.ready(v?.titleTokens ?? {}, document);
           },
-          undefined,
+          label,
           { polling: 100, timeout: 8_000 },
         )
         .catch(() => {
           log.warn(
-            "capture: loadingScreen card never reached the viewer; capturing anyway",
+            "capture: title-token gate never became ready; capturing anyway",
           );
         });
     }

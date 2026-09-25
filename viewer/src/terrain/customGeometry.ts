@@ -195,7 +195,7 @@ export class BlockGeometryCache {
  * @returns candidate paths.
  */
 export function blockGeometryPathCandidates(geometryId: string): string[] {
-  // "minecraft:geometry.full_block" / "pokeb:geometry.foo" → namespace off
+  // "minecraft:geometry.full_block" / "pack:geometry.foo" → namespace off
   // first (a colon in the asset path is a 400), then the geometry. prefix.
   const bare = geometryId.replace(/^[^:]+:/, "").replace(/^geometry\./i, "");
   return [

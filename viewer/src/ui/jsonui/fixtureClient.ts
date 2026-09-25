@@ -7,8 +7,8 @@ import { join } from "node:path";
 import { parseLooseJson, type UiLoadClient, type UiPackInfo } from "./load";
 
 /**
- * Build a stub client that serves `testdata/jsonui/{vanilla,pokebedrock}/…`
- * as packs with ids `vanilla` (priority 0) and `pokebedrock` (priority 1).
+ * Build a stub client that serves `testdata/jsonui/{vanilla,addon}/…`
+ * as packs with ids `vanilla` (priority 0) and `addon` (priority 1).
  *
  * Fixture files live without the `ui/` prefix at the pack root of each folder
  * (e.g. `vanilla/hud_screen.json` ↔ pack path `ui/hud_screen.json`).
@@ -18,8 +18,8 @@ import { parseLooseJson, type UiLoadClient, type UiPackInfo } from "./load";
  */
 export function createFixtureUiClient(fixturesRoot: string): UiLoadClient {
   const packs: UiPackInfo[] = [{ id: "vanilla", priority: 0 }];
-  if (existsSync(join(fixturesRoot, "pokebedrock"))) {
-    packs.push({ id: "pokebedrock", priority: 1 });
+  if (existsSync(join(fixturesRoot, "addon"))) {
+    packs.push({ id: "addon", priority: 1 });
   }
 
   return {

@@ -5,8 +5,7 @@ client: it receives the same chunks, entities, forms and inventory a player
 does. Everything below is about turning that state into pixels, and eventually
 into pixels a person cannot tell apart from the Bedrock client.
 
-The end state is a 1:1 client-faithful renderer. Nothing here is scoped to
-PokeBedrock — the viewer resolves what it draws from what the server sends, so
+The end state is a 1:1 client-faithful renderer. Nothing here is scoped to one addon — the viewer resolves what it draws from what the server sends, so
 any addon gets the same fidelity without the viewer knowing about it.
 
 ## Why it lives in this repo
@@ -29,7 +28,7 @@ months of work before anyone outside this directory benefits.
 
 ## Status
 
-Stages 0–4 are shipped and running in CI. `pokebedrock-beh`'s `addon-tests` job
+Stages 0–4 are shipped and running in CI. a consumer's end-to-end job
 asks the dev-server manager for capture, and each run publishes its stills and
 run video as the `addon-test-viewer` workflow artefact.
 
@@ -202,7 +201,7 @@ all-air sub-chunk case.
       because losing one strands a capture request.
 - [x] Sanitize every HUD lane the same way, including the eventful one.
       `flattenRawtext` locates the rawtext JSON anywhere in a string;
-      `filterHudControlText` shows the value of display-worthy PHUD tokens
+      `filterHudControlText` shows the value of display-worthy title tokens
       (`loadingScreen`, `battleWait`, `evolutionWait`, `currency`) and blanks
       pure control tokens — and when filtering leaves nothing, the title event
       is not emitted at all, because a real client's HUD would not have
@@ -344,7 +343,7 @@ same tests pass with the same verdicts.
       `viewer/README.md`, [`PROTOCOL.md`](PROTOCOL.md), and the dev-server section
       of `bds-manager`'s README.
 
-**Check:** verified on PR #704 of `pokebedrock-beh` — the `addon-tests` job
+**Check:** verified against a consumer end-to-end job — the `addon-tests` job
 published three stills and the run video with no manual step, and an earlier run
 with two failing tests carried a still of each failure.
 
@@ -691,17 +690,13 @@ noon so goldens need no regen.
       global fallback, `modifications`), lays out anchors/`%`/`%c`/stack
       panels/nineslice, and evaluates `#binding` expressions
       (`#hud_title_text_string` string slicing, view bindings with
-      per-element latch state). HUD (`runtime.ts` + `hud.ts`): PokeBedrock
-      PHUD (sidebar/phone/ping/currency/battleWait) renders from the pack's
-      own `ui/phud/*.json`; vanilla hearts/hunger/bubbles/armor/hotbar/xp are
+      per-element latch state). HUD (`runtime.ts` + `hud.ts`): pack screens an extension mounts render from the pack's
+      own `ui/*.json`; vanilla hearts/hunger/bubbles/armor/hotbar/xp are
       native-renderer stubs fed by the `vitals` SSE lane. Forms (`forms.ts`):
       title-flag router (battle/pc/pokedex/chest/search) to the pack's
       screens, collection bindings for `form_buttons`, hover from the
-      `formHover` lane. Known pack quirk documented in `RESEARCH.md`: the
-      shipped title-suppress expression is off-by-one (`%.1s` vs `'&_'`), so
-      the runtime force-hides the vanilla title for `&_<token>:` strings until
-      the pack fixes it. The legacy hand-coded `viewer/src/ui/phud/` renderer
-      is unmounted; the waypoint strip (viewer extra, no pack ui file) lives
+      `formHover` lane. An extension hides vanilla title chrome when a control
+      token owns the title. The waypoint strip (viewer extra, no pack ui file) lives
       on standalone. Punt list: scroll views, grid item templates,
       interactive custom-form widgets (read-only display), hotbar item icons.
 - [ ] Render text with the client's font atlas, including glyph pages, format

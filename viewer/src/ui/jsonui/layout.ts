@@ -13,6 +13,7 @@ import {
   collapseLangPercentEscapes,
   resolveLabelFontScale,
 } from "./labelMetrics";
+import type { LayoutQuirkRules } from "../../extensions/types";
 import type {
   LayoutBox,
   PropertyBag,
@@ -50,6 +51,11 @@ export interface LayoutNode {
 /** Options for {@link layoutTree}. */
 export interface LayoutOptions {
   measureText: MeasureText;
+  /**
+   * Optional pack corrections matched by namespace + element name.
+   * An extension supplies these; the default engine does not assume a pack.
+   */
+  rules?: LayoutQuirkRules;
 }
 
 type Anchor =
@@ -313,7 +319,7 @@ function layoutAnchored(
   // row and center the square mid-plate. Pack plate `offset: [-11%,0]` matches
   // data.png's ~12% left pad so the square can sit on the plate's left edge;
   // treat omitted size as content (`100%c`) and default anchors as left_middle.
-  const sidebarIconHost = isSidebarIconHost(el);
+  const sidebarIconHost = isIconHost(el, opts);
   const sizeSpec = sidebarIconHost
     ? (["100%c", "100%c"] as [unknown, unknown])
     : readSizePair(el.props.size);
@@ -458,23 +464,19 @@ function layoutAnchored(
   clampHorizontalInParent(selfBox, parentBox, anchorFrom);
   clampBattleActorPlateToViewport(selfBox, el, viewport);
 
-  // Sidebar main is authored `["222.22%y", 192]` ≈ 427gui on every screen.
-  // At capture's 640gui width that is ~67% — plates + clipped dock.png then
-  // paint a fat black wall. Cap at ~25% viewport (real client plate scale)
-  // and inset so dock offset + ring stay on-screen.
-  if (
-    el.namespace === "phud_sidebar" &&
-    el.name === "main" &&
-    ANCHORS[anchorFrom].x >= 0.999
-  ) {
-    const maxW = viewport.width * 0.25;
+  // Right-anchored panels an extension asked to cap (a wide %y-derived
+  // host otherwise paints a slab). Inset so an overflowing child stays on
+  // screen after the dock clip below.
+  const cap = opts.rules?.capRight?.find(
+    (r) => r.namespace === el.namespace && r.name === el.name,
+  );
+  if (cap && ANCHORS[anchorFrom].x >= 0.999) {
+    const maxW = viewport.width * cap.maxWidthRatio;
     if (selfBox.w > maxW + 1) {
       selfBox.w = maxW;
       selfBox.x = parentBox.x + parentBox.w - selfBox.w;
     }
-    // Dock `offset: ["47%",0]` + selected ring hang past main; inset enough
-    // that plates stay fully visible after the dock clip below.
-    const inset = Math.max(12, selfBox.w * 0.5);
+    const inset = Math.max(cap.minInset, selfBox.w * cap.insetRatio);
     const parentRight = parentBox.x + parentBox.w;
     if (selfBox.x + selfBox.w > parentRight - inset) {
       selfBox.x = parentRight - inset - selfBox.w;
@@ -482,17 +484,13 @@ function layoutAnchored(
     clampHorizontalInParent(selfBox, parentBox, anchorFrom);
   }
 
-  // Sidebar dock: right-anchored + `offset: ["47%",0]` hangs past main so the
-  // transparent left pad of dock.png sits off-screen. Clip the *paint* box to
-  // the on-screen slice but lay out children against the full authored width
-  // — re-laying into the clipped width recenters ball/ring mid-plate and
-  // shrinks plates so the fixed 62gui XP bar overhangs the groove.
+  // Right-anchored dock an extension named: clip the *paint* box to the
+  // on-screen slice but lay out children against the full authored width.
   let childLayoutBox = selfBox;
-  if (
-    el.namespace === "phud_sidebar" &&
-    el.name === "dock" &&
-    ANCHORS[anchorFrom].x >= 0.999
-  ) {
+  const clipDock = opts.rules?.clipDock?.some(
+    (r) => r.namespace === el.namespace && r.name === el.name,
+  );
+  if (clipDock && ANCHORS[anchorFrom].x >= 0.999) {
     const fullDock = { ...selfBox };
     const parentRight = parentBox.x + parentBox.w;
     const overflow = selfBox.x + selfBox.w - parentRight;
@@ -804,7 +802,7 @@ function layoutStack(
       );
       // Only raise when a fill sibling would paint over the gutter
       // (ActionForm `panel_name` beside `fill` button chrome). Blanket layer
-      // bumps reorder unrelated px×%c stacks (PHUD sidebar icon hosts).
+      // bumps reorder unrelated px×%c stacks (content-sized icon hosts).
       if (fillCount > 0) {
         const flowLayer = Math.max(
           0,
@@ -1379,22 +1377,19 @@ function positionWithAnchors(
 }
 
 /**
- * Pack hosts for the sidebar ball / active ring. They omit `size` and anchors;
- * treating that as wiki `100%`+`center` parks the square mid-plate. Real client
- * placement matches the plate's `-11%` pad (data.png opaque starts ~x29/245):
- * content-sized square on the row's left edge, half-overlapping the plate.
- *
- * Ignore any latched/authored size — pack omits it; a prior-frame fill size
- * would otherwise disable this path and park the ring mid-plate.
+ * Extension-listed icon hosts. They omit `size`; wiki default `100%`+`center`
+ * would fill the row. Treat them as content-sized and left-anchored, ignoring
+ * a latched fill size from a previous frame.
  *
  * @param el - Element being laid out.
+ * @param opts - Layout options (rules.iconHosts).
  * @returns true when this host should content-size + left-anchor.
  */
-function isSidebarIconHost(el: ResolvedElement): boolean {
-  if (el.namespace !== "phud_sidebar") return false;
+function isIconHost(el: ResolvedElement, opts: LayoutOptions): boolean {
   return (
-    el.name === "pokemon_icon_wrapper" ||
-    el.name === "pokemon_selected_indicator"
+    opts.rules?.iconHosts?.some(
+      (r) => r.namespace === el.namespace && r.name === el.name,
+    ) ?? false
   );
 }
 

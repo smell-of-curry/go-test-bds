@@ -200,7 +200,7 @@ test.describe("geometry preload survives real palettes (run 24)", () => {
     expect(isBuiltinBlockGeometry("geometry.fixture.custom_crate")).toBe(false);
 
     // A namespaced id must lose its colon before it becomes a URL path.
-    for (const p of blockGeometryPathCandidates("pokeb:geometry.machine")) {
+    for (const p of blockGeometryPathCandidates("pack:geometry.machine")) {
       expect(p).not.toContain(":");
       expect(p).toContain("machine");
     }
@@ -221,11 +221,11 @@ test.describe("geometry preload survives real palettes (run 24)", () => {
     const cache = new BlockGeometryCache(client);
     const blocks: RegistryBlock[] = [
       {
-        name: "pokeb:plain",
+        name: "pack:plain",
         components: { geometry: "minecraft:geometry.full_block" },
       },
       {
-        name: "pokeb:broken",
+        name: "pack:broken",
         components: { geometry: "geometry.pokeb.machine" },
       },
     ];

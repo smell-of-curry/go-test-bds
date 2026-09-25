@@ -288,12 +288,10 @@ test.describe("terrain parse / resolve (node)", () => {
 
   test("vanilla bare blocks.json keys resolve as minecraft: ids", () => {
     expect(canonicalizeBlockId("stone")).toBe("minecraft:stone");
-    expect(canonicalizeBlockId("pokeb:apricorn_planks")).toBe(
-      "pokeb:apricorn_planks",
-    );
+    expect(canonicalizeBlockId("pack:planks")).toBe("pack:planks");
     const blocks = parseBlocksJson({
       stone: { textures: "flattened_stone" },
-      "pokeb:x": { textures: "x" },
+      "pack:x": { textures: "x" },
     });
     expect(blocks["minecraft:stone"]?.textures).toBe("flattened_stone");
     expect(blocks.stone).toBeUndefined();
@@ -1000,7 +998,7 @@ test.describe("terrain atlas + mesher (browser)", () => {
         const AIR = { name: "minecraft:air", states: {}, rid: 0 };
         const STONE = { name: "minecraft:stone", states: {}, rid: 1 };
         const PLANKS = {
-          name: "pokeb:apricorn_planks",
+          name: "pack:planks",
           states: {},
           rid: 2,
         };

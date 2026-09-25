@@ -435,11 +435,12 @@ type TitleFrame struct {
 	Clear bool `json:"clear,omitempty"`
 }
 
-// PhudFrame is one raw PokeBedrock HUD token write ("&_<token>:<value>"
-// smuggled through SetTitle) on the event lane. The value is lang-resolved
-// like every other lane; packed payloads (sidebar) arrive verbatim for the
-// client to parse. The filtered title lane is unaffected.
-type PhudFrame struct {
+// TitleTokenFrame is one title-channel control write on the event lane.
+// Splitting is off unless a title-token prefix is configured (extensions
+// manifest `bot.titleTokenPrefix`, or GOTESTBDS_TITLE_TOKEN_PREFIX). The
+// value is lang-resolved; packed payloads arrive verbatim. The filtered
+// title lane does not carry the raw token.
+type TitleTokenFrame struct {
 	V     int    `json:"v"`
 	Type  string `json:"type"`
 	Bot   string `json:"bot"`

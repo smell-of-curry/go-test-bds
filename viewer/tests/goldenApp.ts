@@ -169,33 +169,15 @@ export async function startGoldenApp(): Promise<GoldenApp> {
       stream.handle(req, res);
       return;
     }
-    // Terrain pack id is also "vanilla". An optional extra UI fixture pack
-    // keeps JSON UI from clobbering terrain blocks.json.
     if (url.pathname === "/packs") {
       const upstream = await fetch(`${assets.url}/packs`);
       const packs = (await upstream.json()) as Array<Record<string, unknown>>;
-      if (
-        existsSync(join(viewerRoot, "testdata", "jsonui", "pokebedrock")) &&
-        !packs.some((p) => p.id === "pokebedrock")
-      ) {
-        packs.push({
-          id: "pokebedrock",
-          uuid: "22222222-2222-2222-2222-222222222222",
-          version: "1.0.0",
-          name: "pokebedrock",
-          priority: 1,
-          fileCount: 0,
-        });
-      }
       res.writeHead(200, {
         "Content-Type": "application/json",
         "Access-Control-Allow-Origin": "*",
       });
       res.end(JSON.stringify(packs));
       return;
-    }
-    if (url.pathname.startsWith("/pack/pokebedrock/")) {
-      if (handleJsonUiPackRequest(req, res)) return;
     }
     if (url.pathname.startsWith("/pack/vanilla/ui/")) {
       if (handleJsonUiPackRequest(req, res)) return;

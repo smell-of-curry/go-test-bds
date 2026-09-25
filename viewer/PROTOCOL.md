@@ -280,7 +280,7 @@ instruction. Broadcast to every bot's stream, because a run is not per-bot.
   "phase": "testEnd",
   "runId": "run-7", "suite": "machines", "test": "places a crate",
   "status": "failed",
-  "message": "expected pokeb:crate, got minecraft:air",
+  "message": "expected pack:crate, got minecraft:air",
   "elapsedMs": 3412
 }
 ```

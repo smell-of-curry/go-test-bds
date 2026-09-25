@@ -86,7 +86,7 @@ func TestGoStreamGolden(t *testing.T) {
 		Suite:     "machines",
 		Test:      "places a crate",
 		Status:    "failed",
-		Message:   "expected pokeb:crate, got minecraft:air",
+		Message:   "expected pack:crate, got minecraft:air",
 		ElapsedMs: 3412,
 	})
 	if err != nil {

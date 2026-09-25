@@ -63,7 +63,7 @@ bare keys to `minecraft:…` so lookups hit.
 
 **Palette vs pack (renderer):** when `blocks.json` has a `textures` field, that
 pack path wins. The network palette covers names the pack cannot paint (typical
-`pokeb:*` custom blocks). When the palette carries `minecraft:geometry` and the
+`pack:*` custom blocks). When the palette carries `minecraft:geometry` and the
 pack has that `.geo.json`, the mesher emits that mesh (per-instance materials,
 no greedy merge); otherwise it falls back to a textured unit cube.
 
@@ -77,7 +77,7 @@ fixtures and run the packs you actually ship:
 ```bash
 # Vanilla: Mojang/bedrock-samples @ viewer/baseline.tag →
 #   ../.cache/baseline/<tag>/resource_pack
-# Server (optional): pokebedrock-res development_resource_packs path
+# Server (optional): optional server resource pack path
 # Registries (optional): keyframe shape; defaults to testdata/registries-fixture.json
 node tools/diagnose-terrain-packs.mjs
 # or:

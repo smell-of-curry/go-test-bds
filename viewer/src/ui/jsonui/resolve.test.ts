@@ -264,59 +264,78 @@ test("globals are lowest precedence vs element $var", () => {
   assert.equal(r.resolve("ns", "label")!.props.text, "from-element");
 });
 
-test("REAL-FILE smoke: sidebar $string_parser from pokebedrock globals", () => {
-  const globals = parseLooseJson<Record<string, unknown>>(
-    readFileSync(join(fixtures, "pokebedrock/_global_variables.json"), "utf8"),
-  );
-  const sidebar = parseLooseJson(
-    readFileSync(join(fixtures, "pokebedrock/phud/sidebar.json"), "utf8"),
-  );
-  const expectedParser = globals.$string_parser;
-  assert.equal(typeof expectedParser, "string");
-
-  const r = buildResolver(
-    [src("pokebedrock", "ui/phud/sidebar.json", sidebar)],
-    globals,
-  );
-  const el = r.resolve("phud_sidebar", "variable_parser");
-  assert.ok(el, "variable_parser should resolve");
+test("global $string_parser flows into a binding source", () => {
+  const globals = { $string_parser: "(#string - $var_size)" };
+  const doc = {
+    namespace: "side_panel",
+    variable_parser: {
+      type: "label",
+      bindings: [
+        {
+          binding_type: "view",
+          source_property_name: "$string_parser",
+          target_property_name: "#var",
+        },
+      ],
+    },
+  };
+  const r = buildResolver([src("addon", "ui/side.json", doc)], globals);
+  const el = r.resolve("side_panel", "variable_parser");
+  assert.ok(el);
   const binding = el!.bindings.find((b) => b.target_property_name === "#var");
-  assert.ok(binding, "expected #var binding");
-  assert.equal(binding!.source_property_name, expectedParser);
+  assert.ok(binding);
+  assert.equal(binding!.source_property_name, globals.$string_parser);
   assert.notEqual(binding!.source_property_name, "$string_parser");
 });
 
-test("pokebedrock sidebar fixture parses", () => {
-  const text = readFileSync(
-    join(fixtures, "pokebedrock/phud/sidebar.json"),
-    "utf8",
-  );
+test("loose sidebar doc parses", () => {
+  const text = `{
+    "namespace": "side_panel",
+    "main": { "type": "panel", "controls": [{ "dock": { "type": "image" } }] }
+  }`;
   const doc = parseLooseJson(text);
   const raw = parseUiRawFile(doc);
   assert.ok(raw);
   assert.ok(Object.keys(raw!.elements).length > 0);
 });
 
-test("sidebar $var_index aliases resolve to numeric field indices", () => {
-  const globals = parseLooseJson<Record<string, unknown>>(
-    readFileSync(join(fixtures, "pokebedrock/_global_variables.json"), "utf8"),
-  );
-  const sidebar = parseLooseJson(
-    readFileSync(join(fixtures, "pokebedrock/phud/sidebar.json"), "utf8"),
-  );
-  const r = buildResolver(
-    [src("pokebedrock", "ui/phud/sidebar.json", sidebar)],
-    globals,
-  );
-  const main = r.resolve("phud_sidebar", "main");
+test("$var_index aliases resolve to numeric field indices", () => {
+  const globals = { $field_a: 2, $field_b: 16 };
+  const doc = {
+    namespace: "side_panel",
+    row: {
+      type: "panel",
+      $var_index: "$field_index",
+      controls: [{ data: { type: "panel" } }],
+    },
+    main: {
+      type: "panel",
+      controls: [
+        {
+          one: {
+            type: "panel",
+            $field_index: "$field_a",
+            controls: [{ "row@side_panel.row": {} }],
+          },
+        },
+        {
+          two: {
+            type: "panel",
+            $field_index: "$field_b",
+            controls: [{ "row@side_panel.row": {} }],
+          },
+        },
+      ],
+    },
+  };
+  const r = buildResolver([src("addon", "ui/side.json", doc)], globals);
+  const main = r.resolve("side_panel", "main");
   assert.ok(main);
-  const dock = main!.controls.find((c) => c.id === "dock")!.element;
-  const holder = dock.controls.find((c) => c.id === "pokemon_holder")!.element;
-  const p1 = holder.controls.find((c) => c.id === "pokemon1")!.element;
-  const p3 = holder.controls.find((c) => c.id === "pokemon3")!.element;
-  const data1 = p1.controls.find((c) => c.id === "pokemon_data")!.element;
-  const data3 = p3.controls.find((c) => c.id === "pokemon_data")!.element;
+  const one = main!.controls.find((c) => c.id === "one")!.element;
+  const two = main!.controls.find((c) => c.id === "two")!.element;
+  const data1 = one.controls[0]!.element.controls[0]!.element;
+  const data2 = two.controls[0]!.element.controls[0]!.element;
   assert.equal(data1.props.$var_index, 2);
-  assert.equal(data3.props.$var_index, 16);
-  assert.notEqual(data1.props.$var_index, "$pokemon_id_index");
+  assert.equal(data2.props.$var_index, 16);
+  assert.notEqual(data1.props.$var_index, "$field_index");
 });

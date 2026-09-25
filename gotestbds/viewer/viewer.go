@@ -33,11 +33,16 @@ type Options struct {
 	ArtifactDir  string // where artefacts are written
 	AppDir       string // built viewer app to serve at "/", optional
 	// ExtensionsDir is a directory of viewer UI modules served at
-	// /extensions/ and advertised by GET /viewer.json. Empty disables it;
-	// the web app then keeps its built-in HUD behaviour.
+	// /extensions/ and advertised by GET /viewer.json. Empty disables it.
+	// manifest.json may set bot.titleTokenPrefix for the title-token lane.
 	ExtensionsDir string
-	Assets        *assets.Manager
-	Logger        *slog.Logger
+	// TitleTokenPrefix splits SetTitle writes of the form prefix+name+":"+value
+	// onto the titleToken event lane and hides them from the plain title.
+	// Empty disables the lane. When this is empty and ExtensionsDir is set,
+	// New reads bot.titleTokenPrefix from that directory's manifest.json.
+	TitleTokenPrefix string
+	Assets           *assets.Manager
+	Logger           *slog.Logger
 	// EncodeEveryTick disables the world-projection throttle so tests can
 	// drive Tick faster than wall time. Production keeps the throttle: a
 	// full-rate projection starved the bot loop below the client tick rate.
@@ -91,6 +96,9 @@ func New(opts Options) (*Hub, error) {
 	}
 	if opts.Logger == nil {
 		opts.Logger = slog.Default()
+	}
+	if opts.TitleTokenPrefix == "" {
+		opts.TitleTokenPrefix = titleTokenPrefixFromManifest(opts.ExtensionsDir)
 	}
 
 	arts, err := newArtifactStore(opts.ArtifactDir)

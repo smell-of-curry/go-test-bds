@@ -178,7 +178,7 @@ describe("applyBindings view", () => {
     assert.equal(out.visible, true);
   });
 
-  it("PokeBedrock &_ title suppress (hud_screen.json view binding)", () => {
+  it("control-token title suppress (hud_screen.json view binding)", () => {
     // Exact pack expression uses %.1s vs '&_' (1 char vs 2) — under char-truncate
     // semantics that never matches. Intended form is %.2s; assert that.
     const suppress = "(not ((%.2s * #hud_title_text_string ) = '&_'))";

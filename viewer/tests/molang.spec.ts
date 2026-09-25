@@ -232,11 +232,11 @@ test.describe("molang host / queries", () => {
     const host = createDefaultHost({
       queries: {
         variant: 3,
-        property: (args) => (args[0] === "pokeb:skin" ? 2 : 0),
+        property: (args) => (args[0] === "pack:skin" ? 2 : 0),
       },
     });
     expect(num("query.variant", host)).toBe(3);
-    expect(num("query.property('pokeb:skin')", host)).toBe(2);
+    expect(num("query.property('pack:skin')", host)).toBe(2);
     expect(host.unimplementedQueries).toEqual([]);
   });
 });

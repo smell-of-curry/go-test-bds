@@ -38,7 +38,7 @@ export interface BotState {
 /** One inventory slot, as the bot sees it. */
 export interface BotItemStack {
   slot: number;
-  /** Item identifier, e.g. `minecraft:stone` or `pokeb:orb_of_frozen_souls`. */
+  /** Item identifier, e.g. `minecraft:stone` or `pack:custom_item`. */
   name: string;
   count: number;
   customName?: string;

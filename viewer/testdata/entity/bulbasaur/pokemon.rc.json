@@ -9,7 +9,7 @@
       },
       "geometry": "Geometry.default",
       "materials": [{ "*": "Material.default" }],
-      "textures": ["Array.variants[query.property('pokeb:shiny') ? 1 : 0]"]
+      "textures": ["Array.variants[query.property('pack:shiny') ? 1 : 0]"]
     },
     "controller.render.evolve": {
       "geometry": "Geometry.default",

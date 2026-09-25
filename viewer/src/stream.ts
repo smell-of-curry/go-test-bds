@@ -74,7 +74,7 @@ export class SnapshotStream {
       "chat",
       "title",
       "particle",
-      "phud",
+      "titleToken",
       "formHover",
       "vitals",
     ] as const) {

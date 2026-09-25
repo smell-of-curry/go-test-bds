@@ -91,16 +91,23 @@ export interface ViewerHandle {
     gl: string | null;
   };
   /**
-   * Visible JSON UI nodes + live PHUD map for capture stills.
+   * Visible JSON UI nodes + live title-token map for capture stills.
    * Always-on debug artefact (cheap DOM walk).
    */
   debugJsonUiDump: () => JsonUiDump;
   /**
-   * Live PHUD token → value map (SSE lane). Capture uses this to wait for
-   * short-lived tokens (loadingScreen) that the server cache sees before the
-   * bot/viewer does.
+   * Live title-token map (SSE lane). Capture gates read this to wait for
+   * short-lived tokens the server cache sees before the viewer does.
    */
-  readonly phud: Record<string, string>;
+  readonly titleTokens: Record<string, string>;
+  /**
+   * Extension-supplied still gates. A label that includes `labelIncludes`
+   * waits until `ready` returns true.
+   */
+  captureGates?: ReadonlyArray<{
+    labelIncludes: string;
+    ready: (tokens: Record<string, string>, root: ParentNode) => boolean;
+  }>;
 }
 
 declare global {
@@ -213,11 +220,12 @@ export function installViewerHandle(
     get paintGeneration() {
       return getPaintGeneration();
     },
-    get phud() {
+    get titleTokens() {
       const out: Record<string, string> = {};
-      for (const [k, v] of store.getState().phud) out[k] = v;
+      for (const [k, v] of store.getState().titleTokens) out[k] = v;
       return out;
     },
+    captureGates: [],
     flush: (budgetMs?: number) => {
       scene.flush(store.getState(), budgetMs);
       store.clearDirty();
@@ -326,7 +334,7 @@ export function installViewerHandle(
       const host =
         (document.querySelector(".jsonui-hud-host") as HTMLElement | null) ??
         (document.getElementById("json-hud") as HTMLElement | null);
-      return collectJsonUiDump(host, state.tick, state.phud);
+      return collectJsonUiDump(host, state.tick, state.titleTokens);
     },
   };
 }
