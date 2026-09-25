@@ -33,7 +33,7 @@ func TestLookAtSynchronisesRotationBeforeAction(t *testing.T) {
 		t.Fatal("auth input missing block-breaking delay flag")
 	}
 	if auth.InputMode != packet.InputModeMouse ||
-		auth.InteractionModel != packet.InteractionModelCrosshair {
+		auth.InteractionModel != packet.InteractionModelTouch {
 		t.Fatalf("input mode = %d, interaction model = %d", auth.InputMode, auth.InteractionModel)
 	}
 }
@@ -87,8 +87,12 @@ func TestUseItemOnBlockSendsAcceptedClick(t *testing.T) {
 	if use.ClientPrediction != protocol.ClientPredictionSuccess {
 		t.Fatalf("prediction = %d, want success", use.ClientPrediction)
 	}
-	if len(use.Actions) != 0 {
-		t.Fatalf("inventory actions = %d, want 0", len(use.Actions))
+	if len(use.Actions) != 1 {
+		t.Fatalf("inventory actions = %d, want 1", len(use.Actions))
+	}
+	if use.Actions[0].SourceType != protocol.InventoryActionSourceContainer ||
+		use.Actions[0].InventorySlot != uint32(a.HeldSlot()) {
+		t.Fatalf("inventory action = %#v", use.Actions[0])
 	}
 	if use.BlockPosition.X() != int32(pos.X()) || use.BlockPosition.Y() != int32(pos.Y()) || use.BlockPosition.Z() != int32(pos.Z()) {
 		t.Fatalf("block position = %v", use.BlockPosition)
@@ -96,8 +100,8 @@ func TestUseItemOnBlockSendsAcceptedClick(t *testing.T) {
 	if use.ClickedPosition.Y() != 1 {
 		t.Fatalf("top-face click y = %v, want 1", use.ClickedPosition.Y())
 	}
-	eyes := a.EyePos()
-	if use.Position.X() != float32(eyes.X()) || use.Position.Y() != float32(eyes.Y()) || use.Position.Z() != float32(eyes.Z()) {
-		t.Fatalf("position = %v, want eyes %v", use.Position, eyes)
+	feet := a.Position()
+	if use.Position.X() != float32(feet.X()) || use.Position.Y() != float32(feet.Y()) || use.Position.Z() != float32(feet.Z()) {
+		t.Fatalf("position = %v, want feet %v", use.Position, feet)
 	}
 }

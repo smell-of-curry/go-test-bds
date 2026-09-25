@@ -573,7 +573,21 @@ func (a *Actor) UseItemOnBlock(pos cube.Pos, face cube.Face, clickPos mgl64.Vec3
 		clickPos = hitPoint.Sub(pos.Vec3())
 	}
 	blockRuntimeID, _ := a.world.NetworkBlockRuntimeID(pos, 0)
+	predictedItem := heldItem
+	if a.Gamemode() != 1 && predictedItem.Stack.BlockRuntimeID != 0 && predictedItem.Stack.Count > 0 {
+		predictedItem.Stack.Count--
+		if predictedItem.Stack.Count == 0 {
+			predictedItem = protocol.ItemInstance{}
+		}
+	}
 	action := &protocol.UseItemTransactionData{
+		Actions: []protocol.InventoryAction{{
+			SourceType:    protocol.InventoryActionSourceContainer,
+			WindowID:      protocol.Option(int8(protocol.WindowIDInventory)),
+			InventorySlot: uint32(a.heldSlot),
+			OldItem:       heldItem,
+			NewItem:       predictedItem,
+		}},
 		HotBarSlot:       int32(a.heldSlot),
 		HeldItem:         heldItem,
 		ActionType:       protocol.UseItemActionClickBlock,
@@ -581,7 +595,7 @@ func (a *Actor) UseItemOnBlock(pos cube.Pos, face cube.Face, clickPos mgl64.Vec3
 		BlockPosition:    posToProtocol(pos),
 		BlockFace:        int32(face),
 		ClickedPosition:  mcmath.Vec64To32(clickPos),
-		Position:         mcmath.Vec64To32(a.EyePos()),
+		Position:         mcmath.Vec64To32(a.Position()),
 		BlockRuntimeID:   blockRuntimeID,
 		ClientPrediction: protocol.ClientPredictionSuccess,
 	}
@@ -600,7 +614,7 @@ func (a *Actor) UseItemOnBlock(pos cube.Pos, face cube.Face, clickPos mgl64.Vec3
 	return a.conn.WritePacket(&packet.PlayerAction{
 		EntityRuntimeID: a.RuntimeID(),
 		ActionType:      protocol.PlayerActionStopItemUseOn,
-		BlockPosition:   posToProtocol(pos.Side(face)),
+		BlockPosition:   posToProtocol(pos),
 	})
 }
 

@@ -294,7 +294,7 @@ func (a *Actor) SendMovement() {
 		HeadYaw:           yaw,
 		InputData:         a.movementBitset,
 		InputMode:         packet.InputModeMouse,
-		InteractionModel:  packet.InteractionModelCrosshair,
+		InteractionModel:  packet.InteractionModelTouch,
 		InteractPitch:     pitch,
 		InteractYaw:       yaw,
 		Tick:              a.tick,
