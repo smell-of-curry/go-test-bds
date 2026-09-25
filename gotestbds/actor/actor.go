@@ -609,10 +609,10 @@ func (a *Actor) UseItemOnBlock(pos cube.Pos, face cube.Face, clickPos mgl64.Vec3
 		ClientPrediction: protocol.ClientPredictionSuccess,
 	}
 	// The click goes out on the next PlayerAuthInput (PerformItemInteraction).
-	// A separate StartItemUseOn beforehand makes BDS treat that auth input as
-	// a hold-repeat (isFirstEvent false), and the claim handler cancels it.
+	// Sending the same click as a standalone InventoryTransaction makes BDS
+	// treat the auth input as a duplicate and silently discard the interaction.
 	a.pendingItemUse = action
-	return a.useItem(action)
+	return nil
 }
 
 // ReleaseItem stops using held item.

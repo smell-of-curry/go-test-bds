@@ -33,37 +33,10 @@ func TestUseItemOnBlockSendsAcceptedClick(t *testing.T) {
 	if err := a.UseItemOnBlock(pos, cube.FaceUp, click); err != nil {
 		t.Fatal(err)
 	}
-	var tx *packet.InventoryTransaction
 	for _, pk := range conn.written {
-		if got, ok := pk.(*packet.InventoryTransaction); ok {
-			tx = got
+		if _, ok := pk.(*packet.InventoryTransaction); ok {
+			t.Fatal("block click duplicated as InventoryTransaction")
 		}
-	}
-	if tx == nil {
-		t.Fatal("no InventoryTransaction")
-	}
-	data, ok := tx.TransactionData.(*protocol.UseItemTransactionData)
-	if !ok {
-		t.Fatalf("transaction %T", tx.TransactionData)
-	}
-	if data.ActionType != protocol.UseItemActionClickBlock {
-		t.Fatalf("action = %d", data.ActionType)
-	}
-	if data.TriggerType != protocol.TriggerTypePlayerInput {
-		t.Fatalf("trigger = %d, want player input", data.TriggerType)
-	}
-	if data.ClientPrediction != protocol.ClientPredictionSuccess {
-		t.Fatalf("prediction = %d, want success", data.ClientPrediction)
-	}
-	if data.BlockRuntimeID != stone {
-		t.Fatalf("block runtime id = %d, want %d", data.BlockRuntimeID, stone)
-	}
-	eyes := a.EyePos()
-	if data.Position.X() != float32(eyes.X()) || data.Position.Y() != float32(eyes.Y()) || data.Position.Z() != float32(eyes.Z()) {
-		t.Fatalf("position = %v, want eyes %v", data.Position, eyes)
-	}
-	if data.BlockPosition.X() != int32(pos.X()) || data.BlockPosition.Y() != int32(pos.Y()) || data.BlockPosition.Z() != int32(pos.Z()) {
-		t.Fatalf("block position = %v", data.BlockPosition)
 	}
 
 	conn.written = nil
@@ -86,6 +59,15 @@ func TestUseItemOnBlockSendsAcceptedClick(t *testing.T) {
 	}
 	if use.TriggerType != protocol.TriggerTypePlayerInput || use.BlockRuntimeID != stone {
 		t.Fatalf("auth use = trigger %d block %d", use.TriggerType, use.BlockRuntimeID)
+	}
+	if use.ActionType != protocol.UseItemActionClickBlock {
+		t.Fatalf("action = %d", use.ActionType)
+	}
+	if use.ClientPrediction != protocol.ClientPredictionSuccess {
+		t.Fatalf("prediction = %d, want success", use.ClientPrediction)
+	}
+	if use.BlockPosition.X() != int32(pos.X()) || use.BlockPosition.Y() != int32(pos.Y()) || use.BlockPosition.Z() != int32(pos.Z()) {
+		t.Fatalf("block position = %v", use.BlockPosition)
 	}
 	if use.Position != auth.Position {
 		t.Fatalf("use position %v, auth position %v", use.Position, auth.Position)
