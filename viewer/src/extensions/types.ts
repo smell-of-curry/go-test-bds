@@ -117,6 +117,11 @@ export interface ViewerExtensionModule {
    * Default false: quirks still run, and these hooks run in addition.
    */
   replaceBuiltins?: boolean;
+  /**
+   * Invisible title-flag → `namespace.name` screen. First match wins.
+   * Packs that route ActionForms this way supply the table here.
+   */
+  formRoutes?: ReadonlyArray<{ flag: string; screen: string }>;
   /** Pack texture paths without extension, warmed before the first paint. */
   preloadTextures?: readonly string[];
   /**
@@ -177,6 +182,7 @@ export interface ViewerExtensionApi {
  */
 export interface ViewerHudExtension {
   replaceBuiltins: boolean;
+  formRoutes: ReadonlyArray<{ flag: string; screen: string }>;
   preloadTextures: readonly string[];
   resolveTitle?: ViewerExtensionModule["resolveTitle"];
   seedGlobals?: ViewerExtensionModule["seedGlobals"];

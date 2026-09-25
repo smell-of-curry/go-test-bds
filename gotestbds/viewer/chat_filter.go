@@ -193,26 +193,14 @@ func rawtextWithArgs(raw json.RawMessage) []string {
 	return args
 }
 
-// hudTokenValueShown lists PHUD tokens whose value is real display text a
-// real client would show through its JSON UI (the battle log, the tutorial
-// objective, the completion card). The viewer has no JSON UI, so it shows the
-// value as plain title text. Tokens absent here carry animation/layout state
-// (phone poses, packed sidebar data, ping colors) and are dropped.
-var hudTokenValueShown = map[string]bool{
-	"loadingScreen": true,
-	"battleWait":    true,
-	"evolutionWait": true,
-	"currency":      true,
-}
-
-// parsePhudToken splits a PHUD control token ("&_token:value", PokeBedrock's
-// SetTitle smuggling convention) into its token name and raw value. Flatten
-// rawtext BEFORE calling this — the rawtext form
-// ({"rawtext":[{"text":"&_battleWait:"},…]}) only exposes its token once
-// flattened.
+// parsePhudToken splits a control token ("&_token:value") from a title write
+// into its token name and raw value. Flatten rawtext BEFORE calling this —
+// the rawtext form ({"rawtext":[{"text":"&_token:"},…]}) only exposes its
+// token once flattened. Pack-specific rendering of those tokens belongs in a
+// viewer extension; the plain title lane hides them.
 //
 // @param text Flattened title text from the wire.
-// @returns the token name, its raw value, and whether text was a PHUD write.
+// @returns the token name, its raw value, and whether text was a control write.
 func parsePhudToken(text string) (token, value string, ok bool) {
 	rest, found := strings.CutPrefix(text, "&_")
 	if !found {
@@ -225,28 +213,23 @@ func parsePhudToken(text string) (token, value string, ok bool) {
 	return token, value, true
 }
 
-// filterHudControlText resolves title/subtitle/actionbar text that is a PHUD
-// control token rather than plain visible text: display-worthy token values
-// pass through, control-state tokens become "". Flatten rawtext BEFORE calling
-// this (see parsePhudToken).
+// filterHudControlText hides title/subtitle/actionbar text that is a control
+// token (`&_token:value`) rather than plain visible text. Flatten rawtext
+// BEFORE calling this (see parsePhudToken). An extension reads the token from
+// the phud event lane.
 //
 // @param text Flattened title text from the wire.
-// @returns The visible text for the HUD, or "" for control state.
+// @returns The visible text for the plain HUD, or "" for a control token.
 func filterHudControlText(text string) string {
-	token, value, ok := parsePhudToken(text)
+	_, _, ok := parsePhudToken(text)
 	if !ok {
 		if strings.HasPrefix(text, "&_") {
-			// Token without a value separator carries nothing to show.
 			return ""
 		}
-		// Unflattened rawtext-form tokens must never reach the screen raw.
 		if strings.Contains(text, `"&_`) {
 			return ""
 		}
 		return text
-	}
-	if hudTokenValueShown[token] {
-		return value
 	}
 	return ""
 }

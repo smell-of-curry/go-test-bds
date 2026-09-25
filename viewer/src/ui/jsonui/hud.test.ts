@@ -6,8 +6,6 @@ import {
   applyTitleQuirk,
   bindingSourceFromState,
   heartIcons,
-  hudTitleString,
-  PhudTitleTracker,
   PHUD_TITLE_RE,
 } from "./hud";
 import type { ResolvedElement } from "./types";
@@ -49,48 +47,11 @@ function emptyState(over: Partial<WorldState> = {}): WorldState {
   };
 }
 
-describe("bindingSourceFromState / hudTitleString", () => {
+describe("bindingSourceFromState", () => {
   it("maps plain title lane to #hud_title_text_string", () => {
     const state = emptyState({ ui: { title: "Level Up!" } });
-    const src = bindingSourceFromState(state, hudTitleString(state, ""));
+    const src = bindingSourceFromState(state, "Level Up!");
     assert.equal(src.global("#hud_title_text_string"), "Level Up!");
-  });
-
-  it("maps reconstructed phud token to #hud_title_text_string", () => {
-    const state = emptyState();
-    const title = "&_sidebar:payload";
-    const src = bindingSourceFromState(state, title);
-    assert.equal(src.global("#hud_title_text_string"), title);
-  });
-
-  it("prefers live PHUD title over stale plain ui.title", () => {
-    const state = emptyState({ ui: { title: "Hello" } });
-    assert.equal(hudTitleString(state, "&_phone:ring"), "&_phone:ring");
-  });
-});
-
-describe("PhudTitleTracker latch across tokens", () => {
-  it("keeps sidebar payload when phone token arrives later", () => {
-    const tracker = new PhudTitleTracker();
-    const phud = new Map<string, string>();
-    phud.set("sidebar", "SIDEBAR_X");
-    assert.equal(tracker.update(phud), "&_sidebar:SIDEBAR_X");
-
-    phud.set("phone", "ring");
-    assert.equal(tracker.update(phud), "&_phone:ring");
-
-    // Map still holds sidebar value — pack latch uses preserved_text, not title.
-    assert.equal(phud.get("sidebar"), "SIDEBAR_X");
-    assert.equal(phud.get("phone"), "ring");
-  });
-
-  it("emits &_token: when value cleared so pack latches hide", () => {
-    const tracker = new PhudTitleTracker();
-    const phud = new Map<string, string>();
-    phud.set("phone", "ring");
-    assert.equal(tracker.update(phud), "&_phone:ring");
-    phud.set("phone", "");
-    assert.equal(tracker.update(phud), "&_phone:");
   });
 });
 
@@ -99,14 +60,6 @@ describe("title quirk", () => {
     assert.ok(PHUD_TITLE_RE.test("&_sidebar:x"));
     assert.ok(PHUD_TITLE_RE.test("&_phone:ring"));
     assert.equal(PHUD_TITLE_RE.test("Level Up!"), false);
-  });
-
-  it("prefers PHUD title over stale plain ui.title", () => {
-    const state = emptyState({
-      ui: { title: "TestBot" },
-      phud: new Map([["sidebar", "x"]]),
-    });
-    assert.equal(hudTitleString(state, "&_sidebar:x"), "&_sidebar:x");
   });
 
   it("force-hides title subtree for &_ tokens", () => {

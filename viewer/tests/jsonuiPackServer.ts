@@ -96,12 +96,13 @@ export function handleJsonUiPackRequest(
 
   if (url.pathname === "/packs") {
     res.writeHead(200, { ...CORS, "content-type": "application/json" });
-    res.end(
-      JSON.stringify([
-        { id: "vanilla", priority: 0 },
-        { id: "pokebedrock", priority: 1 },
-      ]),
-    );
+    const packs: { id: string; priority: number }[] = [
+      { id: "vanilla", priority: 0 },
+    ];
+    if (existsSync(join(fixturesRoot, "pokebedrock"))) {
+      packs.push({ id: "pokebedrock", priority: 1 });
+    }
+    res.end(JSON.stringify(packs));
     return true;
   }
 

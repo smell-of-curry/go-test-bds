@@ -30,7 +30,6 @@ import type {
 } from "../../extensions/types";
 import type { VitalsFrame } from "../../protocol";
 import type { WorldState } from "../../store";
-import { normalizeSidebarBallType } from "../phud/parse";
 
 /** PHUD control-token title (`&_sidebar:…`). */
 export const PHUD_TITLE_RE = /^&_[A-Za-z]+:/;
@@ -90,74 +89,6 @@ export interface HudRenderer {
 }
 
 /**
- * Reconstruct the raw title string the Bedrock client would see.
- *
- * Prefers the plain `title` lane; otherwise the most recent PHUD token write
- * tracked by the caller via {@link PhudTitleTracker}.
- *
- * @param state - World state.
- * @param lastPhudTitle - Latest `&_<token>:<value>` synthesized from the phud lane.
- * @returns title string (may be empty).
- */
-export function hudTitleString(
-  state: WorldState,
-  lastPhudTitle: string,
-): string {
-  // PHUD writes land on the title channel; a stale plain `ui.title` (nametag
-  // echo, leftover SetTitle) must not win and leave tip Black chrome painted.
-  if (PHUD_TITLE_RE.test(lastPhudTitle)) return lastPhudTitle;
-  const plain = state.ui?.title ?? "";
-  if (plain) return plain;
-  return lastPhudTitle;
-}
-
-/**
- * Track the chronologically latest PHUD write as a raw title string.
- * The phud map alone loses write order across tokens.
- */
-const PHUD_TITLE_LANE_TOKENS = new Set([
-  "sidebar",
-  "phone",
-  "loadingScreen",
-  "evolutionWait",
-]);
-
-export class PhudTitleTracker {
-  private last = "";
-  private prev = new Map<string, string>();
-
-  /**
-   * @param phud - Current phud token map.
-   * @returns latest `&_<token>:<value>` (empty value → `&_<token>:` so pack
-   * latches clear the matching lane).
-   */
-  update(phud: Map<string, string>): string {
-    for (const [token, value] of phud) {
-      if (!PHUD_TITLE_LANE_TOKENS.has(token)) continue;
-      const prev = this.prev.get(token);
-      if (prev === value) continue;
-      this.prev.set(token, value);
-      // Always emit the token prefix — `""` alone never matches `$update_string`
-      // so data_control latches would keep the previous payload forever.
-      this.last = `&_${token}:${value}`;
-    }
-    // Drop tokens removed from the map.
-    for (const token of [...this.prev.keys()]) {
-      if (!phud.has(token)) {
-        this.prev.delete(token);
-        if (this.last.startsWith(`&_${token}:`)) this.last = "";
-      }
-    }
-    return this.last;
-  }
-
-  /** @returns last synthesized title. */
-  get(): string {
-    return this.last;
-  }
-}
-
-/**
  * Build a {@link BindingSource} over WorldState + reconstructed title.
  *
  * @param state - World state.
@@ -168,8 +99,6 @@ export function bindingSourceFromState(
   state: WorldState,
   title: string,
   options?: {
-    /** When false, do not copy the built-in token map onto globals. Default true. */
-    seedPhudTokens?: boolean;
     seedGlobals?: ViewerHudExtension["seedGlobals"];
   },
 ): BindingSource {
@@ -232,14 +161,6 @@ export function bindingSourceFromState(
     globals["#is_armor_visible"] = false;
   }
 
-  // Seed PHUD token props from the map so a busy title lane (sidebar) cannot
-  // starve loadingScreen / phone / etc. when data_control latches lag.
-  if (options?.seedPhudTokens !== false) {
-    for (const [token, value] of state.phud) {
-      const prop = phudTokenProp(token);
-      if (prop) globals[prop] = value;
-    }
-  }
   const tokenRecord = Object.fromEntries(state.phud);
   options?.seedGlobals?.(tokenRecord, (key, value) => {
     globals[key] = value;
@@ -253,30 +174,6 @@ export function bindingSourceFromState(
       return undefined;
     },
   };
-}
-
-/**
- * Map a PHUD token name to the property `phud.elements` bindings write.
- *
- * @param token - Token from the phud SSE lane (`sidebar`, `loadingScreen`, …).
- * @returns `#prop` name, or null when unmapped.
- */
-function phudTokenProp(token: string): string | null {
-  switch (token) {
-    case "currency":
-      return "#level_number";
-    case "battleWait":
-      return "#battleLog";
-    case "playerPing":
-      return "#player_ping_text";
-    case "phone":
-    case "sidebar":
-    case "loadingScreen":
-    case "evolutionWait":
-      return `#${token}`;
-    default:
-      return null;
-  }
 }
 
 /**
@@ -400,7 +297,6 @@ export function createHudRenderer(
         });
 
   const propStore = new Map<string, PropertyBag>();
-  const titleTracker = new PhudTitleTracker();
   let lastFrameMs = 0;
   let lastPaintKey = "";
 
@@ -415,7 +311,6 @@ export function createHudRenderer(
     onFrame(state: WorldState): number {
       const t0 = performance.now();
       const ext = opts.extension;
-      const builtin = !ext?.replaceBuiltins;
       const tokens = Object.fromEntries(state.phud);
       const form = state.ui?.form
         ? {
@@ -433,23 +328,20 @@ export function createHudRenderer(
             dimension: state.actor.dimension,
           }
         : null;
-      const title = builtin
-        ? hudTitleString(state, titleTracker.update(state.phud))
-        : (ext?.resolveTitle?.({
-            title: state.ui?.title ?? "",
-            subtitle: state.ui?.subtitle ?? "",
-            actionBar: state.ui?.actionBar ?? "",
-            tokens,
-          }) ??
-          state.ui?.title ??
-          "");
+      const plainTitle = state.ui?.title ?? "";
+      const title =
+        ext?.resolveTitle?.({
+          title: plainTitle,
+          subtitle: state.ui?.subtitle ?? "",
+          actionBar: state.ui?.actionBar ?? "",
+          tokens,
+        }) ?? plainTitle;
       const source = bindingSourceFromState(state, title, {
-        seedPhudTokens: builtin,
         seedGlobals: ext?.seedGlobals,
       });
       const idIndex = new Map<string, PropertyBag>();
       const pass: BindPass = {
-        builtin,
+        builtin: !ext?.replaceBuiltins,
         title,
         subtitle: state.ui?.subtitle ?? "",
         actionBar: state.ui?.actionBar ?? "",
@@ -470,11 +362,7 @@ export function createHudRenderer(
         state.phud,
         pass,
       );
-      if (builtin) {
-        applyTitleQuirk(bound, title);
-        applyPhudElementTokens(bound, state.phud);
-        applyEmptyChromeQuirks(bound);
-      }
+      if (!ext?.replaceBuiltins) applyTitleQuirk(bound, title);
       ext?.afterTree?.({
         root: bound as unknown as ViewerBoundNode,
         title,
@@ -791,73 +679,7 @@ function bindTree(
       out.localize ?? el.props.localize,
       lang,
     );
-    // playerPing.json splits label + §-colored value. Authored lang is
-    // `Current Ping: ` (trailing space); older pack extracts omit it and the
-    // value (`§a0`) glues to the colon. Preserve the separator space.
-    if (
-      builtin &&
-      el.name === "label_prefix" &&
-      el.namespace === "player_ping" &&
-      text.endsWith(":")
-    ) {
-      text = `${text} `;
-    }
     out.text = text;
-  }
-  // Empty party slots still bind ball texture `…/balls/empty` — hide that icon
-  // so only occupied plates paint (matches real client empty = invisible).
-  // Always assign visible (same latch trap as phone.main): seeding
-  // prev.visible=false after an empty frame sticks forever and layout stubs
-  // the ball with children:[] so pokemon_icon never paints either.
-  // `paintNode` / layout still walk children when the host is hidden.
-  if (builtin && el.name === "ball_icon") {
-    const rawBall = typeof out.ball_type === "string" ? out.ball_type : "";
-    const ball = normalizeSidebarBallType(rawBall);
-    if (ball !== rawBall) {
-      out.ball_type = ball;
-      const tex = typeof out.texture === "string" ? out.texture : "";
-      if (tex.endsWith("/pokeball") || tex.endsWith("/pokeball.png")) {
-        out.texture = `textures/ui/sidebar/balls/${ball}`;
-      }
-    }
-    out.visible = !(ball === "empty" || ball === "null" || ball === "");
-  }
-  // Pack omits size on ball/ring hosts; never latch a fill size from a prior
-  // frame (would disable isSidebarIconHost → mid-plate ring, 0-size icons).
-  if (
-    builtin &&
-    el.namespace === "phud_sidebar" &&
-    (el.name === "pokemon_icon_wrapper" ||
-      el.name === "pokemon_selected_indicator")
-  ) {
-    delete out.size;
-  }
-  // Pack phone.main has no empty-token gate — only child $conditions hide
-  // icons. When the live map has `&_phone:`, hide/show the 64×64 host with it
-  // (always assign — seeding prev.visible=false would stick across setPhud).
-  if (
-    builtin &&
-    el.namespace === "phud_phone" &&
-    el.name === "main" &&
-    phud?.has("phone")
-  ) {
-    out.visible = Boolean(phud.get("phone"));
-  }
-  // Pack fades oak_talk_bg / oak_loop in via wait→alpha anims we do not run.
-  // When talking chrome is shown, force the settled frame (not oak_start ghost).
-  if (builtin && el.namespace === "phud_phone") {
-    const phoneVal = String(phud?.get("phone") ?? out.value ?? "");
-    const talking = phoneVal.slice(0, 4) === "loop";
-    if (el.name === "oak_talk_bg") out.alpha = 1;
-    if (el.name === "oak_icon") {
-      const tex = String(out.texture ?? "");
-      const icon = String(out.$name ?? el.props.$name ?? "");
-      if (tex.includes("oak_loop") || icon === "loop") out.alpha = 1;
-      if (talking && (tex.includes("oak_start") || icon === "start")) {
-        out.visible = false;
-        out.alpha = 0;
-      }
-    }
   }
   applyRendererSizing(el, out, vitals);
   applyHotbarHangPin(el, out, vitals);
@@ -868,32 +690,6 @@ function bindTree(
     prev,
     builtin ? phud : undefined,
   );
-  // Prefer live phud map on the elements panel before children bind, so
-  // loadingScreen/phone see tokens even when title-lane latches lag. Clear
-  // absent overlay tokens so a bad sibling latch cannot keep dirt painted.
-  if (builtin && el.name === "elements" && el.namespace === "phud") {
-    // Pack omits size; Bedrock fills the parent. Our `default` size is content
-    // AABB + center anchors → live dump (193,92) 894×536 inset ("squished HUD").
-    out.size = ["100%", "100%"];
-    if (phud) {
-      for (const token of [
-        "phone",
-        "sidebar",
-        "loadingScreen",
-        "evolutionWait",
-        "battleWait",
-        "playerPing",
-      ] as const) {
-        const prop = phudTokenProp(token);
-        if (!prop) continue;
-        const key = prop.startsWith("#") ? prop.slice(1) : prop;
-        // Keep "" on clear — `(not (#token = ''))` needs the empty string present.
-        if (phud.has(token)) out[key] = phud.get(token)!;
-        else delete out[key];
-      }
-      if (phud.has("currency")) out.level_number = phud.get("currency")!;
-    }
-  }
   // Hotbar grid uses grid_item_template; HUD seeds dimensions. Form grids
   // (starter picker) expand via collections.expandCollections.
   // Size the host and inject one full-width hotbar_renderer stub instead.
@@ -1133,61 +929,6 @@ function applyVisibilityChangedLatch(
   } else {
     delete out.preserved_text;
   }
-}
-
-/**
- * Write PHUD token values onto the `elements` panel so child widgets
- * (`loadingScreen`, `phone`, …) see them even when sibling data_control
- * latches are empty on the first frame.
- *
- * @param root - Bound HUD tree.
- * @param phud - Live PHUD map.
- */
-function applyPhudElementTokens(
-  root: ResolvedElement,
-  phud: Map<string, string>,
-): void {
-  const walk = (el: ResolvedElement): void => {
-    if (el.name === "elements" && el.namespace === "phud") {
-      for (const [token, value] of phud) {
-        const prop = phudTokenProp(token);
-        if (!prop) continue;
-        const key = prop.startsWith("#") ? prop.slice(1) : prop;
-        el.props[key] = value;
-      }
-    }
-    for (const c of el.controls) walk(c.element);
-  };
-  walk(root);
-}
-
-/**
- * Hide tip chrome that the pack always mounts but the real client collapses
- * when its bound label is empty (quest-only `&_currency:` → no coin chip).
- *
- * @param root - Bound HUD tree.
- */
-function applyEmptyChromeQuirks(root: ResolvedElement): void {
-  const walk = (el: ResolvedElement, parent: ResolvedElement | null): void => {
-    if (el.namespace === "phud_currency" && el.name === "currency") {
-      let labelText = "";
-      for (const c of el.controls) {
-        if (c.element.type !== "label") continue;
-        const t = c.element.props.text;
-        if (typeof t === "string") labelText = t;
-      }
-      if (!labelText.trim()) {
-        el.props.visible = false;
-        if (parent) {
-          for (const c of parent.controls) {
-            if (c.element.name === "separator") c.element.props.visible = false;
-          }
-        }
-      }
-    }
-    for (const c of el.controls) walk(c.element, el);
-  };
-  walk(root, null);
 }
 
 /**

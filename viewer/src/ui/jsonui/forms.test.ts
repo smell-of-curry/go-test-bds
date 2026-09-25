@@ -11,7 +11,7 @@ import {
 } from "./collections.js";
 import { createFixtureUiClient } from "./fixtureClient.js";
 import {
-  FORM_FLAG_ROUTES,
+  type FormFlagRoute,
   collectBattleMoveRects,
   formBindingState,
   intersectingBattleMovePairs,
@@ -82,6 +82,11 @@ function battleFormSnapshot(): FormSnapshot {
   };
 }
 
+const SAMPLE_ROUTES: FormFlagRoute[] = [
+  { flag: "§b§a§t§l§e", screen: "battle.main" },
+  { flag: "§p§o§k§e", screen: "pokemon.main_panel" },
+];
+
 function walk(el: ResolvedElement, visit: (el: ResolvedElement) => void): void {
   visit(el);
   for (const c of el.controls) walk(c.element, visit);
@@ -89,12 +94,15 @@ function walk(el: ResolvedElement, visit: (el: ResolvedElement) => void): void {
 
 describe("routeForm", () => {
   it("maps battle flag to battle.main", () => {
-    const r = routeForm({
-      type: "action",
-      title: "§b§a§t§l§e§s§m",
-      content: "",
-      buttons: [],
-    });
+    const r = routeForm(
+      {
+        type: "action",
+        title: "§b§a§t§l§e§s§m",
+        content: "",
+        buttons: [],
+      },
+      SAMPLE_ROUTES,
+    );
     assert.equal(r.screen, "battle.main");
     assert.equal(r.namespace, "battle");
     assert.equal(r.name, "main");
@@ -114,12 +122,15 @@ describe("routeForm", () => {
   });
 
   it("maps pokemon flag to pokemon.main_panel (starter picker)", () => {
-    const r = routeForm({
-      type: "menu",
-      title: "§p§o§k§e§1",
-      content: "",
-      buttons: ["Bulbasaur"],
-    });
+    const r = routeForm(
+      {
+        type: "menu",
+        title: "§p§o§k§e§1",
+        content: "",
+        buttons: ["Bulbasaur"],
+      },
+      SAMPLE_ROUTES,
+    );
     assert.equal(r.screen, "pokemon.main_panel");
     assert.equal(r.flag, "§p§o§k§e");
     assert.equal(r.kind, "flag");
@@ -136,14 +147,17 @@ describe("routeForm", () => {
     assert.equal(r.kind, "custom_form");
   });
 
-  it("covers every documented flag route", () => {
-    for (const { flag, screen } of FORM_FLAG_ROUTES) {
-      const r = routeForm({
-        type: "action",
-        title: `${flag}extra`,
-        content: "",
-        buttons: [],
-      });
+  it("matches the first supplied flag route", () => {
+    for (const { flag, screen } of SAMPLE_ROUTES) {
+      const r = routeForm(
+        {
+          type: "action",
+          title: `${flag}extra`,
+          content: "",
+          buttons: [],
+        },
+        SAMPLE_ROUTES,
+      );
       assert.equal(r.screen, screen, flag);
     }
   });

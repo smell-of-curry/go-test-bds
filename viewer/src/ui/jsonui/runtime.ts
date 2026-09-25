@@ -34,22 +34,6 @@ const PRELOAD_TEXTURES = [
   "textures/ui/bg32",
 ] as const;
 
-/**
- * Textures the built-in `&_token:` HUD path warms. Skipped when an extension
- * sets `replaceBuiltins` (that module lists its own `preloadTextures`).
- */
-const BUILTIN_PACK_TEXTURES = [
-  "textures/ui/phud/oak_start",
-  "textures/ui/phud/oak_loop",
-  "textures/ui/phud/ringing",
-  "textures/ui/phud/standby",
-  "textures/ui/phud/box_small",
-  "textures/ui/phud/box_wide",
-  "textures/ui/sidebar/dock",
-  "textures/ui/sidebar/data",
-  "textures/ui/sidebar/ring",
-] as const;
-
 /** Options for {@link createJsonUiRuntime}. */
 export interface JsonUiRuntimeOptions {
   /** Origin serving `/packs`, `/pack/{id}/{path}`, `/asset/{path}`. */
@@ -285,7 +269,6 @@ export function createJsonUiRuntime(opts: JsonUiRuntimeOptions): JsonUiRuntime {
     // Nineslice / flipbook UV need sync size lookup on first paint.
     const preload = [
       ...PRELOAD_TEXTURES,
-      ...(extension?.replaceBuiltins ? [] : BUILTIN_PACK_TEXTURES),
       ...(extension?.preloadTextures ?? []),
     ];
     await Promise.all(preload.map((p) => preloadTextureInfo(p)));
@@ -305,6 +288,7 @@ export function createJsonUiRuntime(opts: JsonUiRuntimeOptions): JsonUiRuntime {
       lang,
       host: formsHost,
       guiScale,
+      formRoutes: extension?.formRoutes,
     });
     if (pendingState) {
       const state = pendingState;

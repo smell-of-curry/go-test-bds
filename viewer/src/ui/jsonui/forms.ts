@@ -1,8 +1,8 @@
 /**
  * Server-form routing + JSON UI rendering for ActionForm / ModalForm.
  *
- * Title-flag table mirrors `pokebedrock/server_form.json` → `ng_long_form`.
- * Unroutable / missing screens fall back to a plain panel (caller may also
+ * Title flags come from a viewer extension (`formRoutes`). Unroutable
+ * titles fall back to vanilla long/custom form (caller may also
  * keep `?debugForms=1` for the top-right debug UI).
  */
 
@@ -45,22 +45,11 @@ export interface FormSnapshot {
   buttonImages?: string[];
 }
 
-/** Flag → screen id (namespace.name). Order = match priority (first wins). */
-export const FORM_FLAG_ROUTES: ReadonlyArray<{
+/** Title flag → `namespace.name` screen. Supplied by a viewer extension. */
+export interface FormFlagRoute {
   flag: string;
   screen: string;
-}> = [
-  { flag: "§b§a§t§l§e", screen: "battle.main" },
-  { flag: "§p§o§k§e", screen: "pokemon.main_panel" },
-  { flag: "§d§e§d§e§t§k", screen: "pokedex.pokemon_details" },
-  { flag: "§d§e§k§x", screen: "pokedex.main_grid" },
-  { flag: "§p§c", screen: "pc.main" },
-  { flag: "§c§h§e§s§t", screen: "chest_ui.chest_panel" },
-  { flag: "§s§e§a§r§c", screen: "search_server_form.long_form" },
-  { flag: "§1§r", screen: "rotom_phone_first.blackbarbar_first" },
-  { flag: "§2§r", screen: "rotom_phone_second.blackbarbar_second" },
-  { flag: "§3§r", screen: "rotom_phone_third.blackbarbar_third" },
-];
+}
 
 export interface FormRoute {
   /** `"battle.main"` style. */
@@ -83,6 +72,8 @@ export interface FormRendererDeps {
   measureText?: MeasureText;
   /** Merged pack lang table for `localize: true` labels. */
   lang?: Readonly<Record<string, string>>;
+  /** Title-flag routes from a viewer extension. Empty uses vanilla forms only. */
+  formRoutes?: readonly FormFlagRoute[];
   /**
    * Texture size + nineslice map for dialogue chrome / portraits.
    * Prefer `assets.textureInfo`; this is a test/fixture override.
@@ -109,9 +100,12 @@ export interface FormRenderer {
  * @param form - Form snapshot.
  * @returns route descriptor.
  */
-export function routeForm(form: FormSnapshot): FormRoute {
+export function routeForm(
+  form: FormSnapshot,
+  routes: readonly FormFlagRoute[] = [],
+): FormRoute {
   const title = form.title ?? "";
-  for (const { flag, screen } of FORM_FLAG_ROUTES) {
+  for (const { flag, screen } of routes) {
     if (title.includes(flag)) {
       const [namespace, name] = splitScreen(screen);
       return { screen, namespace, name, flag, kind: "flag" };
@@ -185,8 +179,9 @@ export function prepareFormTree(
   resolver: UiResolver,
   form: FormSnapshot,
   extraGlobals: PropertyBag = {},
+  routes: readonly FormFlagRoute[] = [],
 ): { tree: ResolvedElement; route: FormRoute } | null {
-  const route = routeForm(form);
+  const route = routeForm(form, routes);
   const root = resolver.resolve(route.namespace, route.name);
   if (!root) return null;
   const { source, collections } = formBindingState(form);
@@ -233,11 +228,7 @@ export function patchDialogueChrome(tree: ResolvedElement): void {
     }
     if (el.name === "panel_indent") {
       const off = el.props.offset;
-      if (
-        Array.isArray(off) &&
-        off.length >= 2 &&
-        Number(off[1]) === 23
-      ) {
+      if (Array.isArray(off) && off.length >= 2 && Number(off[1]) === 23) {
         el.props.offset = [off[0], 28];
         const sz = el.props.size;
         if (Array.isArray(sz) && sz[1] === "100% - 31px") {
@@ -360,8 +351,7 @@ export function createFormRenderer(deps: FormRendererDeps): FormRenderer {
 
   /** `#json-hud` / `.jsonui-hud-host` that contains this forms host. */
   const hudRoot =
-    (host.closest("#json-hud, .jsonui-hud-host") as HTMLElement | null) ??
-    null;
+    (host.closest("#json-hud, .jsonui-hud-host") as HTMLElement | null) ?? null;
   let hudZBeforeForm: string | null = null;
 
   function setHudFormStacking(open: boolean): void {
@@ -427,7 +417,7 @@ export function createFormRenderer(deps: FormRendererDeps): FormRenderer {
 
   function showPlain(form: FormSnapshot): void {
     clear();
-    lastRoute = routeForm(form);
+    lastRoute = routeForm(form, deps.formRoutes);
     const wrap = document.createElement("div");
     wrap.className = "jh-form jsonui-form-fallback";
     wrap.hidden = false;
@@ -457,7 +447,7 @@ export function createFormRenderer(deps: FormRendererDeps): FormRenderer {
   function showEngine(form: FormSnapshot): boolean {
     // Dialogue / vanilla long_form only — battle + other flag screens keep
     // their own layout (another agent owns that path).
-    const routed = routeForm(form);
+    const routed = routeForm(form, deps.formRoutes);
     const dialogue =
       routed.kind === "long_form" || routed.kind === "custom_form";
     const prepared = prepareFormTree(

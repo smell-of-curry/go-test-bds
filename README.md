@@ -230,9 +230,11 @@ The directory needs a `manifest.json`:
 
 The hub serves it at `GET /extensions/…` and advertises it from `GET /viewer.json`
 (`{"extensions":"/extensions/"}`). An empty `extensions` string — the default
-when the flag is unset — keeps the built-in HUD path, including the historical
-`&_token:` title-channel quirks. A module that sets `replaceBuiltins: true`
-turns those quirks off and must supply whatever its pack still needs.
+when the flag is unset — hides `&_token:` titles on the plain HUD and paints
+JSON UI from the server's resource pack. Pack-specific title synthesis, bind
+quirks, and form-title routes belong in a module (`resolveTitle`, `onBind`,
+`formRoutes`). `replaceBuiltins: true` also skips the built-in control-token
+title hide so the module owns that chrome.
 
 Each module exports `viewerExtension` (or a default object):
 
@@ -244,7 +246,8 @@ Each module exports `viewerExtension` (or a default object):
 | `onBind(ctx)` | Mutate `ctx.props` after generic bind. `ctx` carries `name`, `namespace`, `authored` (`$variables`), `bindings`, `title`, `subtitle`, `actionBar`, `tokens`, `form`, `bot`, `vitals` |
 | `afterTree({ root, title, tokens })` | Walk the bound HUD tree once per frame, before layout |
 | `mount(host, api)` | DOM overlay. `api.onFrame(frame)` receives the same lanes: title, subtitle, actionBar, `tokens` (control-token map — custom sidebars arrive here, not as a vanilla scoreboard), `form`, `bot` (`name`, `position`, `dimension`), `vitals` |
-| `replaceBuiltins` | Skip built-in `&_token:` quirks |
+| `formRoutes` | `{ flag, screen }` pairs. First title-flag match picks a JSON UI screen (`namespace.name`). Absent → vanilla long/custom form |
+| `replaceBuiltins` | Skip the built-in hide of `&_token:` title chrome. The module's `afterTree` / `resolveTitle` own that pack |
 
 `tokens` is the latest `&_token:value` title write per token name (the `phud` stream event). Packs that do not use that convention see `{}`.
 

@@ -4,7 +4,11 @@
  */
 
 import type { WorldState } from "../store";
-import { parseWaypoint, relativeBearing, waypointDistance } from "./phud/parse";
+import {
+  parseWaypoint,
+  relativeBearing,
+  waypointDistance,
+} from "./waypointParse";
 import "./waypointStrip.css";
 
 /** Handle wired into the store subscriber (same shape as other overlays). */

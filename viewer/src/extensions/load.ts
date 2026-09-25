@@ -57,6 +57,7 @@ export function mergeViewerExtensions(
   const resolveTitle = modules.find((m) => m.resolveTitle)?.resolveTitle;
   return {
     replaceBuiltins: modules.some((m) => m.replaceBuiltins === true),
+    formRoutes: modules.flatMap((m) => (m.formRoutes ? [...m.formRoutes] : [])),
     preloadTextures: modules.flatMap((m) =>
       m.preloadTextures ? [...m.preloadTextures] : [],
     ),

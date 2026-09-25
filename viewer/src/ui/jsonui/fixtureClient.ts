@@ -17,10 +17,10 @@ import { parseLooseJson, type UiLoadClient, type UiPackInfo } from "./load";
  * @returns injectable load client.
  */
 export function createFixtureUiClient(fixturesRoot: string): UiLoadClient {
-  const packs: UiPackInfo[] = [
-    { id: "vanilla", priority: 0 },
-    { id: "pokebedrock", priority: 1 },
-  ];
+  const packs: UiPackInfo[] = [{ id: "vanilla", priority: 0 }];
+  if (existsSync(join(fixturesRoot, "pokebedrock"))) {
+    packs.push({ id: "pokebedrock", priority: 1 });
+  }
 
   return {
     async getPacks() {
