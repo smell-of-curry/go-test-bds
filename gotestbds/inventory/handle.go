@@ -125,14 +125,24 @@ func (source *Handle) String() string {
 }
 
 // ItemInstance returns protocol.ItemInstance.
+//
+// Prefers the stack the server sent. Rebuilding through the local item table
+// turns an unknown network id into air, and BDS then rejects the click because
+// the held stack does not match the hotbar slot.
 func (source *Handle) ItemInstance(slot int) (protocol.ItemInstance, error) {
 	s, err := source.stack(slot)
 	if err != nil {
 		return protocol.ItemInstance{}, err
 	}
+	if slot >= 0 && slot < len(source.raw) && source.raw[slot].ItemType.NetworkID != 0 {
+		return protocol.ItemInstance{
+			StackNetworkID: s.id,
+			Stack:          source.raw[slot],
+		}, nil
+	}
 	it := internal.InstanceFromItem(s.s)
 	it.StackNetworkID = s.id
-	return it, err
+	return it, nil
 }
 
 // Slots ...
