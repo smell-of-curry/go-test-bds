@@ -47,7 +47,7 @@
     "@typescript-eslint/eslint-plugin": "^8.65.0",
     "@typescript-eslint/parser": "^8.65.0",
     "esbuild": "^0.25.9",
-    "eslint": "^9.39.5",
+    "eslint": "^10.11.0",
     "eslint-plugin-import": "^2.31.0",
     "eslint-plugin-minecraft-linting": "^2.0.9",
     "husky": "^9.1.7",
