@@ -151,6 +151,18 @@ func (a *Actor) alignTick() {
 	}
 }
 
+// AnchorTick sets the wall-clock origin of the auth tick to when StartGame
+// arrived. tickBase stays StartGame.Time, so elapsed time since that packet
+// is the server's elapsed time, including spawn delay before the tick loop.
+//
+// @param startGameAt Receipt time of StartGame. Zero leaves the origin unchanged.
+func (a *Actor) AnchorTick(startGameAt time.Time) {
+	if startGameAt.IsZero() {
+		return
+	}
+	a.tickOrigin = startGameAt
+}
+
 // OnGround ...
 func (a *Actor) OnGround() bool {
 	return a.onGround

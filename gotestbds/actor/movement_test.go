@@ -132,4 +132,14 @@ func TestSendMovementCatchesTickUpToServer(t *testing.T) {
 	if got < 130 || got > 180 {
 		t.Fatalf("tick=%d want about 140 (2s of stalled loop at 50ms)", got)
 	}
+
+	conn.written = nil
+	a.tick = 500
+	a.tickBase = 500
+	a.AnchorTick(time.Now().Add(-3 * time.Second))
+	a.SendMovement()
+	got = authTick(t, conn)
+	if got < 550 || got > 600 {
+		t.Fatalf("tick=%d want about 560 (anchored at StartGame 3s ago)", got)
+	}
 }
