@@ -40,6 +40,14 @@ export interface BotState {
    * Set from the server's `SetActorLink`.
    */
   vehicleUniqueId?: number;
+  /** Actor tick sent on PlayerAuthInput. */
+  tick?: number;
+  /** CorrectPlayerMovePrediction packets received. */
+  correctCount?: number;
+  /** Self MovePlayer packets in reset or teleport mode. */
+  moveResetCount?: number;
+  /** Newest server tick seen on those movement packets. */
+  lastServerTick?: number;
 }
 
 /** One inventory slot, as the bot sees it. */

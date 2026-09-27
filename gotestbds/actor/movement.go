@@ -79,12 +79,41 @@ type movementData struct {
 	rideMove    mgl32.Vec2
 	rideMoveSet bool
 
+	// Server movement traces. Counters are read from the tick goroutine.
+	correctCount   int
+	moveResetCount int
+	lastServerTick uint64
+
 	mc *physics.Computer
 }
 
 // CurrentTick returns current tick of the actor
 func (a *Actor) CurrentTick() uint64 {
 	return a.tick
+}
+
+// NoteServerMovement records a server movement packet for diagnostics.
+//
+// @param correct True for CorrectPlayerMovePrediction.
+// @param reset True for a self MovePlayer in reset or teleport mode.
+// @param tick Server tick carried by the packet. Zero does not rewind lastServerTick.
+func (a *Actor) NoteServerMovement(correct, reset bool, tick uint64) {
+	if correct {
+		a.correctCount++
+	}
+	if reset {
+		a.moveResetCount++
+	}
+	if tick > a.lastServerTick {
+		a.lastServerTick = tick
+	}
+}
+
+// MovementTrace returns how many movement corrections the server has sent.
+//
+// @returns CorrectPlayerMovePrediction count, self reset/teleport MovePlayer count, newest server tick.
+func (a *Actor) MovementTrace() (correct, moveReset int, lastServerTick uint64) {
+	return a.correctCount, a.moveResetCount, a.lastServerTick
 }
 
 // OnGround ...

@@ -138,6 +138,23 @@ func TestMovePlayerTeleportAcksWithPlayerAuthInput(t *testing.T) {
 	if auth.Position.X() != dest.X() || auth.Position.Z() != dest.Z() {
 		t.Fatalf("PlayerAuthInput position=%v, want %v", auth.Position, dest)
 	}
+	_, resets, serverTick := a.MovementTrace()
+	if resets != 1 || serverTick != 0 {
+		t.Fatalf("teleport trace reset=%d tick=%d, want 1, 0", resets, serverTick)
+	}
+	err = (&MovePlayerHandler{}).Handle(&packet.MovePlayer{
+		EntityRuntimeID: 1,
+		Position:        dest,
+		Mode:            packet.MoveModeNormal,
+		Tick:            40,
+	}, nil, a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, resets, serverTick = a.MovementTrace()
+	if resets != 1 || serverTick != 40 {
+		t.Fatalf("normal move reset=%d tick=%d, want reset unchanged at 1 and tick 40", resets, serverTick)
+	}
 }
 
 // TestNetworkChunkPublisherUpdateRadiusIsInChunks covers the unit mismatch:

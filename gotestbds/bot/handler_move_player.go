@@ -45,6 +45,8 @@ func (*MovePlayerHandler) Handle(p packet.Packet, _ *Bot, a *actor.Actor) error 
 		}
 		return nil
 	}
+	reset := move.Mode == packet.MoveModeReset || move.Mode == packet.MoveModeTeleport
+	a.NoteServerMovement(false, reset, move.Tick)
 
 	feet := pos.Sub(mgl64.Vec3{0, eyeOffset})
 	a.Move(feet, rot)

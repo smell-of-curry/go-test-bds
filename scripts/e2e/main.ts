@@ -50,7 +50,8 @@ function emitCaseLines(result: RunResult): void {
     const observed = interactionDiagnostics.get(test.name);
     const events = observed
       ? ` events=beforeBlock:${observed.beforeBlock},afterBlock:${observed.afterBlock},` +
-        `beforeItemUse:${observed.beforeItemUse},afterItemUse:${observed.afterItemUse}`
+        `beforeItemUse:${observed.beforeItemUse},afterItemUse:${observed.afterItemUse}` +
+        (observed.click ? ` click=${observed.click}` : "")
       : "";
     console.warn(
       `GOTESTBDS_E2E_CASE: name=${JSON.stringify(test.name)} ` +

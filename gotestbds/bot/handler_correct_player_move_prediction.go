@@ -22,13 +22,14 @@ type CorrectPlayerMovePredictionHandler struct{}
 // NavigateToBlock hit context deadline with zero fruitless. MovePlayer
 // teleports still apply (different packet).
 func (*CorrectPlayerMovePredictionHandler) Handle(p packet.Packet, b *Bot, a *actor.Actor) error {
+	correct := p.(*packet.CorrectPlayerMovePrediction)
+	a.NoteServerMovement(true, false, correct.Tick)
 	if a.Navigating() {
 		return nil
 	}
 	if b != nil && b.logger != nil {
 		b.logger.Warn("mismatched movement", slog.String("src", "CorrectPlayerMovePrediction"))
 	}
-	correct := p.(*packet.CorrectPlayerMovePrediction)
 	pos := mcmath.Vec32To64(correct.Position)
 	rot := cube.Rotation{float64(correct.Rotation[0]), float64(correct.Rotation[1])}
 	feet := pos.Sub(mgl64.Vec3{0, eyeOffset})

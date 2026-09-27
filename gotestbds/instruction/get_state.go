@@ -22,6 +22,7 @@ func (g *GetState) Run(ctx context.Context, b *bot.Bot) error {
 	return execute(b, func(a *actor.Actor) error {
 		pos := a.Position()
 		yaw, pitch := a.Rotation().Elem()
+		correct, moveReset, serverTick := a.MovementTrace()
 		g.result = map[string]any{
 			"name":            a.Name(),
 			"xuid":            a.XUID(),
@@ -36,6 +37,10 @@ func (g *GetState) Run(ctx context.Context, b *bot.Bot) error {
 			"heldSlot":        a.HeldSlot(),
 			"sneaking":        a.Sneaking(),
 			"vehicleUniqueId": a.VehicleUniqueID(),
+			"tick":            a.CurrentTick(),
+			"correctCount":    correct,
+			"moveResetCount":  moveReset,
+			"lastServerTick":  serverTick,
 		}
 		return nil
 	})

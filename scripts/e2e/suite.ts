@@ -1,4 +1,4 @@
-import { ItemStack, world } from "@minecraft/server";
+import { ItemStack, system, world } from "@minecraft/server";
 import { ActionFormData, MessageFormData } from "@minecraft/server-ui";
 import {
   assert,
@@ -22,10 +22,83 @@ export interface InteractionDiagnostics {
   afterBlock: boolean;
   beforeItemUse: boolean;
   afterItemUse: boolean;
+  /** Server-vs-bot snapshot taken immediately before the click. */
+  click?: string;
 }
 
 /** Event observations printed by the CI fixture after the run. */
 export const interactionDiagnostics = new Map<string, InteractionDiagnostics>();
+
+function n2(value: number): string {
+  return Number.isFinite(value) ? value.toFixed(2) : "nan";
+}
+
+/**
+ * Snapshot taken at click time and printed on the CI case line.
+ *
+ * @param ctx Live test context.
+ * @param support Block the click targets.
+ * @returns Compact key=value fields for the case line.
+ */
+async function captureClickDiag(
+  ctx: TestContext,
+  support: { x: number; y: number; z: number },
+): Promise<string> {
+  const player = ctx.bot.player;
+  const loc = player.location;
+  const head = player.getHeadLocation();
+  const rot = player.getRotation();
+  const view = player.getViewDirection();
+  const target = {
+    x: support.x + 0.5,
+    y: support.y + 0.5,
+    z: support.z + 0.5,
+  };
+  const dx = head.x - target.x;
+  const dy = head.y - target.y;
+  const dz = head.z - target.z;
+  const dist = Math.hypot(dx, dy, dz);
+  const bot = await ctx.bot.getState();
+  return [
+    `srvPos=${n2(loc.x)},${n2(loc.y)},${n2(loc.z)}`,
+    `srvHead=${n2(head.x)},${n2(head.y)},${n2(head.z)}`,
+    `srvRot=${n2(rot.x)},${n2(rot.y)}`,
+    `srvView=${n2(view.x)},${n2(view.y)},${n2(view.z)}`,
+    `headDist=${n2(dist)}`,
+    `gm=${player.getGameMode()}`,
+    `perm=${player.playerPermissionLevel}/${player.commandPermissionLevel}`,
+    `onGround=${player.isOnGround}`,
+    `botPos=${n2(bot.position.x)},${n2(bot.position.y)},${n2(bot.position.z)}`,
+    `botRot=${n2(bot.rotation.yaw)},${n2(bot.rotation.pitch)}`,
+    `botOnGround=${bot.onGround}`,
+    `botTick=${bot.tick ?? "?"}`,
+    `srvTick=${system.currentTick}`,
+    `worldTime=${world.getAbsoluteTime()}`,
+    `correct=${bot.correctCount ?? "?"}`,
+    `moveReset=${bot.moveResetCount ?? "?"}`,
+    `lastServerTick=${bot.lastServerTick ?? "?"}`,
+  ].join(";");
+}
+
+/**
+ * Stores the click snapshot on the case that observeBlockInteraction armed.
+ *
+ * @param testName Case name used as the diagnostics key.
+ * @param ctx Live test context.
+ * @param support Block the click targets.
+ * @returns Nothing. The snapshot is stored on the case diagnostics.
+ */
+async function recordClick(
+  testName: string,
+  ctx: TestContext,
+  support: { x: number; y: number; z: number },
+): Promise<void> {
+  const observed = interactionDiagnostics.get(testName);
+  if (!observed) {
+    return;
+  }
+  observed.click = await captureClickDiag(ctx, support);
+}
 
 function observeBlockInteraction(
   ctx: TestContext,
@@ -287,6 +360,7 @@ export const protocolSuite: TestSuite = defineSuite({
         );
 
         observeBlockInteraction(ctx, testName, support);
+        await recordClick(testName, ctx, support);
         await ctx.bot.interactWithBlock(support);
         await assertEventually(
           () =>
@@ -318,6 +392,7 @@ export const protocolSuite: TestSuite = defineSuite({
           "minecraft:pig_spawn_egg",
         );
         observeBlockInteraction(ctx, testName, support);
+        await recordClick(testName, ctx, support);
         await ctx.bot.interactWithBlock(support);
         await assertEventually(
           () =>
@@ -358,6 +433,7 @@ export const protocolSuite: TestSuite = defineSuite({
         );
 
         observeBlockInteraction(ctx, testName, support);
+        await recordClick(testName, ctx, support);
         await ctx.bot.interactWithBlock(support);
         await assertEventually(() => seen, {
           timeoutMs: seconds(15),

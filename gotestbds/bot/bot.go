@@ -72,6 +72,25 @@ func (b *Bot) Close() error {
 	return nil
 }
 
+// LogMovementTrace writes server-vs-bot tick diagnostics at info level.
+//
+// Call from the tick goroutine. Nil logger is a no-op so tests stay quiet.
+//
+// @param reason Short label for the call site, e.g. "interactWithBlock".
+func (b *Bot) LogMovementTrace(reason string) {
+	if b.logger == nil || b.a == nil {
+		return
+	}
+	correct, resets, serverTick := b.a.MovementTrace()
+	b.logger.Info("GOTESTBDS_MOVE",
+		slog.String("at", reason),
+		slog.Int("correct", correct),
+		slog.Int("moveReset", resets),
+		slog.Uint64("serverTick", serverTick),
+		slog.Uint64("botTick", b.a.CurrentTick()),
+	)
+}
+
 // Closed is closed when Close has been called (or the tick loop is shutting down).
 //
 // @returns a receive-only channel that closes on shutdown.
