@@ -389,6 +389,20 @@ func (a *Actor) SendMovement() {
 		pk.VehicleRotation = protocol.Option(mgl32.Vec2{pitch, yaw})
 	}
 	_ = a.conn.WritePacket(pk)
+	// Script rotation stayed at spawn while PlayerAuthInput already carried
+	// the look, and the server Y did not follow a local fall. BDS no longer
+	// advertises movement mode; a client MovePlayer is what the older mode
+	// applies for facing and position.
+	_ = a.conn.WritePacket(&packet.MovePlayer{
+		EntityRuntimeID: a.RuntimeID(),
+		Position:        pk.Position,
+		Pitch:           pitch,
+		Yaw:             yaw,
+		HeadYaw:         yaw,
+		Mode:            packet.MoveModeNormal,
+		OnGround:        a.OnGround(),
+		Tick:            a.tick,
+	})
 }
 
 // VehicleUniqueID returns the ridden entity's unique id, or 0 when not riding.

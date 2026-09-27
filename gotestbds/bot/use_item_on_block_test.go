@@ -30,15 +30,19 @@ func TestLookAtSynchronisesRotationBeforeAction(t *testing.T) {
 
 	a.LookAt(a.EyePos().Add(mgl64.Vec3{1, 0, 0}))
 
-	if len(conn.written) != 1 {
-		t.Fatalf("packets = %d, want one PlayerAuthInput", len(conn.written))
+	if len(conn.written) != 2 {
+		t.Fatalf("packets = %d, want PlayerAuthInput and MovePlayer", len(conn.written))
 	}
 	auth, ok := conn.written[0].(*packet.PlayerAuthInput)
 	if !ok {
 		t.Fatalf("packet = %T, want PlayerAuthInput", conn.written[0])
 	}
-	if auth.Yaw != -90 || auth.InteractYaw != -90 {
-		t.Fatalf("yaw = %v, interact yaw = %v, want -90", auth.Yaw, auth.InteractYaw)
+	move, ok := conn.written[1].(*packet.MovePlayer)
+	if !ok {
+		t.Fatalf("packet = %T, want MovePlayer", conn.written[1])
+	}
+	if auth.Yaw != -90 || auth.InteractYaw != -90 || move.Yaw != -90 {
+		t.Fatalf("auth yaw = %v, interact yaw = %v, move yaw = %v, want -90", auth.Yaw, auth.InteractYaw, move.Yaw)
 	}
 	if !auth.InputData.Load(packet.InputFlagBlockBreakingDelayEnabled) {
 		t.Fatal("auth input missing block-breaking delay flag")
