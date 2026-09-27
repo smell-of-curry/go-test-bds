@@ -1,6 +1,8 @@
 package actor
 
 import (
+	"time"
+
 	"github.com/df-mc/dragonfly/server/block/cube"
 	dfworld "github.com/df-mc/dragonfly/server/world"
 	"github.com/google/uuid"
@@ -54,6 +56,9 @@ func (c Config) New() (actor *Actor) {
 	}
 
 	data.movementBitset = protocol.NewInputFlags(packet.InputFlagCount)
+	data.tick = uint64(gameData.Time)
+	data.tickBase = data.tick
+	data.tickOrigin = time.Now()
 
 	data.mc = &physics.Computer{
 		Gravity:           0.08,

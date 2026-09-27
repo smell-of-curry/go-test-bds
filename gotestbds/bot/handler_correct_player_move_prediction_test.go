@@ -37,6 +37,7 @@ func TestCorrectPlayerMovePredictionUsesEyeOffset(t *testing.T) {
 	err := (&CorrectPlayerMovePredictionHandler{}).Handle(&packet.CorrectPlayerMovePrediction{
 		Position: eyes,
 		Rotation: [2]float32{90, 0},
+		Tick:     77,
 	}, &Bot{logger: nil}, a)
 	if err != nil {
 		t.Fatal(err)
@@ -48,6 +49,10 @@ func TestCorrectPlayerMovePredictionUsesEyeOffset(t *testing.T) {
 	}
 	if a.Position().X() != 12.5 || a.Position().Z() != 14.5 {
 		t.Fatalf("feet XZ=%v,%v want 12.5,14.5", a.Position().X(), a.Position().Z())
+	}
+	correct, resets, serverTick := a.MovementTrace()
+	if correct != 1 || resets != 0 || serverTick != 77 {
+		t.Fatalf("trace correct=%d reset=%d tick=%d, want 1, 0, 77", correct, resets, serverTick)
 	}
 }
 
@@ -87,5 +92,9 @@ func TestCorrectIgnoredWhileNavigating(t *testing.T) {
 	}
 	if a.Position() != before {
 		t.Fatalf("Correct moved actor while navigating: %v → %v", before, a.Position())
+	}
+	correct, _, _ := a.MovementTrace()
+	if correct != 1 {
+		t.Fatalf("ignored correct count=%d, want 1", correct)
 	}
 }

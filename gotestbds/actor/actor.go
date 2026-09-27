@@ -337,20 +337,11 @@ func (a *Actor) NearestEntity(filter func(e world.Entity) bool) (world.Entity, f
 
 // LookAt makes Actor look at the point.
 func (a *Actor) LookAt(point mgl64.Vec3) {
-	pos := a.EyePos()
-	horizontal := math.Sqrt(math.Pow(point.X()-pos.X(), 2) + math.Pow(point.Z()-pos.Z(), 2))
-	vertical := point.Y() - (pos.Y())
-	pitch := -math.Atan2(vertical, horizontal) * 180 / math.Pi
-
-	xDist := point.X() - pos.X()
-	zDist := point.Z() - pos.Z()
-
-	yaw := math.Atan2(zDist, xDist)*180/math.Pi - 90
-	if yaw < 0 {
-		yaw += 360.0
-	}
-
-	a.Move(a.Position(), cube.Rotation{yaw, pitch})
+	a.Move(a.Position(), mcmath.VectorToRotation(point.Sub(a.EyePos())))
+	// Item interactions are checked against the last rotation BDS received.
+	// Flush the new aim before the caller sends its click transaction.
+	a.SendMovement()
+	a.tick++
 }
 
 // LookAtBlock makes Actor look at the block position passed.
@@ -559,17 +550,6 @@ func (a *Actor) UseItem() error {
 	return a.useItem(action)
 }
 
-// clampClick keeps a face coordinate strictly inside the block.
-func clampClick(v float64) float64 {
-	if v <= 0 {
-		return 0.01
-	}
-	if v >= 1 {
-		return 0.99
-	}
-	return v
-}
-
 // UseItemOnBlock uses item in heldSlot on the block.
 func (a *Actor) UseItemOnBlock(pos cube.Pos, face cube.Face, clickPos mgl64.Vec3) error {
 	_, err := a.AbleToInteractWithBlock(a.world.Block(pos), pos)
@@ -592,11 +572,22 @@ func (a *Actor) UseItemOnBlock(pos cube.Pos, face cube.Face, clickPos mgl64.Vec3
 		face = hitFace
 		clickPos = hitPoint.Sub(pos.Vec3())
 	}
-	// A click exactly on the block boundary (y=1 on the top face) is rejected
-	// by BDS and never becomes playerInteractWithBlock.
-	clickPos = mgl64.Vec3{clampClick(clickPos[0]), clampClick(clickPos[1]), clampClick(clickPos[2])}
 	blockRuntimeID, _ := a.world.NetworkBlockRuntimeID(pos, 0)
+	predictedItem := heldItem
+	if a.Gamemode() != 1 && predictedItem.Stack.BlockRuntimeID != 0 && predictedItem.Stack.Count > 0 {
+		predictedItem.Stack.Count--
+		if predictedItem.Stack.Count == 0 {
+			predictedItem = protocol.ItemInstance{}
+		}
+	}
 	action := &protocol.UseItemTransactionData{
+		Actions: []protocol.InventoryAction{{
+			SourceType:    protocol.InventoryActionSourceContainer,
+			WindowID:      protocol.Option(int8(protocol.WindowIDInventory)),
+			InventorySlot: uint32(a.heldSlot),
+			OldItem:       heldItem,
+			NewItem:       predictedItem,
+		}},
 		HotBarSlot:       int32(a.heldSlot),
 		HeldItem:         heldItem,
 		ActionType:       protocol.UseItemActionClickBlock,
@@ -604,15 +595,27 @@ func (a *Actor) UseItemOnBlock(pos cube.Pos, face cube.Face, clickPos mgl64.Vec3
 		BlockPosition:    posToProtocol(pos),
 		BlockFace:        int32(face),
 		ClickedPosition:  mcmath.Vec64To32(clickPos),
-		Position:         mcmath.Vec64To32(a.EyePos()),
+		Position:         mcmath.Vec64To32(a.Position()),
 		BlockRuntimeID:   blockRuntimeID,
 		ClientPrediction: protocol.ClientPredictionSuccess,
 	}
-	// The click goes out on the next PlayerAuthInput (PerformItemInteraction).
-	// A separate StartItemUseOn beforehand makes BDS treat that auth input as
-	// a hold-repeat (isFirstEvent false), and the claim handler cancels it.
-	a.pendingItemUse = action
-	return a.useItem(action)
+	if err := a.conn.WritePacket(&packet.PlayerAction{
+		EntityRuntimeID: a.RuntimeID(),
+		ActionType:      protocol.PlayerActionStartItemUseOn,
+		BlockPosition:   posToProtocol(pos),
+		ResultPosition:  posToProtocol(pos.Side(face)),
+		BlockFace:       int32(face),
+	}); err != nil {
+		return err
+	}
+	if err := a.useItem(action); err != nil {
+		return err
+	}
+	return a.conn.WritePacket(&packet.PlayerAction{
+		EntityRuntimeID: a.RuntimeID(),
+		ActionType:      protocol.PlayerActionStopItemUseOn,
+		BlockPosition:   posToProtocol(pos),
+	})
 }
 
 // ReleaseItem stops using held item.

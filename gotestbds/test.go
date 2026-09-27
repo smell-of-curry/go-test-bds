@@ -3,9 +3,11 @@ package gotestbds
 import (
 	"context"
 	"log/slog"
+	"net"
 	"time"
 
 	"github.com/sandertv/gophertunnel/minecraft"
+	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/actor"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/bot"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/instruction"
@@ -63,6 +65,16 @@ func (t *Test) RunCtx(ctx context.Context) error {
 	}
 
 	t.Logger.Debug("dialing", "address", t.RemoteAddress)
+	prevPacket := t.Dialer.PacketFunc
+	var startGameAt time.Time
+	t.Dialer.PacketFunc = func(header packet.Header, payload []byte, src, dst net.Addr) {
+		if header.PacketID == packet.IDStartGame && startGameAt.IsZero() {
+			startGameAt = time.Now()
+		}
+		if prevPacket != nil {
+			prevPacket(header, payload, src, dst)
+		}
+	}
 	conn, err := t.Dialer.DialContext(ctx, "raknet", t.RemoteAddress)
 	if err != nil {
 		return err
@@ -89,6 +101,10 @@ func (t *Test) RunCtx(ctx context.Context) error {
 	b := bot.NewBot(conn, t.Logger.With("src", "bot"))
 	h := NewTestingHandler(b, t)
 	b.Execute(func(a *actor.Actor) {
+		// StartGame.Time is the clock at that packet. Actor creation is
+		// later (chunk gen, the 2s move delay), so anchoring here covers
+		// the ticks the loop never saw.
+		a.AnchorTick(startGameAt)
 		a.Handle(h)
 	})
 

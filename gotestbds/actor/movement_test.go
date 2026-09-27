@@ -2,11 +2,13 @@ package actor
 
 import (
 	"testing"
+	"time"
 
 	"github.com/df-mc/dragonfly/server/world"
 	"github.com/df-mc/dragonfly/server/world/chunk"
 	"github.com/go-gl/mathgl/mgl32"
 	"github.com/go-gl/mathgl/mgl64"
+	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 	botworld "github.com/smell-of-curry/go-test-bds/gotestbds/world"
 )
 
@@ -63,5 +65,81 @@ func TestMoveAccumulatesDeltaBeforePositionUpdate(t *testing.T) {
 	}
 	if !a.Position().ApproxEqual(dest) {
 		t.Fatalf("position=%v want %v", a.Position(), dest)
+	}
+}
+
+// tickRecordingConn records outbound packets so auth-input tick can be asserted.
+type tickRecordingConn struct {
+	navStubConn
+	written []packet.Packet
+}
+
+func (c *tickRecordingConn) WritePacket(pk packet.Packet) error {
+	c.written = append(c.written, pk)
+	return nil
+}
+
+func authTick(t *testing.T, conn *tickRecordingConn) uint64 {
+	t.Helper()
+	for i := len(conn.written) - 1; i >= 0; i-- {
+		if pk, ok := conn.written[i].(*packet.PlayerAuthInput); ok {
+			return pk.Tick
+		}
+	}
+	t.Fatal("no PlayerAuthInput written")
+	return 0
+}
+
+// TestSendMovementCatchesTickUpToServer: a tick loop that starts late must
+// not keep sending StartGame.Time. BDS drops stale PlayerAuthInput, which
+// leaves the server rotation at spawn.
+func TestSendMovementCatchesTickUpToServer(t *testing.T) {
+	conn := &tickRecordingConn{navStubConn: navStubConn{pos: mgl32.Vec3{1, 64, 1}}}
+	a := Config{Conn: conn}.New()
+	conn.written = nil
+
+	a.SetWorldTime(1180)
+	a.SendMovement()
+	if got := authTick(t, conn); got != 1180 {
+		t.Fatalf("tick=%d want 1180 (world time ahead of the local counter)", got)
+	}
+
+	conn.written = nil
+	a.tick = 2000
+	a.SetWorldTime(1100)
+	a.SendMovement()
+	if got := authTick(t, conn); got != 2000 {
+		t.Fatalf("tick=%d want 2000 (must not rewind behind a later local tick)", got)
+	}
+
+	conn.written = nil
+	a.tick = 1000
+	a.NoteServerMovement(false, false, 1500)
+	a.SetWorldTime(9000)
+	a.SendMovement()
+	if got := authTick(t, conn); got != 1500 {
+		t.Fatalf("tick=%d want 1500 (movement packet tick wins over world time)", got)
+	}
+
+	conn.written = nil
+	a.lastServerTick = 0
+	a.worldTime = nil
+	a.tick = 100
+	a.tickBase = 100
+	a.tickOrigin = time.Now().Add(-2 * time.Second)
+	a.SendMovement()
+	got := authTick(t, conn)
+	if got < 130 || got > 180 {
+		t.Fatalf("tick=%d want about 140 (2s of stalled loop at 50ms)", got)
+	}
+
+	conn.written = nil
+	a.tick = 500
+	a.tickBase = 500
+	a.AnchorTick(time.Now().Add(-3 * time.Second))
+	a.SendMovement()
+	got = authTick(t, conn)
+	if got < 550 || got > 600 {
+		t.Fatalf("tick=%d want about 560 (anchored at StartGame 3s ago)", got)
 	}
 }

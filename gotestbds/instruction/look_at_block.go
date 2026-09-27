@@ -20,8 +20,11 @@ func (*LookAtBlock) Name() string {
 
 // Run is the function that runs the instruction.
 func (l *LookAtBlock) Run(ctx context.Context, b *bot.Bot) error {
-	return execute(b, func(a *actor.Actor) error {
+	if err := execute(b, func(a *actor.Actor) error {
 		a.LookAtBlock(cube.Pos(l.Pos))
 		return nil
-	})
+	}); err != nil {
+		return err
+	}
+	return waitForLookToSettle(ctx)
 }

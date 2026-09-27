@@ -30,10 +30,6 @@ type movementData struct {
 
 	sneaking, sprinting, swimming, crawling, gliding, immobile, onGround bool
 	movementBitset                                                       protocol.InputFlags
-	// pendingItemUse rides the next PlayerAuthInput. BDS 1.26 ignores a
-	// standalone InventoryTransaction click unless that tick's auth input
-	// carries the same UseItem data under PerformItemInteraction.
-	pendingItemUse *protocol.UseItemTransactionData
 
 	path             *pathfind.Path
 	navigationTarget cube.Pos
@@ -83,12 +79,91 @@ type movementData struct {
 	rideMove    mgl32.Vec2
 	rideMoveSet bool
 
+	// Server movement traces. Counters are read from the tick goroutine.
+	correctCount   int
+	moveResetCount int
+	lastServerTick uint64
+
+	// tickBase + tickOrigin estimate the server tick when the loop stalls.
+	// CI missed ~300 ticks while SubChunk decoding blocked the loop; the
+	// counter then stayed a constant offset behind world time.
+	tickBase   uint64
+	tickOrigin time.Time
+
+	abilityNote  string
+	loadingAcked bool
+
 	mc *physics.Computer
 }
 
 // CurrentTick returns current tick of the actor
 func (a *Actor) CurrentTick() uint64 {
 	return a.tick
+}
+
+// NoteServerMovement records a server movement packet for diagnostics.
+//
+// @param correct True for CorrectPlayerMovePrediction.
+// @param reset True for a self MovePlayer in reset or teleport mode.
+// @param tick Server tick carried by the packet. Zero does not rewind lastServerTick.
+func (a *Actor) NoteServerMovement(correct, reset bool, tick uint64) {
+	if correct {
+		a.correctCount++
+	}
+	if reset {
+		a.moveResetCount++
+	}
+	if tick > a.lastServerTick {
+		a.lastServerTick = tick
+	}
+}
+
+// MovementTrace returns how many movement corrections the server has sent.
+//
+// @returns CorrectPlayerMovePrediction count, self reset/teleport MovePlayer count, newest server tick.
+func (a *Actor) MovementTrace() (correct, moveReset int, lastServerTick uint64) {
+	return a.correctCount, a.moveResetCount, a.lastServerTick
+}
+
+// alignTick catches PlayerAuthInput.Tick up to the newest server clock.
+//
+// The counter starts at StartGame.Time and only advances while the tick loop
+// runs. CI stalled on SubChunk decode (23 ticks in 5s) and then stayed ~300
+// ticks behind world time. BDS drops that stale input, so server rotation
+// stays at the spawn yaw.
+//
+// A movement-packet tick wins. Otherwise the tick is StartGame.Time plus
+// wall-clock time since spawn, so a stalled loop catches up in one packet.
+func (a *Actor) alignTick() {
+	if a.lastServerTick > a.tick {
+		a.tick = a.lastServerTick
+		return
+	}
+	if !a.tickOrigin.IsZero() {
+		elapsed := uint64(time.Since(a.tickOrigin) / (time.Millisecond * 50))
+		if estimated := a.tickBase + elapsed; estimated > a.tick {
+			a.tick = estimated
+		}
+	}
+	if a.lastServerTick != 0 {
+		return
+	}
+	t, ok := a.WorldTime()
+	if ok && t > 0 && uint64(t) > a.tick {
+		a.tick = uint64(t)
+	}
+}
+
+// AnchorTick sets the wall-clock origin of the auth tick to when StartGame
+// arrived. tickBase stays StartGame.Time, so elapsed time since that packet
+// is the server's elapsed time, including spawn delay before the tick loop.
+//
+// @param startGameAt Receipt time of StartGame. Zero leaves the origin unchanged.
+func (a *Actor) AnchorTick(startGameAt time.Time) {
+	if startGameAt.IsZero() {
+		return
+	}
+	a.tickOrigin = startGameAt
 }
 
 // OnGround ...
@@ -247,6 +322,13 @@ func (a *Actor) Immobile() bool {
 
 // fillMovementBitset ...
 func (a *Actor) fillMovementBitset() {
+	a.movementBitset.Set(packet.InputFlagBlockBreakingDelayEnabled)
+	a.movementBitset.Set(packet.InputFlagClientAckServerData)
+	if a.OnGround() {
+		a.movementBitset.Set(packet.InputFlagVerticalCollision)
+	} else {
+		a.movementBitset.Unset(packet.InputFlagVerticalCollision)
+	}
 	if a.Sneaking() {
 		a.movementBitset.Set(packet.InputFlagSneaking)
 	}
@@ -284,6 +366,7 @@ func (a *Actor) SendMovement() {
 	}
 
 	a.fillMovementBitset()
+	a.alignTick()
 	pk := &packet.PlayerAuthInput{
 		Pitch:             pitch,
 		Yaw:               yaw,
@@ -291,7 +374,7 @@ func (a *Actor) SendMovement() {
 		MoveVector:        moveVector.Normalize(),
 		HeadYaw:           yaw,
 		InputData:         a.movementBitset,
-		InputMode:         packet.InputModeTouch,
+		InputMode:         packet.InputModeMouse,
 		InteractionModel:  packet.InteractionModelTouch,
 		InteractPitch:     pitch,
 		InteractYaw:       yaw,
@@ -308,13 +391,21 @@ func (a *Actor) SendMovement() {
 		pk.ClientPredictedVehicle = protocol.Option(a.vehicleUniqueID)
 		pk.VehicleRotation = protocol.Option(mgl32.Vec2{pitch, yaw})
 	}
-	if a.pendingItemUse != nil {
-		a.pendingItemUse.Position = pk.Position
-		pk.InputData.Set(packet.InputFlagPerformItemInteraction)
-		pk.ItemInteractionData = protocol.Option(*a.pendingItemUse)
-		a.pendingItemUse = nil
-	}
 	_ = a.conn.WritePacket(pk)
+	// Script rotation stayed at spawn while PlayerAuthInput already carried
+	// the look, and the server Y did not follow a local fall. BDS no longer
+	// advertises movement mode; a client MovePlayer is what the older mode
+	// applies for facing and position.
+	_ = a.conn.WritePacket(&packet.MovePlayer{
+		EntityRuntimeID: a.RuntimeID(),
+		Position:        pk.Position,
+		Pitch:           pitch,
+		Yaw:             yaw,
+		HeadYaw:         yaw,
+		Mode:            packet.MoveModeNormal,
+		OnGround:        a.OnGround(),
+		Tick:            a.tick,
+	})
 }
 
 // VehicleUniqueID returns the ridden entity's unique id, or 0 when not riding.

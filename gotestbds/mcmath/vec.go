@@ -43,10 +43,6 @@ func VectorToRotation(direction mgl64.Vec3) cube.Rotation {
 	pitch := -math.Atan2(dir.Y(), horizontal) * 180 / math.Pi
 
 	yaw := math.Atan2(dir.Z(), dir.X())*180/math.Pi - 90
-	if yaw < 0 {
-		yaw += 360.0
-	}
-
 	return cube.Rotation{yaw, pitch}
 }
 
