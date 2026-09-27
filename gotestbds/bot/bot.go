@@ -307,6 +307,7 @@ func (b *Bot) registerHandlers() {
 		packet.IDItemStackResponse:           &ItemStackResponseHandler{},
 		packet.IDMobEffect:                   &MobEffectHandler{},
 		packet.IDUpdateAttributes:            &UpdateAttributesHandler{},
+		packet.IDUpdateAbilities:             &UpdateAbilitiesHandler{},
 		packet.IDCorrectPlayerMovePrediction: &CorrectPlayerMovePredictionHandler{},
 		packet.IDRemoveActor:                 &RemoveActorHandler{},
 		packet.IDActorEvent:                  &ActorEventHandler{},

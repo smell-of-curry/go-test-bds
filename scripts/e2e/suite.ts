@@ -77,6 +77,8 @@ async function captureClickDiag(
     `correct=${bot.correctCount ?? "?"}`,
     `moveReset=${bot.moveResetCount ?? "?"}`,
     `lastServerTick=${bot.lastServerTick ?? "?"}`,
+    `metaImmobile=${bot.metaImmobile ?? "?"}`,
+    `ability=${bot.ability ?? "none"}`,
   ].join(";");
 }
 

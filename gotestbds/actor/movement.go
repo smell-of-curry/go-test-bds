@@ -90,6 +90,9 @@ type movementData struct {
 	tickBase   uint64
 	tickOrigin time.Time
 
+	abilityNote  string
+	loadingAcked bool
+
 	mc *physics.Computer
 }
 

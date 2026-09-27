@@ -48,6 +48,10 @@ export interface BotState {
   moveResetCount?: number;
   /** Newest server tick seen on those movement packets. */
   lastServerTick?: number;
+  /** Entity-metadata immobile flag from SetActorData. */
+  metaImmobile?: boolean;
+  /** Compact UpdateAbilities snapshot. */
+  ability?: string;
 }
 
 /** One inventory slot, as the bot sees it. */
