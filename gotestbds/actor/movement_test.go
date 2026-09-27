@@ -2,6 +2,7 @@ package actor
 
 import (
 	"testing"
+	"time"
 
 	"github.com/df-mc/dragonfly/server/world"
 	"github.com/df-mc/dragonfly/server/world/chunk"
@@ -118,5 +119,17 @@ func TestSendMovementCatchesTickUpToServer(t *testing.T) {
 	a.SendMovement()
 	if got := authTick(t, conn); got != 1500 {
 		t.Fatalf("tick=%d want 1500 (movement packet tick wins over world time)", got)
+	}
+
+	conn.written = nil
+	a.lastServerTick = 0
+	a.worldTime = nil
+	a.tick = 100
+	a.tickBase = 100
+	a.tickOrigin = time.Now().Add(-2 * time.Second)
+	a.SendMovement()
+	got := authTick(t, conn)
+	if got < 130 || got > 180 {
+		t.Fatalf("tick=%d want about 140 (2s of stalled loop at 50ms)", got)
 	}
 }

@@ -84,6 +84,12 @@ type movementData struct {
 	moveResetCount int
 	lastServerTick uint64
 
+	// tickBase + tickOrigin estimate the server tick when the loop stalls.
+	// CI missed ~300 ticks while SubChunk decoding blocked the loop; the
+	// counter then stayed a constant offset behind world time.
+	tickBase   uint64
+	tickOrigin time.Time
+
 	mc *physics.Computer
 }
 
@@ -119,14 +125,22 @@ func (a *Actor) MovementTrace() (correct, moveReset int, lastServerTick uint64) 
 // alignTick catches PlayerAuthInput.Tick up to the newest server clock.
 //
 // The counter starts at StartGame.Time and only advances while the tick loop
-// runs. A late start leaves a constant lag (CI: bot 935, world time 1180).
-// BDS drops those stale inputs, so the server rotation stays at spawn.
-// A movement-packet tick wins over world time: on a long-lived world those
-// clocks diverge, and only the movement tick is what CorrectPlayerMovePrediction uses.
+// runs. CI stalled on SubChunk decode (23 ticks in 5s) and then stayed ~300
+// ticks behind world time. BDS drops that stale input, so server rotation
+// stays at the spawn yaw.
+//
+// A movement-packet tick wins. Otherwise the tick is StartGame.Time plus
+// wall-clock time since spawn, so a stalled loop catches up in one packet.
 func (a *Actor) alignTick() {
 	if a.lastServerTick > a.tick {
 		a.tick = a.lastServerTick
 		return
+	}
+	if !a.tickOrigin.IsZero() {
+		elapsed := uint64(time.Since(a.tickOrigin) / (time.Millisecond * 50))
+		if estimated := a.tickBase + elapsed; estimated > a.tick {
+			a.tick = estimated
+		}
 	}
 	if a.lastServerTick != 0 {
 		return
