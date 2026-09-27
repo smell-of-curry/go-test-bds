@@ -116,6 +116,27 @@ func (a *Actor) MovementTrace() (correct, moveReset int, lastServerTick uint64) 
 	return a.correctCount, a.moveResetCount, a.lastServerTick
 }
 
+// alignTick catches PlayerAuthInput.Tick up to the newest server clock.
+//
+// The counter starts at StartGame.Time and only advances while the tick loop
+// runs. A late start leaves a constant lag (CI: bot 935, world time 1180).
+// BDS drops those stale inputs, so the server rotation stays at spawn.
+// A movement-packet tick wins over world time: on a long-lived world those
+// clocks diverge, and only the movement tick is what CorrectPlayerMovePrediction uses.
+func (a *Actor) alignTick() {
+	if a.lastServerTick > a.tick {
+		a.tick = a.lastServerTick
+		return
+	}
+	if a.lastServerTick != 0 {
+		return
+	}
+	t, ok := a.WorldTime()
+	if ok && t > 0 && uint64(t) > a.tick {
+		a.tick = uint64(t)
+	}
+}
+
 // OnGround ...
 func (a *Actor) OnGround() bool {
 	return a.onGround
@@ -316,6 +337,7 @@ func (a *Actor) SendMovement() {
 	}
 
 	a.fillMovementBitset()
+	a.alignTick()
 	pk := &packet.PlayerAuthInput{
 		Pitch:             pitch,
 		Yaw:               yaw,
