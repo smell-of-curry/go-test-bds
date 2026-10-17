@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>JSON UI probe</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        width: 100%;
+        height: 100%;
+        background: #000;
+        overflow: hidden;
+      }
+      #json-hud {
+        position: fixed;
+        inset: 0;
+      }
+      @font-face {
+        font-family: "Minecraft";
+        src: url("/font/Mojangles.ttf") format("truetype");
+        font-display: block;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="json-hud" class="jsonui-hud-host"></div>
+    <script type="module" src="./probe-page.ts"></script>
+  </body>
+</html>

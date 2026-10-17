@@ -1,0 +1,2869 @@
+{
+  "namespace": "probe",
+  "root": {
+    "type": "panel",
+    "size": [
+      "100%",
+      "100%"
+    ],
+    "controls": [
+      {
+        "bg@probe.bg": {}
+      },
+      {
+        "cell_a@probe.cell_a": {}
+      },
+      {
+        "cell_b@probe.cell_b": {}
+      },
+      {
+        "cell_c@probe.cell_c": {}
+      },
+      {
+        "cell_d@probe.cell_d": {}
+      },
+      {
+        "cell_e@probe.cell_e": {}
+      },
+      {
+        "cell_f@probe.cell_f": {}
+      },
+      {
+        "cell_g@probe.cell_g": {}
+      },
+      {
+        "cell_h@probe.cell_h": {}
+      },
+      {
+        "cell_i@probe.cell_i": {}
+      },
+      {
+        "cell_j@probe.cell_j": {}
+      },
+      {
+        "cell_k@probe.cell_k": {}
+      },
+      {
+        "cell_l@probe.cell_l": {}
+      },
+      {
+        "cell_m1@probe.cell_m1": {}
+      },
+      {
+        "cell_m2@probe.cell_m2": {}
+      },
+      {
+        "cell_m3@probe.cell_m3": {}
+      },
+      {
+        "cell_m4@probe.cell_m4": {}
+      },
+      {
+        "cell_m5@probe.cell_m5": {}
+      },
+      {
+        "cell_m6@probe.cell_m6": {}
+      },
+      {
+        "cell_m7@probe.cell_m7": {}
+      },
+      {
+        "cell_m8@probe.cell_m8": {}
+      },
+      {
+        "cell_m9@probe.cell_m9": {}
+      }
+    ],
+    "anchor_from": "top_left",
+    "anchor_to": "top_left"
+  },
+  "bg": {
+    "type": "image",
+    "texture": "textures/probe/black",
+    "size": [
+      "100%",
+      "100%"
+    ],
+    "layer": 0,
+    "keep_ratio": false,
+    "anchor_from": "top_left",
+    "anchor_to": "top_left"
+  },
+  "cell_a": {
+    "type": "panel",
+    "offset": [
+      4,
+      4
+    ],
+    "size": [
+      188,
+      44
+    ],
+    "layer": 1,
+    "controls": [
+      {
+        "title": {
+          "type": "label",
+          "text": "A keep false | true | omit",
+          "shadow": false,
+          "color": [
+            1,
+            1,
+            1
+          ],
+          "size": [
+            "100%",
+            8
+          ],
+          "offset": [
+            0,
+            0
+          ],
+          "anchor_from": "top_left",
+          "anchor_to": "top_left"
+        }
+      },
+      {
+        "keep_false": {
+          "type": "image",
+          "texture": "textures/probe/checker16x32",
+          "size": [
+            60,
+            30
+          ],
+          "offset": [
+            0,
+            10
+          ],
+          "keep_ratio": false,
+          "anchor_from": "top_left",
+          "anchor_to": "top_left"
+        }
+      },
+      {
+        "keep_true": {
+          "type": "image",
+          "texture": "textures/probe/checker16x32",
+          "size": [
+            60,
+            30
+          ],
+          "offset": [
+            64,
+            10
+          ],
+          "keep_ratio": true,
+          "anchor_from": "top_left",
+          "anchor_to": "top_left"
+        }
+      },
+      {
+        "keep_omit": {
+          "type": "image",
+          "texture": "textures/probe/checker16x32",
+          "size": [
+            60,
+            30
+          ],
+          "offset": [
+            128,
+            10
+          ],
+          "anchor_from": "top_left",
+          "anchor_to": "top_left"
+        }
+      }
+    ],
+    "anchor_from": "top_left",
+    "anchor_to": "top_left"
+  },
+  "cell_b": {
+    "type": "panel",
+    "offset": [
+      4,
+      52
+    ],
+    "size": [
+      188,
+      74
+    ],
+    "layer": 1,
+    "controls": [
+      {
+        "title": {
+          "type": "label",
+          "text": "B 50% | 50%x | 50%c",
+          "shadow": false,
+          "color": [
+            1,
+            1,
+            1
+          ],
+          "size": [
+            "100%",
+            8
+          ],
+          "offset": [
+            0,
+            0
+          ],
+          "anchor_from": "top_left",
+          "anchor_to": "top_left"
+        }
+      },
+      {
+        "off_pct": {
+          "type": "image",
+          "texture": "textures/probe/solid",
+          "color": [
+            0.3,
+            0.3,
+            0.3
+          ],
+          "size": [
+            60,
+            60
+          ],
+          "offset": [
+            0,
+            12
+          ],
+          "controls": [
+            {
+              "mark": {
+                "type": "image",
+                "texture": "textures/probe/solid",
+                "color": [
+                  1,
+                  0,
+                  0
+                ],
+                "size": [
+                  10,
+                  10
+                ],
+                "offset": [
+                  "50%",
+                  0
+                ],
+                "anchor_from": "top_left",
+                "anchor_to": "top_left"
+              }
+            }
+          ],
+          "anchor_from": "top_left",
+          "anchor_to": "top_left"
+        }
+      },
+      {
+        "off_x": {
+          "type": "image",
+          "texture": "textures/probe/solid",
+          "color": [
+            0.3,
+            0.3,
+            0.3
+          ],
+          "size": [
+            60,
+            60
+          ],
+          "offset": [
+            64,
+            12
+          ],
+          "controls": [
+            {
+              "mark": {
+                "type": "image",
+                "texture": "textures/probe/solid",
+                "color": [
+                  1,
+                  0,
+                  0
+                ],
+                "size": [
+                  10,
+                  10
+                ],
+                "offset": [
+                  "50%x",
+                  0
+                ],
+                "anchor_from": "top_left",
+                "anchor_to": "top_left"
+              }
+            }
+          ],
+          "anchor_from": "top_left",
+          "anchor_to": "top_left"
+        }
+      },
+      {
+        "off_c": {
+          "type": "image",
+          "texture": "textures/probe/solid",
+          "color": [
+            0.3,
+            0.3,
+            0.3
+          ],
+          "size": [
+            60,
+            60
+          ],
+          "offset": [
+            128,
+            12
+          ],
+          "controls": [
+            {
+              "mark": {
+                "type": "image",
+                "texture": "textures/probe/solid",
+                "color": [
+                  1,
+                  0,
+                  0
+                ],
+                "size": [
+                  10,
+                  10
+                ],
+                "offset": [
+                  "50%c",
+                  0
+                ],
+                "anchor_from": "top_left",
+                "anchor_to": "top_left"
+              }
+            }
+          ],
+          "anchor_from": "top_left",
+          "anchor_to": "top_left"
+        }
+      }
+    ],
+    "anchor_from": "top_left",
+    "anchor_to": "top_left"
+  },
+  "cell_c": {
+    "type": "panel",
+    "offset": [
+      196,
+      52
+    ],
+    "size": [
+      128,
+      74
+    ],
+    "layer": 1,
+    "controls": [
+      {
+        "title": {
+          "type": "label",
+          "text": "C default | center",
+          "shadow": false,
+          "color": [
+            1,
+            1,
+            1
+          ],
+          "size": [
+            "100%",
+            8
+          ],
+          "offset": [
+            0,
+            0
+          ],
+          "anchor_from": "top_left",
+          "anchor_to": "top_left"
+        }
+      },
+      {
+        "fillish": {
+          "type": "image",
+          "texture": "textures/probe/solid",
+          "color": [
+            0.3,
+            0.3,
+            0.3
+          ],
+          "size": [
+            60,
+            60
+          ],
+          "offset": [
+            0,
+            12
+          ],
+          "controls": [
+            {
+              "host": {
+                "type": "panel",
+                "controls": [
+                  {
+                    "mark": {
+                      "type": "image",
+                      "texture": "textures/probe/solid",
+                      "color": [
+                        0,
+                        0.85,
+                        0.2
+                      ],
+                      "size": [
+                        10,
+                        10
+                      ],
+                      "anchor_from": "bottom_right",
+                      "anchor_to": "bottom_right"
+                    }
+                  }
+                ]
+              }
+            }
+          ],
+          "anchor_from": "top_left",
+          "anchor_to": "top_left"
+        }
+      },
+      {
+        "centered": {
+          "type": "image",
+          "texture": "textures/probe/solid",
+          "color": [
+            0.3,
+            0.3,
+            0.3
+          ],
+          "size": [
+            60,
+            60
+          ],
+          "offset": [
+            64,
+            12
+          ],
+          "controls": [
+            {
+              "host": {
+                "type": "panel",
+                "controls": [
+                  {
+                    "mark": {
+                      "type": "image",
+                      "texture": "textures/probe/solid",
+                      "color": [
+                        0,
+                        0.85,
+                        0.2
+                      ],
+                      "size": [
+                        10,
+                        10
+                      ],
+                      "anchor_from": "bottom_right",
+                      "anchor_to": "bottom_right"
+                    }
+                  }
+                ],
+                "anchor_from": "center",
+                "anchor_to": "center"
+              }
+            }
+          ],
+          "anchor_from": "top_left",
+          "anchor_to": "top_left"
+        }
+      }
+    ],
+    "anchor_from": "top_left",
+    "anchor_to": "top_left"
+  },
+  "cell_d": {
+    "type": "panel",
+    "offset": [
+      4,
+      130
+    ],
+    "size": [
+      188,
+      92
+    ],
+    "layer": 1,
+    "controls": [
+      {
+        "title": {
+          "type": "label",
+          "text": "D % | %y | %c | fill | +5 | -10",
+          "shadow": false,
+          "color": [
+            1,
+            1,
+            1
+          ],
+          "size": [
+            "100%",
+            8
+          ],
+          "offset": [
+            0,
+            0
+          ],
+          "anchor_from": "top_left",
+          "anchor_to": "top_left"
+        }
+      },
+      {
+        "p_pct": {
+          "type": "image",
+          "texture": "textures/probe/solid",
+          "color": [
+            0.22,
+            0.22,
+            0.22
+          ],
+          "size": [
+            80,
+            40
+          ],
+          "offset": [
+            0,
+            8
+          ],
+          "controls": [
+            {
+              "img": {
+                "type": "image",
+                "texture": "textures/probe/checker16x32",
+                "size": [
+                  "50%",
+                  "100%"
+                ],
+                "anchor_from": "top_left",
+                "anchor_to": "top_left"
+              }
+            }
+          ],
+          "anchor_from": "top_left",
+          "anchor_to": "top_left"
+        }
+      },
+      {
+        "p_y": {
+          "type": "image",
+          "texture": "textures/probe/solid",
+          "color": [
+            0.22,
+            0.22,
+            0.22
+          ],
+          "size": [
+            80,
+            40
+          ],
+          "offset": [
+            84,
+            8
+          ],
+          "controls": [
+            {
+              "img": {
+                "type": "image",
+                "texture": "textures/probe/checker16x32",
+                "size": [
+                  "50%y",
+                  "100%"
+                ],
+                "anchor_from": "top_left",
+                "anchor_to": "top_left"
+              }
+            }
+          ],
+          "anchor_from": "top_left",
+          "anchor_to": "top_left"
+        }
+      },
+      {
+        "p_c": {
+          "type": "image",
+          "texture": "textures/probe/solid",
+          "color": [
+            0.22,
+            0.22,
+            0.22
+          ],
+          "size": [
+            80,
+            40
+          ],
+          "offset": [
+            0,
+            50
+          ],
+          "controls": [
+            {
+              "img": {
+                "type": "image",
+                "texture": "textures/probe/solid",
+                "color": [
+                  0,
+                  0.75,
+                  0.3
+                ],
+                "size": [
+                  "100%c",
+                  16
+                ],
+                "controls": [
+                  {
+                    "chip": {
+                      "type": "image",
+                      "texture": "textures/probe/solid",
+                      "color": [
+                        1,
+                        0.2,
+                        0.2
+                      ],
+                      "size": [
+                        24,
+                        10
+                      ],
+                      "anchor_from": "top_left",
+                      "anchor_to": "top_left"
+                    }
+                  }
+                ],
+                "anchor_from": "top_left",
+                "anchor_to": "top_left"
+              }
+            }
+          ],
+          "anchor_from": "top_left",
+          "anchor_to": "top_left"
+        }
+      },
+      {
+        "p_math": {
+          "type": "image",
+          "texture": "textures/probe/solid",
+          "color": [
+            0.22,
+            0.22,
+            0.22
+          ],
+          "size": [
+            80,
+            40
+          ],
+          "offset": [
+            84,
+            50
+          ],
+          "controls": [
+            {
+              "stack": {
+                "type": "stack_panel",
+                "orientation": "horizontal",
+                "size": [
+                  80,
+                  12
+                ],
+                "anchor_from": "top_left",
+                "anchor_to": "top_left",
+                "controls": [
+                  {
+                    "fixed": {
+                      "type": "image",
+                      "texture": "textures/probe/solid",
+                      "color": [
+                        0.9,
+                        0.15,
+                        0.15
+                      ],
+                      "size": [
+                        20,
+                        10
+                      ],
+                      "anchor_from": "top_left",
+                      "anchor_to": "top_left"
+                    }
+                  },
+                  {
+                    "fill": {
+                      "type": "image",
+                      "texture": "textures/probe/solid",
+                      "color": [
+                        0.15,
+                        0.75,
+                        0.25
+                      ],
+                      "size": [
+                        "fill",
+                        10
+                      ],
+                      "anchor_from": "top_left",
+                      "anchor_to": "top_left"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "plus": {
+                "type": "image",
+                "texture": "textures/probe/solid",
+                "color": [
+                  0.95,
+                  0.75,
+                  0.15
+                ],
+                "size": [
+                  "50% + 5px",
+                  8
+                ],
+                "offset": [
+                  0,
+                  14
+                ],
+                "anchor_from": "top_left",
+                "anchor_to": "top_left"
+              }
+            },
+            {
+              "minus": {
+                "type": "image",
+                "texture": "textures/probe/solid",
+                "color": [
+                  0.25,
+                  0.55,
+                  1
+                ],
+                "size": [
+                  "100% - 10px",
+                  8
+                ],
+                "offset": [
+                  0,
+                  26
+                ],
+                "anchor_from": "top_left",
+                "anchor_to": "top_left"
+              }
+            }
+          ],
+          "anchor_from": "top_left",
+          "anchor_to": "top_left"
+        }
+      }
+    ],
+    "anchor_from": "top_left",
+    "anchor_to": "top_left"
+  },
+  "cell_e": {
+    "type": "panel",
+    "offset": [
+      196,
+      4
+    ],
+    "size": [
+      180,
+      46
+    ],
+    "layer": 1,
+    "controls": [
+      {
+        "title": {
+          "type": "label",
+          "text": "E tint",
+          "shadow": false,
+          "color": [
+            1,
+            1,
+            1
+          ],
+          "size": [
+            "100%",
+            8
+          ],
+          "offset": [
+            0,
+            0
+          ],
+          "anchor_from": "top_left",
+          "anchor_to": "top_left"
+        }
+      },
+      {
+        "raw": {
+          "type": "image",
+          "texture": "textures/probe/grad",
+          "size": [
+            32,
+            32
+          ],
+          "offset": [
+            0,
+            10
+          ],
+          "anchor_from": "top_left",
+          "anchor_to": "top_left"
+        }
+      },
+      {
+        "red": {
+          "type": "image",
+          "texture": "textures/probe/grad",
+          "size": [
+            32,
+            32
+          ],
+          "offset": [
+            34,
+            10
+          ],
+          "color": [
+            1,
+            0,
+            0
+          ],
+          "anchor_from": "top_left",
+          "anchor_to": "top_left"
+        }
+      },
+      {
+        "blue": {
+          "type": "image",
+          "texture": "textures/probe/grad",
+          "size": [
+            32,
+            32
+          ],
+          "offset": [
+            68,
+            10
+          ],
+          "color": [
+            0.5,
+            0.5,
+            1.0
+          ],
+          "anchor_from": "top_left",
+          "anchor_to": "top_left"
+        }
+      },
+      {
+        "half": {
+          "type": "image",
+          "texture": "textures/probe/grad",
+          "size": [
+            32,
+            32
+          ],
+          "offset": [
+            102,
+            10
+          ],
+          "alpha": 0.5,
+          "anchor_from": "top_left",
+          "anchor_to": "top_left"
+        }
+      },
+      {
+        "solid_tint": {
+          "type": "image",
+          "texture": "textures/probe/solid",
+          "size": [
+            32,
+            32
+          ],
+          "offset": [
+            136,
+            10
+          ],
+          "color": [
+            0.25,
+            0.6,
+            1.0
+          ],
+          "anchor_from": "top_left",
+          "anchor_to": "top_left"
+        }
+      }
+    ],
+    "anchor_from": "top_left",
+    "anchor_to": "top_left"
+  },
+  "cell_f": {
+    "type": "panel",
+    "offset": [
+      196,
+      130
+    ],
+    "size": [
+      128,
+      72
+    ],
+    "layer": 1,
+    "controls": [
+      {
+        "title": {
+          "type": "label",
+          "text": "F nine 1 / stretch",
+          "shadow": false,
+          "color": [
+            1,
+            1,
+            1
+          ],
+          "size": [
+            "100%",
+            8
+          ],
+          "offset": [
+            0,
+            0
+          ],
+          "anchor_from": "top_left",
+          "anchor_to": "top_left"
+        }
+      },
+      {
+        "native": {
+          "type": "image",
+          "texture": "textures/probe/nine",
+          "size": [
+            12,
+            12
+          ],
+          "offset": [
+            0,
+            10
+          ],
+          "anchor_from": "top_left",
+          "anchor_to": "top_left"
+        }
+      },
+      {
+        "wide": {
+          "type": "image",
+          "texture": "textures/probe/nine",
+          "size": [
+            48,
+            24
+          ],
+          "offset": [
+            16,
+            10
+          ],
+          "anchor_from": "top_left",
+          "anchor_to": "top_left"
+        }
+      },
+      {
+        "tall": {
+          "type": "image",
+          "texture": "textures/probe/nine",
+          "size": [
+            30,
+            60
+          ],
+          "offset": [
+            68,
+            10
+          ],
+          "anchor_from": "top_left",
+          "anchor_to": "top_left"
+        }
+      },
+      {
+        "forced": {
+          "type": "image",
+          "texture": "textures/probe/nine",
+          "size": [
+            24,
+            24
+          ],
+          "offset": [
+            16,
+            38
+          ],
+          "nineslice_size": 1,
+          "anchor_from": "top_left",
+          "anchor_to": "top_left"
+        }
+      }
+    ],
+    "anchor_from": "top_left",
+    "anchor_to": "top_left"
+  },
+  "cell_g": {
+    "type": "panel",
+    "offset": [
+      328,
+      52
+    ],
+    "size": [
+      48,
+      46
+    ],
+    "layer": 1,
+    "controls": [
+      {
+        "title": {
+          "type": "label",
+          "text": "G uv",
+          "shadow": false,
+          "color": [
+            1,
+            1,
+            1
+          ],
+          "size": [
+            "100%",
+            8
+          ],
+          "offset": [
+            0,
+            0
+          ],
+          "anchor_from": "top_left",
+          "anchor_to": "top_left"
+        }
+      },
+      {
+        "tl": {
+          "type": "image",
+          "texture": "textures/probe/checker16x32",
+          "size": [
+            16,
+            16
+          ],
+          "offset": [
+            0,
+            10
+          ],
+          "uv": [
+            0,
+            0
+          ],
+          "uv_size": [
+            8,
+            8
+          ],
+          "anchor_from": "top_left",
+          "anchor_to": "top_left"
+        }
+      },
+      {
+        "br": {
+          "type": "image",
+          "texture": "textures/probe/checker16x32",
+          "size": [
+            16,
+            32
+          ],
+          "offset": [
+            20,
+            10
+          ],
+          "uv": [
+            8,
+            16
+          ],
+          "uv_size": [
+            8,
+            16
+          ],
+          "anchor_from": "top_left",
+          "anchor_to": "top_left"
+        }
+      }
+    ],
+    "anchor_from": "top_left",
+    "anchor_to": "top_left"
+  },
+  "cell_h": {
+    "type": "panel",
+    "offset": [
+      380,
+      4
+    ],
+    "size": [
+      96,
+      72
+    ],
+    "layer": 1,
+    "controls": [
+      {
+        "title": {
+          "type": "label",
+          "text": "H layer",
+          "shadow": false,
+          "color": [
+            1,
+            1,
+            1
+          ],
+          "size": [
+            "100%",
+            8
+          ],
+          "offset": [
+            0,
+            0
+          ],
+          "anchor_from": "top_left",
+          "anchor_to": "top_left"
+        }
+      },
+      {
+        "same_r": {
+          "type": "image",
+          "texture": "textures/probe/solid",
+          "color": [
+            1,
+            0,
+            0
+          ],
+          "size": [
+            20,
+            20
+          ],
+          "offset": [
+            0,
+            10
+          ],
+          "layer": 0,
+          "anchor_from": "top_left",
+          "anchor_to": "top_left"
+        }
+      },
+      {
+        "same_g": {
+          "type": "image",
+          "texture": "textures/probe/solid",
+          "color": [
+            0,
+            0.8,
+            0.2
+          ],
+          "size": [
+            20,
+            20
+          ],
+          "offset": [
+            6,
+            16
+          ],
+          "layer": 0,
+          "anchor_from": "top_left",
+          "anchor_to": "top_left"
+        }
+      },
+      {
+        "same_b": {
+          "type": "image",
+          "texture": "textures/probe/solid",
+          "color": [
+            0.2,
+            0.4,
+            1
+          ],
+          "size": [
+            20,
+            20
+          ],
+          "offset": [
+            12,
+            22
+          ],
+          "layer": 0,
+          "anchor_from": "top_left",
+          "anchor_to": "top_left"
+        }
+      },
+      {
+        "ord_r": {
+          "type": "image",
+          "texture": "textures/probe/solid",
+          "color": [
+            1,
+            0,
+            0
+          ],
+          "size": [
+            20,
+            20
+          ],
+          "offset": [
+            40,
+            10
+          ],
+          "layer": 2,
+          "anchor_from": "top_left",
+          "anchor_to": "top_left"
+        }
+      },
+      {
+        "ord_g": {
+          "type": "image",
+          "texture": "textures/probe/solid",
+          "color": [
+            0,
+            0.8,
+            0.2
+          ],
+          "size": [
+            20,
+            20
+          ],
+          "offset": [
+            46,
+            16
+          ],
+          "layer": 1,
+          "anchor_from": "top_left",
+          "anchor_to": "top_left"
+        }
+      },
+      {
+        "ord_b": {
+          "type": "image",
+          "texture": "textures/probe/solid",
+          "color": [
+            0.2,
+            0.4,
+            1
+          ],
+          "size": [
+            20,
+            20
+          ],
+          "offset": [
+            52,
+            22
+          ],
+          "layer": 0,
+          "anchor_from": "top_left",
+          "anchor_to": "top_left"
+        }
+      },
+      {
+        "nest": {
+          "type": "panel",
+          "layer": 5,
+          "size": [
+            24,
+            24
+          ],
+          "offset": [
+            0,
+            42
+          ],
+          "controls": [
+            {
+              "kid": {
+                "type": "image",
+                "texture": "textures/probe/solid",
+                "color": [
+                  0,
+                  0.9,
+                  0.4
+                ],
+                "size": [
+                  20,
+                  20
+                ],
+                "layer": -10,
+                "anchor_from": "top_left",
+                "anchor_to": "top_left"
+              }
+            }
+          ],
+          "anchor_from": "top_left",
+          "anchor_to": "top_left"
+        }
+      },
+      {
+        "sib": {
+          "type": "image",
+          "texture": "textures/probe/solid",
+          "color": [
+            1,
+            0.2,
+            0.2
+          ],
+          "size": [
+            20,
+            20
+          ],
+          "layer": 1,
+          "offset": [
+            10,
+            50
+          ],
+          "anchor_from": "top_left",
+          "anchor_to": "top_left"
+        }
+      }
+    ],
+    "anchor_from": "top_left",
+    "anchor_to": "top_left"
+  },
+  "cell_i": {
+    "type": "panel",
+    "offset": [
+      128,
+      224
+    ],
+    "size": [
+      348,
+      44
+    ],
+    "layer": 1,
+    "controls": [
+      {
+        "title": {
+          "type": "label",
+          "text": "I labels",
+          "shadow": false,
+          "color": [
+            1,
+            1,
+            1
+          ],
+          "size": [
+            "100%",
+            8
+          ],
+          "offset": [
+            0,
+            0
+          ],
+          "anchor_from": "top_left",
+          "anchor_to": "top_left"
+        }
+      },
+      {
+        "def": {
+          "type": "label",
+          "text": "The quick brown fox 0123456789",
+          "shadow": false,
+          "color": [
+            1,
+            1,
+            1
+          ],
+          "size": [
+            156,
+            8
+          ],
+          "offset": [
+            0,
+            8
+          ],
+          "anchor_from": "top_left",
+          "anchor_to": "top_left"
+        }
+      },
+      {
+        "sh": {
+          "type": "label",
+          "text": "The quick brown fox 0123456789",
+          "shadow": true,
+          "color": [
+            1,
+            1,
+            1
+          ],
+          "size": [
+            156,
+            8
+          ],
+          "offset": [
+            0,
+            16
+          ],
+          "anchor_from": "top_left",
+          "anchor_to": "top_left"
+        }
+      },
+      {
+        "col": {
+          "type": "label",
+          "text": "The quick brown fox 0123456789",
+          "shadow": false,
+          "color": [
+            1,
+            0.33,
+            0.33
+          ],
+          "size": [
+            156,
+            8
+          ],
+          "offset": [
+            0,
+            24
+          ],
+          "anchor_from": "top_left",
+          "anchor_to": "top_left"
+        }
+      },
+      {
+        "codes": {
+          "type": "label",
+          "text": "\u00a7aGreen \u00a7lBold\u00a7r \u00a7oItalic",
+          "shadow": false,
+          "color": [
+            1,
+            1,
+            1
+          ],
+          "size": [
+            156,
+            8
+          ],
+          "offset": [
+            0,
+            32
+          ],
+          "anchor_from": "top_left",
+          "anchor_to": "top_left"
+        }
+      },
+      {
+        "scale": {
+          "type": "label",
+          "text": "The quick brown fox 0123456789",
+          "shadow": false,
+          "color": [
+            1,
+            1,
+            1
+          ],
+          "font_scale_factor": 2,
+          "size": [
+            180,
+            12
+          ],
+          "offset": [
+            164,
+            8
+          ],
+          "anchor_from": "top_left",
+          "anchor_to": "top_left"
+        }
+      },
+      {
+        "large": {
+          "type": "label",
+          "text": "The quick brown fox 0123456789",
+          "shadow": false,
+          "color": [
+            1,
+            1,
+            1
+          ],
+          "font_size": "large",
+          "size": [
+            80,
+            8
+          ],
+          "offset": [
+            164,
+            20
+          ],
+          "anchor_from": "top_left",
+          "anchor_to": "top_left"
+        }
+      },
+      {
+        "small": {
+          "type": "label",
+          "text": "The quick brown fox 0123456789",
+          "shadow": false,
+          "color": [
+            1,
+            1,
+            1
+          ],
+          "font_size": "small",
+          "size": [
+            36,
+            8
+          ],
+          "offset": [
+            248,
+            20
+          ],
+          "anchor_from": "top_left",
+          "anchor_to": "top_left"
+        }
+      },
+      {
+        "center": {
+          "type": "label",
+          "text": "The quick brown fox 0123456789",
+          "shadow": false,
+          "color": [
+            1,
+            1,
+            1
+          ],
+          "text_alignment": "center",
+          "size": [
+            120,
+            8
+          ],
+          "offset": [
+            164,
+            28
+          ],
+          "anchor_from": "top_left",
+          "anchor_to": "top_left"
+        }
+      },
+      {
+        "right": {
+          "type": "label",
+          "text": "The quick brown fox 0123456789",
+          "shadow": false,
+          "color": [
+            1,
+            1,
+            1
+          ],
+          "text_alignment": "right",
+          "size": [
+            120,
+            8
+          ],
+          "offset": [
+            164,
+            36
+          ],
+          "anchor_from": "top_left",
+          "anchor_to": "top_left"
+        }
+      },
+      {
+        "wrap_max": {
+          "type": "label",
+          "text": "The quick brown fox 0123456789",
+          "shadow": false,
+          "color": [
+            1,
+            1,
+            1
+          ],
+          "max_width": 60,
+          "size": [
+            60,
+            12
+          ],
+          "offset": [
+            288,
+            20
+          ],
+          "anchor_from": "top_left",
+          "anchor_to": "top_left"
+        }
+      },
+      {
+        "wrap_box": {
+          "type": "label",
+          "text": "The quick brown fox 0123456789",
+          "shadow": false,
+          "color": [
+            1,
+            1,
+            1
+          ],
+          "size": [
+            60,
+            14
+          ],
+          "offset": [
+            288,
+            30
+          ],
+          "anchor_from": "top_left",
+          "anchor_to": "top_left"
+        }
+      }
+    ],
+    "anchor_from": "top_left",
+    "anchor_to": "top_left"
+  },
+  "cell_j": {
+    "type": "panel",
+    "offset": [
+      328,
+      104
+    ],
+    "size": [
+      148,
+      52
+    ],
+    "layer": 1,
+    "controls": [
+      {
+        "title": {
+          "type": "label",
+          "text": "J alpha | propagate",
+          "shadow": false,
+          "color": [
+            1,
+            1,
+            1
+          ],
+          "size": [
+            "100%",
+            8
+          ],
+          "offset": [
+            0,
+            0
+          ],
+          "anchor_from": "top_left",
+          "anchor_to": "top_left"
+        }
+      },
+      {
+        "plain": {
+          "type": "image",
+          "texture": "textures/probe/solid",
+          "alpha": 0.5,
+          "color": [
+            1,
+            1,
+            1
+          ],
+          "size": [
+            40,
+            40
+          ],
+          "offset": [
+            0,
+            10
+          ],
+          "controls": [
+            {
+              "kid": {
+                "type": "image",
+                "texture": "textures/probe/solid",
+                "color": [
+                  1,
+                  0,
+                  0
+                ],
+                "size": [
+                  16,
+                  16
+                ],
+                "offset": [
+                  8,
+                  8
+                ],
+                "alpha": 1,
+                "anchor_from": "top_left",
+                "anchor_to": "top_left"
+              }
+            }
+          ],
+          "anchor_from": "top_left",
+          "anchor_to": "top_left"
+        }
+      },
+      {
+        "prop": {
+          "type": "image",
+          "texture": "textures/probe/solid",
+          "alpha": 0.5,
+          "color": [
+            1,
+            1,
+            1
+          ],
+          "size": [
+            40,
+            40
+          ],
+          "offset": [
+            48,
+            10
+          ],
+          "controls": [
+            {
+              "kid": {
+                "type": "image",
+                "texture": "textures/probe/solid",
+                "color": [
+                  1,
+                  0,
+                  0
+                ],
+                "size": [
+                  16,
+                  16
+                ],
+                "offset": [
+                  8,
+                  8
+                ],
+                "alpha": 1,
+                "anchor_from": "top_left",
+                "anchor_to": "top_left"
+              }
+            }
+          ],
+          "propagate_alpha": true,
+          "anchor_from": "top_left",
+          "anchor_to": "top_left"
+        }
+      }
+    ],
+    "anchor_from": "top_left",
+    "anchor_to": "top_left"
+  },
+  "cell_k": {
+    "type": "panel",
+    "offset": [
+      328,
+      160
+    ],
+    "size": [
+      148,
+      62
+    ],
+    "layer": 1,
+    "controls": [
+      {
+        "title": {
+          "type": "label",
+          "text": "K clips on | off",
+          "shadow": false,
+          "color": [
+            1,
+            1,
+            1
+          ],
+          "size": [
+            "100%",
+            8
+          ],
+          "offset": [
+            0,
+            0
+          ],
+          "anchor_from": "top_left",
+          "anchor_to": "top_left"
+        }
+      },
+      {
+        "on": {
+          "type": "panel",
+          "size": [
+            30,
+            30
+          ],
+          "offset": [
+            12,
+            18
+          ],
+          "clips_children": true,
+          "controls": [
+            {
+              "frame": {
+                "type": "image",
+                "texture": "textures/probe/solid",
+                "color": [
+                  0.35,
+                  0.35,
+                  0.35
+                ],
+                "size": [
+                  30,
+                  30
+                ],
+                "anchor_from": "top_left",
+                "anchor_to": "top_left"
+              }
+            },
+            {
+              "big": {
+                "type": "image",
+                "texture": "textures/probe/checker16x32",
+                "size": [
+                  50,
+                  50
+                ],
+                "offset": [
+                  -10,
+                  -10
+                ],
+                "anchor_from": "top_left",
+                "anchor_to": "top_left"
+              }
+            }
+          ],
+          "anchor_from": "top_left",
+          "anchor_to": "top_left"
+        }
+      },
+      {
+        "off": {
+          "type": "panel",
+          "size": [
+            30,
+            30
+          ],
+          "offset": [
+            78,
+            18
+          ],
+          "clips_children": false,
+          "controls": [
+            {
+              "frame": {
+                "type": "image",
+                "texture": "textures/probe/solid",
+                "color": [
+                  0.35,
+                  0.35,
+                  0.35
+                ],
+                "size": [
+                  30,
+                  30
+                ],
+                "anchor_from": "top_left",
+                "anchor_to": "top_left"
+              }
+            },
+            {
+              "big": {
+                "type": "image",
+                "texture": "textures/probe/checker16x32",
+                "size": [
+                  50,
+                  50
+                ],
+                "offset": [
+                  -10,
+                  -10
+                ],
+                "anchor_from": "top_left",
+                "anchor_to": "top_left"
+              }
+            }
+          ],
+          "anchor_from": "top_left",
+          "anchor_to": "top_left"
+        }
+      }
+    ],
+    "anchor_from": "top_left",
+    "anchor_to": "top_left"
+  },
+  "cell_l": {
+    "type": "panel",
+    "offset": [
+      4,
+      224
+    ],
+    "size": [
+      120,
+      44
+    ],
+    "layer": 1,
+    "controls": [
+      {
+        "title": {
+          "type": "label",
+          "text": "L stack",
+          "shadow": false,
+          "color": [
+            1,
+            1,
+            1
+          ],
+          "size": [
+            "100%",
+            8
+          ],
+          "offset": [
+            0,
+            0
+          ],
+          "anchor_from": "top_left",
+          "anchor_to": "top_left"
+        }
+      },
+      {
+        "v": {
+          "type": "stack_panel",
+          "orientation": "vertical",
+          "anchor_from": "top_left",
+          "anchor_to": "top_left",
+          "offset": [
+            0,
+            8
+          ],
+          "size": [
+            "100%c",
+            "100%c"
+          ],
+          "controls": [
+            {
+              "s0": {
+                "type": "image",
+                "texture": "textures/probe/solid",
+                "color": [
+                  1,
+                  0.2,
+                  0.2
+                ],
+                "size": [
+                  10,
+                  10
+                ],
+                "anchor_from": "top_left",
+                "anchor_to": "top_left"
+              }
+            },
+            {
+              "s1": {
+                "type": "image",
+                "texture": "textures/probe/solid",
+                "color": [
+                  0.2,
+                  0.85,
+                  0.3
+                ],
+                "size": [
+                  15,
+                  10
+                ],
+                "anchor_from": "top_left",
+                "anchor_to": "top_left"
+              }
+            },
+            {
+              "s2": {
+                "type": "image",
+                "texture": "textures/probe/solid",
+                "color": [
+                  0.25,
+                  0.45,
+                  1
+                ],
+                "size": [
+                  20,
+                  10
+                ],
+                "anchor_from": "top_left",
+                "anchor_to": "top_left"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "h": {
+          "type": "stack_panel",
+          "orientation": "horizontal",
+          "anchor_from": "top_left",
+          "anchor_to": "top_left",
+          "offset": [
+            28,
+            8
+          ],
+          "size": [
+            "100%c",
+            "100%c"
+          ],
+          "controls": [
+            {
+              "s0": {
+                "type": "image",
+                "texture": "textures/probe/solid",
+                "color": [
+                  1,
+                  0.2,
+                  0.2
+                ],
+                "size": [
+                  10,
+                  10
+                ],
+                "anchor_from": "top_left",
+                "anchor_to": "top_left"
+              }
+            },
+            {
+              "s1": {
+                "type": "image",
+                "texture": "textures/probe/solid",
+                "color": [
+                  0.2,
+                  0.85,
+                  0.3
+                ],
+                "size": [
+                  15,
+                  10
+                ],
+                "anchor_from": "top_left",
+                "anchor_to": "top_left"
+              }
+            },
+            {
+              "s2": {
+                "type": "image",
+                "texture": "textures/probe/solid",
+                "color": [
+                  0.25,
+                  0.45,
+                  1
+                ],
+                "size": [
+                  20,
+                  10
+                ],
+                "anchor_from": "top_left",
+                "anchor_to": "top_left"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "c": {
+          "type": "stack_panel",
+          "orientation": "horizontal",
+          "anchor_from": "top_left",
+          "anchor_to": "top_left",
+          "offset": [
+            80,
+            8
+          ],
+          "size": [
+            40,
+            14
+          ],
+          "controls": [
+            {
+              "grow": {
+                "type": "panel",
+                "size": [
+                  "100%c",
+                  10
+                ],
+                "controls": [
+                  {
+                    "chip": {
+                      "type": "image",
+                      "texture": "textures/probe/solid",
+                      "color": [
+                        1,
+                        0.85,
+                        0.2
+                      ],
+                      "size": [
+                        16,
+                        8
+                      ],
+                      "anchor_from": "top_left",
+                      "anchor_to": "top_left"
+                    }
+                  }
+                ],
+                "anchor_from": "top_left",
+                "anchor_to": "top_left"
+              }
+            }
+          ]
+        }
+      }
+    ],
+    "anchor_from": "top_left",
+    "anchor_to": "top_left"
+  },
+  "cell_m1": {
+    "type": "panel",
+    "offset": [
+      496,
+      4
+    ],
+    "size": [
+      40,
+      42
+    ],
+    "layer": 1,
+    "controls": [
+      {
+        "title": {
+          "type": "label",
+          "text": "M1 p1 c1",
+          "shadow": false,
+          "color": [
+            1,
+            1,
+            1
+          ],
+          "size": [
+            "100%",
+            8
+          ],
+          "offset": [
+            0,
+            0
+          ],
+          "anchor_from": "top_left",
+          "anchor_to": "top_left"
+        }
+      },
+      {
+        "host": {
+          "type": "image",
+          "texture": "textures/probe/solid",
+          "color": [
+            1,
+            0,
+            0
+          ],
+          "size": [
+            20,
+            20
+          ],
+          "keep_ratio": false,
+          "alpha": 1.0,
+          "offset": [
+            0,
+            10
+          ],
+          "controls": [
+            {
+              "kid": {
+                "type": "image",
+                "texture": "textures/probe/solid",
+                "color": [
+                  0,
+                  0.35,
+                  1
+                ],
+                "size": [
+                  20,
+                  20
+                ],
+                "keep_ratio": false,
+                "offset": [
+                  10,
+                  0
+                ],
+                "alpha": 1.0,
+                "anchor_from": "top_left",
+                "anchor_to": "top_left"
+              }
+            }
+          ],
+          "anchor_from": "top_left",
+          "anchor_to": "top_left"
+        }
+      }
+    ],
+    "anchor_from": "top_left",
+    "anchor_to": "top_left"
+  },
+  "cell_m2": {
+    "type": "panel",
+    "offset": [
+      540,
+      4
+    ],
+    "size": [
+      40,
+      42
+    ],
+    "layer": 1,
+    "controls": [
+      {
+        "title": {
+          "type": "label",
+          "text": "M2 p.99 c1",
+          "shadow": false,
+          "color": [
+            1,
+            1,
+            1
+          ],
+          "size": [
+            "100%",
+            8
+          ],
+          "offset": [
+            0,
+            0
+          ],
+          "anchor_from": "top_left",
+          "anchor_to": "top_left"
+        }
+      },
+      {
+        "host": {
+          "type": "image",
+          "texture": "textures/probe/solid",
+          "color": [
+            1,
+            0,
+            0
+          ],
+          "size": [
+            20,
+            20
+          ],
+          "keep_ratio": false,
+          "alpha": 0.99,
+          "offset": [
+            0,
+            10
+          ],
+          "controls": [
+            {
+              "kid": {
+                "type": "image",
+                "texture": "textures/probe/solid",
+                "color": [
+                  0,
+                  0.35,
+                  1
+                ],
+                "size": [
+                  20,
+                  20
+                ],
+                "keep_ratio": false,
+                "offset": [
+                  10,
+                  0
+                ],
+                "alpha": 1.0,
+                "anchor_from": "top_left",
+                "anchor_to": "top_left"
+              }
+            }
+          ],
+          "anchor_from": "top_left",
+          "anchor_to": "top_left"
+        }
+      }
+    ],
+    "anchor_from": "top_left",
+    "anchor_to": "top_left"
+  },
+  "cell_m3": {
+    "type": "panel",
+    "offset": [
+      584,
+      4
+    ],
+    "size": [
+      40,
+      42
+    ],
+    "layer": 1,
+    "controls": [
+      {
+        "title": {
+          "type": "label",
+          "text": "M3 p1 c.5",
+          "shadow": false,
+          "color": [
+            1,
+            1,
+            1
+          ],
+          "size": [
+            "100%",
+            8
+          ],
+          "offset": [
+            0,
+            0
+          ],
+          "anchor_from": "top_left",
+          "anchor_to": "top_left"
+        }
+      },
+      {
+        "host": {
+          "type": "image",
+          "texture": "textures/probe/solid",
+          "color": [
+            1,
+            0,
+            0
+          ],
+          "size": [
+            20,
+            20
+          ],
+          "keep_ratio": false,
+          "alpha": 1.0,
+          "offset": [
+            0,
+            10
+          ],
+          "controls": [
+            {
+              "kid": {
+                "type": "image",
+                "texture": "textures/probe/solid",
+                "color": [
+                  0,
+                  0.35,
+                  1
+                ],
+                "size": [
+                  20,
+                  20
+                ],
+                "keep_ratio": false,
+                "offset": [
+                  10,
+                  0
+                ],
+                "alpha": 0.5,
+                "anchor_from": "top_left",
+                "anchor_to": "top_left"
+              }
+            }
+          ],
+          "anchor_from": "top_left",
+          "anchor_to": "top_left"
+        }
+      }
+    ],
+    "anchor_from": "top_left",
+    "anchor_to": "top_left"
+  },
+  "cell_m4": {
+    "type": "panel",
+    "offset": [
+      628,
+      4
+    ],
+    "size": [
+      40,
+      42
+    ],
+    "layer": 1,
+    "controls": [
+      {
+        "title": {
+          "type": "label",
+          "text": "M4 a.5 then 1",
+          "shadow": false,
+          "color": [
+            1,
+            1,
+            1
+          ],
+          "size": [
+            "100%",
+            8
+          ],
+          "offset": [
+            0,
+            0
+          ],
+          "anchor_from": "top_left",
+          "anchor_to": "top_left"
+        }
+      },
+      {
+        "first": {
+          "type": "image",
+          "texture": "textures/probe/solid",
+          "color": [
+            1,
+            0,
+            0
+          ],
+          "size": [
+            20,
+            20
+          ],
+          "keep_ratio": false,
+          "offset": [
+            0,
+            10
+          ],
+          "alpha": 0.5,
+          "anchor_from": "top_left",
+          "anchor_to": "top_left"
+        }
+      },
+      {
+        "second": {
+          "type": "image",
+          "texture": "textures/probe/solid",
+          "color": [
+            0,
+            0.35,
+            1
+          ],
+          "size": [
+            20,
+            20
+          ],
+          "keep_ratio": false,
+          "offset": [
+            10,
+            10
+          ],
+          "alpha": 1.0,
+          "anchor_from": "top_left",
+          "anchor_to": "top_left"
+        }
+      }
+    ],
+    "anchor_from": "top_left",
+    "anchor_to": "top_left"
+  },
+  "cell_m5": {
+    "type": "panel",
+    "offset": [
+      672,
+      4
+    ],
+    "size": [
+      40,
+      42
+    ],
+    "layer": 1,
+    "controls": [
+      {
+        "title": {
+          "type": "label",
+          "text": "M5 1 then a.5",
+          "shadow": false,
+          "color": [
+            1,
+            1,
+            1
+          ],
+          "size": [
+            "100%",
+            8
+          ],
+          "offset": [
+            0,
+            0
+          ],
+          "anchor_from": "top_left",
+          "anchor_to": "top_left"
+        }
+      },
+      {
+        "first": {
+          "type": "image",
+          "texture": "textures/probe/solid",
+          "color": [
+            1,
+            0,
+            0
+          ],
+          "size": [
+            20,
+            20
+          ],
+          "keep_ratio": false,
+          "offset": [
+            0,
+            10
+          ],
+          "alpha": 1.0,
+          "anchor_from": "top_left",
+          "anchor_to": "top_left"
+        }
+      },
+      {
+        "second": {
+          "type": "image",
+          "texture": "textures/probe/solid",
+          "color": [
+            0,
+            0.35,
+            1
+          ],
+          "size": [
+            20,
+            20
+          ],
+          "keep_ratio": false,
+          "offset": [
+            10,
+            10
+          ],
+          "alpha": 0.5,
+          "anchor_from": "top_left",
+          "anchor_to": "top_left"
+        }
+      }
+    ],
+    "anchor_from": "top_left",
+    "anchor_to": "top_left"
+  },
+  "cell_m6": {
+    "type": "panel",
+    "offset": [
+      716,
+      4
+    ],
+    "size": [
+      40,
+      42
+    ],
+    "layer": 1,
+    "controls": [
+      {
+        "title": {
+          "type": "label",
+          "text": "M6 prop a.5",
+          "shadow": false,
+          "color": [
+            1,
+            1,
+            1
+          ],
+          "size": [
+            "100%",
+            8
+          ],
+          "offset": [
+            0,
+            0
+          ],
+          "anchor_from": "top_left",
+          "anchor_to": "top_left"
+        }
+      },
+      {
+        "host": {
+          "type": "image",
+          "texture": "textures/probe/solid",
+          "color": [
+            1,
+            0,
+            0
+          ],
+          "size": [
+            20,
+            20
+          ],
+          "keep_ratio": false,
+          "alpha": 0.5,
+          "offset": [
+            0,
+            10
+          ],
+          "controls": [
+            {
+              "kid": {
+                "type": "image",
+                "texture": "textures/probe/solid",
+                "color": [
+                  0,
+                  0.35,
+                  1
+                ],
+                "size": [
+                  20,
+                  20
+                ],
+                "keep_ratio": false,
+                "offset": [
+                  10,
+                  0
+                ],
+                "alpha": 1.0,
+                "anchor_from": "top_left",
+                "anchor_to": "top_left"
+              }
+            }
+          ],
+          "propagate_alpha": true,
+          "anchor_from": "top_left",
+          "anchor_to": "top_left"
+        }
+      }
+    ],
+    "anchor_from": "top_left",
+    "anchor_to": "top_left"
+  },
+  "cell_m7": {
+    "type": "panel",
+    "offset": [
+      496,
+      52
+    ],
+    "size": [
+      70,
+      72
+    ],
+    "layer": 1,
+    "controls": [
+      {
+        "title": {
+          "type": "label",
+          "text": "M7 frame then chk",
+          "shadow": false,
+          "color": [
+            1,
+            1,
+            1
+          ],
+          "size": [
+            "100%",
+            8
+          ],
+          "offset": [
+            0,
+            0
+          ],
+          "anchor_from": "top_left",
+          "anchor_to": "top_left"
+        }
+      },
+      {
+        "off": {
+          "type": "panel",
+          "size": [
+            30,
+            30
+          ],
+          "offset": [
+            12,
+            18
+          ],
+          "clips_children": false,
+          "controls": [
+            {
+              "frame": {
+                "type": "image",
+                "texture": "textures/probe/solid",
+                "color": [
+                  0.35,
+                  0.35,
+                  0.35
+                ],
+                "size": [
+                  30,
+                  30
+                ],
+                "keep_ratio": false,
+                "anchor_from": "top_left",
+                "anchor_to": "top_left"
+              }
+            },
+            {
+              "big": {
+                "type": "image",
+                "texture": "textures/probe/checker16x32",
+                "size": [
+                  50,
+                  50
+                ],
+                "offset": [
+                  -10,
+                  -10
+                ],
+                "keep_ratio": false,
+                "anchor_from": "top_left",
+                "anchor_to": "top_left"
+              }
+            }
+          ],
+          "anchor_from": "top_left",
+          "anchor_to": "top_left"
+        }
+      }
+    ],
+    "anchor_from": "top_left",
+    "anchor_to": "top_left"
+  },
+  "cell_m8": {
+    "type": "panel",
+    "offset": [
+      572,
+      52
+    ],
+    "size": [
+      70,
+      72
+    ],
+    "layer": 1,
+    "controls": [
+      {
+        "title": {
+          "type": "label",
+          "text": "M8 chk then frame",
+          "shadow": false,
+          "color": [
+            1,
+            1,
+            1
+          ],
+          "size": [
+            "100%",
+            8
+          ],
+          "offset": [
+            0,
+            0
+          ],
+          "anchor_from": "top_left",
+          "anchor_to": "top_left"
+        }
+      },
+      {
+        "off": {
+          "type": "panel",
+          "size": [
+            30,
+            30
+          ],
+          "offset": [
+            12,
+            18
+          ],
+          "clips_children": false,
+          "controls": [
+            {
+              "big": {
+                "type": "image",
+                "texture": "textures/probe/checker16x32",
+                "size": [
+                  50,
+                  50
+                ],
+                "offset": [
+                  -10,
+                  -10
+                ],
+                "keep_ratio": false,
+                "anchor_from": "top_left",
+                "anchor_to": "top_left"
+              }
+            },
+            {
+              "frame": {
+                "type": "image",
+                "texture": "textures/probe/solid",
+                "color": [
+                  0.35,
+                  0.35,
+                  0.35
+                ],
+                "size": [
+                  30,
+                  30
+                ],
+                "keep_ratio": false,
+                "anchor_from": "top_left",
+                "anchor_to": "top_left"
+              }
+            }
+          ],
+          "anchor_from": "top_left",
+          "anchor_to": "top_left"
+        }
+      }
+    ],
+    "anchor_from": "top_left",
+    "anchor_to": "top_left"
+  },
+  "cell_m9": {
+    "type": "panel",
+    "offset": [
+      760,
+      4
+    ],
+    "size": [
+      40,
+      42
+    ],
+    "layer": 1,
+    "controls": [
+      {
+        "title": {
+          "type": "label",
+          "text": "M9 ring then solid",
+          "shadow": false,
+          "color": [
+            1,
+            1,
+            1
+          ],
+          "size": [
+            "100%",
+            8
+          ],
+          "offset": [
+            0,
+            0
+          ],
+          "anchor_from": "top_left",
+          "anchor_to": "top_left"
+        }
+      },
+      {
+        "ring": {
+          "type": "image",
+          "texture": "textures/probe/ring",
+          "size": [
+            16,
+            16
+          ],
+          "offset": [
+            0,
+            10
+          ],
+          "keep_ratio": false,
+          "anchor_from": "top_left",
+          "anchor_to": "top_left"
+        }
+      },
+      {
+        "solid": {
+          "type": "image",
+          "texture": "textures/probe/solid",
+          "color": [
+            0.15,
+            0.9,
+            0.2
+          ],
+          "size": [
+            16,
+            16
+          ],
+          "keep_ratio": false,
+          "offset": [
+            0,
+            10
+          ],
+          "alpha": 1,
+          "anchor_from": "top_left",
+          "anchor_to": "top_left"
+        }
+      }
+    ],
+    "anchor_from": "top_left",
+    "anchor_to": "top_left"
+  }
+}
