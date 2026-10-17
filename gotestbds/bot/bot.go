@@ -183,6 +183,25 @@ func (b *Bot) Conn() Conn {
 	return b.conn
 }
 
+// SetPassive forwards a movement-off flag to the actor.
+//
+// Call before StartTickLoop. See actor.Actor.SetPassive.
+//
+// @param passive True when an external client owns position.
+func (b *Bot) SetPassive(passive bool) {
+	b.a.SetPassive(passive)
+}
+
+// SetHandler sets the actor handler before the tick loop starts.
+//
+// Safe only before StartTickLoop: after that, use Execute so the write happens
+// on the tick goroutine.
+//
+// @param h Handler to install. Nil becomes NopHandler.
+func (b *Bot) SetHandler(h actor.Handler) {
+	b.a.Handle(h)
+}
+
 // packetBuf bounds inbound packets waiting for the tick loop. When full,
 // enqueuePacket drops the oldest rather than blocking ReadPacket — a blocked
 // read stops RakNet ACK processing, which then stalls every WritePacket

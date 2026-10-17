@@ -66,16 +66,17 @@ function normalizeBattleMoveButton(text: string): string {
 }
 
 /**
- * Pack actor plates use details `%.58s`, color at 58, clip at 60, HP after 62.
- * Legacy BEH `padEnd(50, '_')` leaves health 8 chars early → glued
- * "Lv.5G0.0  10". Match on level-line + health float (not only `startsWith(
- * "§0§")`) so mojibake / odd prefixes still realign.
+ * Pack actor plates use details `%.58s`, color at 58, clip `%.3s` at 59,
+ * HP after 62. Locked buttons have a leading space, so BEH pads details to
+ * 57. Legacy `padEnd(50)` glued "Lv.5G0.0  10" into the level line. Match on
+ * level-line + health float (not only `startsWith("§0§")`) so mojibake / odd
+ * prefixes still realign.
  *
  * @param text - Button label.
  * @returns actor button with details padded to 58, or unchanged.
  */
 function normalizeBattleActorButton(text: string): string {
-  // Live HP: `G0.0⠀100%%`. Fainted: `G0%⠀Fainted` (no float).
+  // Live HP: `G0.0⠀100%%`. Fainted: `R1.0⠀Fainted`.
   const m = /([GYR]\d+\.\d+|[GYR]0%)/.exec(text);
   if (!m || m.index == null) return text;
   if (!/\n Lv\.\d/.test(text) && !/§0§[0a]/.test(text)) return text;

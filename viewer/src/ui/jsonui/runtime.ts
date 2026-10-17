@@ -10,6 +10,7 @@ import type {
   ViewerHudExtension,
   ViewerOverlayFrame,
 } from "../../extensions/types";
+import { ensureMojangles } from "../mojangles";
 import { AssetClient } from "../../terrain/assetClient";
 import type { WorldState } from "../../store";
 import { type JsonUiAssets, type TextureInfo } from "./dom";
@@ -256,6 +257,8 @@ export function createJsonUiRuntime(opts: JsonUiRuntimeOptions): JsonUiRuntime {
   }
 
   const ready = (async () => {
+    // Outlines must exist before the first layout so wrapping matches paint.
+    await ensureMojangles(assetBase);
     if (opts.extension === undefined && !opts.skipExtensionFetch && assetBase) {
       const loaded: LoadedViewerExtensions =
         await loadViewerExtensions(assetBase);

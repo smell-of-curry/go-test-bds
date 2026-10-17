@@ -3,6 +3,7 @@ import type { Actor, Item, UI } from "../protocol";
 import type { WorldState } from "../store";
 import { BlockBreakEffects } from "./effects";
 import { formatCodesToFragment, stripFormatCodes } from "./formatCodes";
+import { mojanglesLoaded } from "./mojangles";
 import "./hud.css";
 
 const CHAT_LIMIT = 8;
@@ -103,7 +104,9 @@ export function initHud(opts: {
     if (!plain || CHAT_NOISE_RE.test(plain)) return;
     const el = document.createElement("div");
     el.className = "hud-chat-line";
-    el.appendChild(formatCodesToFragment(text));
+    el.appendChild(
+      formatCodesToFragment(text, { guiScale: 2, shadow: true }),
+    );
     chatEl.appendChild(el);
     chat.push({ el, bornMs: nowMs, text });
     while (chat.length > CHAT_LIMIT) {
@@ -192,7 +195,9 @@ export function initHud(opts: {
     }
     if (el.dataset.text !== state.text) {
       el.dataset.text = state.text;
-      el.replaceChildren(formatCodesToFragment(state.text));
+      el.replaceChildren(
+        formatCodesToFragment(state.text, { guiScale: 2, shadow: true }),
+      );
     }
     el.style.opacity = String(opacity);
   }
@@ -260,6 +265,17 @@ export function initHud(opts: {
       }
     },
     tick(nowMs: number): void {
+      // Chat can land before the TTF fetch finishes; swap spans for the
+      // pixel canvas once the outlines are in.
+      if (mojanglesLoaded()) {
+        for (const line of chat) {
+          if (!line.el.querySelector("canvas")) {
+            line.el.replaceChildren(
+              formatCodesToFragment(line.text, { guiScale: 2, shadow: true }),
+            );
+          }
+        }
+      }
       for (const line of chat) {
         line.el.classList.toggle("faded", nowMs - line.bornMs >= CHAT_FADE_MS);
       }

@@ -103,6 +103,31 @@ func main() {
 		logger.Info("viewer listening", "address", hub.Addr(), "cache", cacheDir, "baseline", baselineTag, "extensions", config.Viewer.ExtensionsDir)
 	}
 
+	if config.Shadow.Listen != "" {
+		var assetM *assets.Manager
+		if hub != nil {
+			assetM = hub.Assets()
+		}
+		logger.Info("shadow mode",
+			"listen", config.Shadow.Listen,
+			"address", config.Network.ServerAddress,
+		)
+		err := (&gotestbds.Shadow{
+			Listen:        config.Shadow.Listen,
+			RemoteAddress: config.Network.ServerAddress,
+			Packs:         config.Shadow.Packs,
+			Logger:        logger,
+			Viewer:        hub,
+			Assets:        assetM,
+		}).Run(ctx)
+		if err != nil && !errors.Is(err, context.Canceled) {
+			logger.Error("shadow stopped", "error", err)
+			os.Exit(1)
+		}
+		logger.Info("shut down")
+		return
+	}
+
 	logger.Info("starting bots",
 		"address", config.Network.ServerAddress,
 		"count", config.Bots.Count,

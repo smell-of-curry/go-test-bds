@@ -24,6 +24,7 @@ import {
 import { ensureBaseline } from "./ensureBaseline";
 import { ensureLiveExtract, liveExtractAvailable } from "./ensureLiveExtract";
 import { waitForJsonUiPaintReady } from "./jsonUiPaintReady";
+import { handleFontFile } from "./fontFile";
 import { handleJsonUiPackRequest } from "./jsonuiPackServer";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -74,6 +75,7 @@ async function startHarness(): Promise<Harness> {
         stream.handle(req, res);
         return;
       }
+      if (handleFontFile(url.pathname, res)) return;
       if (handleJsonUiPackRequest(req, res)) return;
       res.writeHead(404);
       res.end("not found");
@@ -186,6 +188,9 @@ test("ActionForm hollow fill dims center; form stacks above body nametag", async
       const controlFace = control?.querySelector(
         ":scope > .jsonui-image-face",
       ) as HTMLElement | null;
+      const hollowFace = hollow?.querySelector(
+        ":scope > .jsonui-image-face",
+      ) as HTMLElement | null;
       const title =
         ([...form.querySelectorAll(".jsonui-label")].find((el) =>
           (el.textContent ?? "").includes("Welcome"),
@@ -237,7 +242,9 @@ test("ActionForm hollow fill dims center; form stacks above body nametag", async
             getComputedStyle(controlFace).backgroundImage.includes("control") ||
             controlFace.style.borderImageSource.includes("control")),
         controlZ: control ? Number(getComputedStyle(control).zIndex || "0") : 0,
-        hollowIsolation: hollow ? getComputedStyle(hollow).isolation : "auto",
+        hollowFaceZ: hollowFace
+          ? Number(getComputedStyle(hollowFace).zIndex || "0")
+          : 0,
         controlBox: control
           ? {
               w: control.getBoundingClientRect().width,
@@ -277,9 +284,8 @@ test("ActionForm hollow fill dims center; form stacks above body nametag", async
     expect(info.controlOpacity).toBeGreaterThan(0.5);
     expect(info.controlOpacity).toBeLessThanOrEqual(1);
     expect(info.controlHasBg || info.controlOpacity === 0.8).toBe(true);
-    // Pack layer -1 kept; parent isolate keeps fill under title/frame chrome.
-    expect(info.controlZ).toBeLessThan(0);
-    expect(info.hollowIsolation).toBe("isolate");
+    // Hollow fill is layer -1 relative to the frame, so it paints behind it.
+    expect(info.controlZ).toBeLessThan(info.hollowFaceZ);
     expect(info.formOpen).toBe(true);
     expect(info.tagOverlapsForm).toBe(true);
     // Body nametag at z=10 must sit under raised HUD root (not nested host z).
@@ -319,8 +325,18 @@ test("ActionForm hollow fill dims center; form stacks above body nametag", async
           faceBox.right <= btnBox.right + 2 &&
           faceBox.top >= btnBox.top - 2 &&
           faceBox.bottom <= btnBox.bottom + 2,
-        panelZ: panel ? Number(getComputedStyle(panel).zIndex || "0") : -1,
-        btnZ: btn ? Number(getComputedStyle(btn).zIndex || "0") : -1,
+        iconZ: (() => {
+          const icon = panel?.querySelector(
+            '.jsonui[data-ui-name="image"]',
+          ) as HTMLElement | null;
+          return icon ? Number(getComputedStyle(icon).zIndex || "0") : -1;
+        })(),
+        chromeZ: (() => {
+          const chrome = btn?.querySelector(
+            '.jsonui[data-ui-name="button_image"]',
+          ) as HTMLElement | null;
+          return chrome ? Number(getComputedStyle(chrome).zIndex || "0") : -1;
+        })(),
       };
     });
     expect(iconInfo.hasFace).toBe(true);
@@ -328,7 +344,7 @@ test("ActionForm hollow fill dims center; form stacks above body nametag", async
     expect(iconInfo.faceW).toBeGreaterThan(8);
     expect(iconInfo.faceH).toBeGreaterThan(8);
     expect(iconInfo.inButton).toBe(true);
-    expect(iconInfo.panelZ).toBeGreaterThan(iconInfo.btnZ);
+    expect(iconInfo.iconZ).toBeGreaterThan(iconInfo.chromeZ);
 
     // Pixel proof: bright lime world under scrim outside; hollow center must
     // not read brighter (full-bright world punch-through).

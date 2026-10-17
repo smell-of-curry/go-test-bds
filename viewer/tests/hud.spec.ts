@@ -13,6 +13,7 @@ import {
   loadJsonlFrames,
   type JsonlFrame,
 } from "./fixtureServer";
+import { handleFontFile } from "./fontFile";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const viewerRoot = join(here, "..");
@@ -58,6 +59,7 @@ async function startHarness(bootstrap?: JsonlFrame[]): Promise<Harness> {
       stream.handle(req, res);
       return;
     }
+    if (handleFontFile(url.pathname, res)) return;
     res.writeHead(404);
     res.end("not found");
   }

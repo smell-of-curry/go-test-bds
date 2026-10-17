@@ -18,3 +18,6 @@ artifacts/.cache/
 viewer/dist.sha
 
 viewer/testdata/jsonui/live-v2.18.5*
+
+# Ad-hoc UILabHelper.app (TCC identity is local).
+viewer/tools/realclient/build/

@@ -246,7 +246,7 @@ Each module exports `viewerExtension` (or a default object):
 | Field | Role |
 |---|---|
 | `hudScreens` | Extra `root_panel` children to keep, or `{ id, namespace, name, wrapStack? }` fallbacks to mount |
-| `layoutRules` | Namespace/name corrections: `iconHosts`, `capRight`, `clipDock`, `maxWidth`, `layoutHiddenChildren`, `stackFactoryChildNames`, `clampToViewport`. Absent rules change nothing |
+| `layoutRules` | `stackFactoryChildNames`: factory children whose `$offset` only lands when each child is stacked. Absent rules change nothing |
 | `titleTokenClearDelayMs` | Token name → ms to hold a non-empty value after an empty clear |
 | `captureGates` | `{ labelIncludes, ready(tokens, root) }` still gates for `noSettle` captures |
 | `preloadTextures` | Pack texture paths (no extension) warmed before first paint |

@@ -11,7 +11,13 @@ import {
   prepareCollectionTree,
   type CollectionMap,
 } from "./collections.js";
-import { renderTree, type JsonUiAssets, type TextureInfoMap } from "./dom.js";
+import {
+  paintChildOrder,
+  renderTree,
+  type JsonUiAssets,
+  type TextureInfoMap,
+} from "./dom.js";
+import { measureMojangles } from "../mojangles.js";
 import {
   LABEL_LINE_HEIGHT_GUI,
   collapseLangPercentEscapes,
@@ -321,6 +327,8 @@ export function createFormRenderer(deps: FormRendererDeps): FormRenderer {
     deps.measureText ??
     ((text: string, fontScale: number) => {
       const plain = collapseLangPercentEscapes(text.replace(/[§&]./g, ""));
+      const moj = measureMojangles(plain, fontScale);
+      if (moj) return moj;
       const lines = plain.length ? plain.split("\n") : [""];
       let maxLen = 1;
       for (const line of lines) maxLen = Math.max(maxLen, line.length);
@@ -555,16 +563,7 @@ function tagCollectionIndices(
     // Must match paintNode: invisible subtrees are not emitted.
     if (!n.visible) return;
     order.push(n);
-    // Keep in sync with dom.ts paintSiblingRank (button_content above chrome).
-    const kids = [...n.children].sort((a, b) => {
-      const rank = (x: import("./layout.js").LayoutNode): number => {
-        if (x.element.name === "button_image") return -1000 + x.layer;
-        if (x.element.name === "button_content") return 1000 + x.layer;
-        return x.layer;
-      };
-      return rank(a) - rank(b);
-    });
-    for (const k of kids) walk(k);
+    for (const k of paintChildOrder(n.children)) walk(k);
   })(node);
 
   const els = domRoot.querySelectorAll<HTMLElement>(".jsonui");

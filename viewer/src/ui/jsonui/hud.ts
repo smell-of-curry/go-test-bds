@@ -4,6 +4,7 @@
  */
 
 import { mapMinecraftGlyphs } from "../formatCodes";
+import { MOJANGLES_STACK, measureMojangles } from "../mojangles";
 import { applyBindings } from "./bindings";
 import { renderTree, type JsonUiAssets } from "./dom";
 import { evalExpr, parseExpr } from "./expr";
@@ -234,8 +235,6 @@ export function createHudRenderer(
 ): HudRenderer {
   const guiScale = opts.guiScale ?? DEFAULT_GUI_SCALE;
   const lang = opts.lang;
-  const fontStack =
-    '"Minecraft", ui-sans-serif, system-ui, "Segoe UI", sans-serif';
   const measureText =
     opts.measureText ??
     (typeof document !== "undefined"
@@ -244,6 +243,8 @@ export function createHudRenderer(
           const plain = mapMinecraftGlyphs(
             collapseLangPercentEscapes(stripSection(text)),
           );
+          const moj = measureMojangles(plain, fontScale);
+          if (moj) return moj;
           const lines = plain.length ? plain.split("\n") : [""];
           const canvas = document.createElement("canvas");
           const ctx = canvas.getContext("2d");
@@ -251,20 +252,14 @@ export function createHudRenderer(
           const cssFontPx = LABEL_FONT_SIZE_GUI * guiScale * fontScale;
           let maxWcss = 1;
           if (ctx) {
-            const measureLine = (raw: string, bold: boolean): number => {
-              ctx.font = `${bold ? "700 " : ""}${cssFontPx}px ${fontStack}`;
+            const measureLine = (raw: string): number => {
+              ctx.font = `${cssFontPx}px ${MOJANGLES_STACK}`;
               const marker = ctx.measureText("M").width;
               return Math.max(0, ctx.measureText(`${raw}M`).width - marker);
             };
             for (const line of lines) {
               // Trailing spaces are significant (`Current Ping: ` + §value).
-              const raw = line || " ";
-              // Take bold max — §l titles (TUTORIAL COMPLETE) paint wider.
-              maxWcss = Math.max(
-                maxWcss,
-                measureLine(raw, false),
-                measureLine(raw, true),
-              );
+              maxWcss = Math.max(maxWcss, measureLine(line || " "));
             }
           } else {
             let maxLen = 1;
@@ -1369,7 +1364,8 @@ function paintHotbar(
       badge.style.fontSize = `${8 * guiScale}px`;
       badge.style.lineHeight = "1";
       badge.style.color = "#fff";
-      badge.style.textShadow = "1px 1px 0 #000";
+      badge.style.fontFamily = MOJANGLES_STACK;
+      badge.style.textShadow = `${guiScale}px ${guiScale}px 0 rgb(64, 64, 64)`;
       badge.style.pointerEvents = "none";
       slot.appendChild(badge);
     }

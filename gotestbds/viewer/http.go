@@ -21,6 +21,7 @@ func (h *Hub) routes() http.Handler {
 	mux.HandleFunc("GET /packs/index", h.handlePacksIndex)
 	mux.HandleFunc("GET /pack/{packId}/{path...}", h.handlePackFile)
 	mux.HandleFunc("GET /asset/{path...}", h.handleAsset)
+	mux.HandleFunc("GET /font/{name}", h.handleFont)
 	mux.HandleFunc("GET /viewer.json", h.handleViewerConfig)
 	mux.HandleFunc("GET /extensions/{path...}", h.handleExtensionFile)
 	mux.HandleFunc("GET /", h.handleRoot)

@@ -4,50 +4,17 @@
  */
 
 import { formatCodesToFragment } from "../formatCodes";
+import { ellipsizeMojangles, MOJANGLES_STACK } from "../mojangles";
 import {
   LABEL_FONT_SIZE_GUI,
   LABEL_LINE_HEIGHT_GUI,
   collapseLangPercentEscapes,
-  fitLabelPaintMetrics,
   resolveLabelFontScale,
 } from "./labelMetrics";
 import { localizeLabelText } from "./load";
 import type { LayoutNode } from "./layout";
 
 export { resolveLabelFontScale } from "./labelMetrics";
-
-const LABEL_FONT_STACK =
-  '"Minecraft", ui-sans-serif, system-ui, "Segoe UI", sans-serif';
-
-let inkMeasureCtx: CanvasRenderingContext2D | null | undefined;
-
-/**
- * Measure CSS font ink height (ascent+descent) at `fontPx`.
- *
- * @param fontPx - CSS font-size in px.
- * @param sample - Representative label text (plain).
- * @returns ink height in CSS px.
- */
-function measureCssInkHeight(fontPx: number, sample: string): number {
-  if (!(fontPx > 0)) return 0;
-  if (typeof document === "undefined") {
-    // Node layout tests: Bedrock 8/9 ratio is a lower bound; CSS fonts run taller.
-    return fontPx * 1.25;
-  }
-  if (inkMeasureCtx === undefined) {
-    inkMeasureCtx = document.createElement("canvas").getContext("2d");
-  }
-  if (!inkMeasureCtx) return fontPx * 1.25;
-  inkMeasureCtx.font = `${fontPx}px ${LABEL_FONT_STACK}`;
-  const plain = sample.replace(/[§&]./g, "") || "Hg";
-  const m = inkMeasureCtx.measureText(plain);
-  const ascent = m.actualBoundingBoxAscent;
-  const descent = m.actualBoundingBoxDescent;
-  if (!Number.isFinite(ascent) || !Number.isFinite(descent)) {
-    return fontPx * 1.25;
-  }
-  return Math.max(fontPx, ascent + descent);
-}
 
 /** Natural pixel size + optional texture-json nineslice for a pack texture. */
 export interface TextureInfo {
@@ -136,14 +103,14 @@ export function renderTree(
   root.style.width = "100%";
   root.style.height = "100%";
   root.style.pointerEvents = "none";
-  root.style.fontFamily =
-    '"Minecraft", ui-sans-serif, system-ui, "Segoe UI", sans-serif';
+  root.style.fontFamily = MOJANGLES_STACK;
   root.style.color = "#fff";
-  root.style.textShadow = "1px 1px 0 #000";
+  // Screen edge clips. Off-screen overflow must not grow scrollbars.
+  root.style.overflow = "hidden";
   host.appendChild(root);
 
   // Root box is absolute in viewport space; children paint parent-relative.
-  paintNode(node, root, opts, { x: 0, y: 0 });
+  paintNode(node, root, opts, { x: 0, y: 0 }, 0);
   return root;
 }
 
@@ -220,22 +187,97 @@ export function lookupTextureInfo(
  * @param elemCss - Painted element size in CSS px.
  * @returns size + position CSS pixel values.
  */
+/**
+ * `keep_ratio` defaults true. Only an explicit false stretches the texture.
+ * Nineslice and tiled faces ignore this (they never call it).
+ *
+ * @param raw - Element `keep_ratio` prop.
+ * @returns false only for `false` / `"false"` / `0`.
+ */
+export function imageKeepsRatio(raw: unknown): boolean {
+  if (raw === false || raw === 0 || raw === "false") return false;
+  return true;
+}
+
+/**
+ * CSS background for an image face, in CSS pixels (pixelated scale).
+ *
+ * `keepRatio` aspect-fits the UV crop (or the whole texture) inside the
+ * element and centers it. Crop aspect is `uv_size`, not the full PNG, when
+ * a crop is set. `keepRatio: false` stretches that rect to the element.
+ *
+ * @param natural - Full texture pixel size.
+ * @param uv - Crop origin, or null when the whole texture is shown.
+ * @param uvSize - Crop size, or null.
+ * @param elemCss - Element box in CSS px.
+ * @param keepRatio - Aspect-fit when true.
+ * @returns `background-size` and `background-position`.
+ */
+export function fitImageBackgroundCss(
+  natural: { w: number; h: number },
+  uv: [number, number] | null,
+  uvSize: [number, number] | null,
+  elemCss: { w: number; h: number },
+  keepRatio: boolean,
+): { size: string; position: string } {
+  const ew = Math.max(0, elemCss.w);
+  const eh = Math.max(0, elemCss.h);
+  const hasCrop =
+    uv !== null &&
+    uvSize !== null &&
+    uvSize[0]! > 0 &&
+    uvSize[1]! > 0 &&
+    natural.w > 0 &&
+    natural.h > 0;
+  const cropW = hasCrop ? uvSize![0]! : Math.max(1, natural.w);
+  const cropH = hasCrop ? uvSize![1]! : Math.max(1, natural.h);
+
+  let fitW = ew;
+  let fitH = eh;
+  let ox = 0;
+  let oy = 0;
+  if (keepRatio && cropW > 0 && cropH > 0 && ew > 0 && eh > 0) {
+    if (ew * cropH > eh * cropW) {
+      fitH = eh;
+      fitW = eh * (cropW / cropH);
+    } else {
+      fitW = ew;
+      fitH = ew * (cropH / cropW);
+    }
+    fitW = Math.round(fitW);
+    fitH = Math.round(fitH);
+    ox = Math.round((ew - fitW) / 2);
+    oy = Math.round((eh - fitH) / 2);
+  }
+
+  if (!hasCrop) {
+    return {
+      size: `${cssPx(fitW)} ${cssPx(fitH)}`,
+      position: `${cssPx(ox)} ${cssPx(oy)}`,
+    };
+  }
+  const [u, v] = uv!;
+  const [uw, uh] = uvSize!;
+  const bw = (natural.w * fitW) / uw;
+  const bh = (natural.h * fitH) / uh;
+  return {
+    size: `${cssPx(bw)} ${cssPx(bh)}`,
+    position: `${cssPx(ox + (-u * fitW) / uw)} ${cssPx(oy + (-v * fitH) / uh)}`,
+  };
+}
+
+function cssPx(n: number): string {
+  const r = Math.round(n * 1000) / 1000;
+  return `${r}px`;
+}
+
 export function uvBackgroundCss(
   natural: { w: number; h: number },
   uv: [number, number],
   uvSize: [number, number],
   elemCss: { w: number; h: number },
 ): { size: string; position: string } {
-  const [u, v] = uv;
-  const [uw, uh] = uvSize;
-  const ew = Math.max(0, elemCss.w);
-  const eh = Math.max(0, elemCss.h);
-  const bw = (natural.w * ew) / uw;
-  const bh = (natural.h * eh) / uh;
-  return {
-    size: `${bw}px ${bh}px`,
-    position: `${(-u * ew) / uw}px ${(-v * eh) / uh}px`,
-  };
+  return fitImageBackgroundCss(natural, uv, uvSize, elemCss, false);
 }
 
 function paintNode(
@@ -243,19 +285,12 @@ function paintNode(
   parentEl: HTMLElement,
   opts: RenderOptions,
   parentOrigin: { x: number; y: number },
+  parentLayer: number,
 ): void {
-  // Hidden hosts drop their own paint. Visible children are painted when
-  // layout kept them (`layoutHiddenChildren`).
-  if (!node.visible) {
-    const kids = node.children
-      .filter((c) => c.visible)
-      .sort((a, b) => a.layer - b.layer);
-    for (const child of kids) {
-      paintNode(child, parentEl, opts, parentOrigin);
-    }
-    return;
-  }
+  // Hidden hosts drop themselves and their children.
+  if (!node.visible) return;
 
+  const abs = absolutePaintLayer(parentLayer, node.layer);
   const el = document.createElement("div");
   el.className = `jsonui jsonui-${cssType(node.element.type)}`;
   el.dataset.uiName = node.element.name;
@@ -273,10 +308,13 @@ function paintNode(
   el.style.width = `${Math.max(0, box.w * s)}px`;
   el.style.height = `${Math.max(0, box.h * s)}px`;
   el.style.boxSizing = "border-box";
-  // `new_ui_button_panel` authors button_image at layer 1 and button_content at
-  // 0 — Bedrock still paints the label on top of the chrome. CSS z-index from
-  // raw `layer` would hide the label under the opaque button face.
-  el.style.zIndex = String(paintLayerZIndex(node.element.name, node.layer));
+  // A z-index creates a stacking context that traps descendants. Containers
+  // stay `auto` so a grandchild's absolute layer can paint above an uncle
+  // (vanilla button label is panel+0+3+2, above button_image at panel+1).
+  // Leaves and labels take the absolute layer themselves.
+  const hasVisibleChild = node.children.some((c) => c.visible);
+  const leafStack = !hasVisibleChild || node.element.type === "label";
+  if (leafStack) el.style.zIndex = String(abs);
   el.style.overflow =
     node.element.props.clips_children === true ? "hidden" : "visible";
 
@@ -288,7 +326,7 @@ function paintNode(
 
   switch (node.element.type) {
     case "image":
-      applyImage(el, node, opts);
+      applyImage(el, node, opts, abs, !leafStack);
       break;
     case "label":
       applyLabel(el, node, opts);
@@ -312,55 +350,59 @@ function paintNode(
 
   parentEl.appendChild(el);
 
-  // Paint siblings in layer order for stable stacking within this parent.
-  const kids = [...node.children].sort(
-    (a, b) => paintSiblingRank(a) - paintSiblingRank(b),
-  );
-  // Pack layer < 0 means behind siblings (hollow `control` at -1). CSS
-  // z-index < 0 under a composited parent (border-image / opacity) otherwise
-  // drops the child out of the painted layer — isolate so negatives stay
-  // inside this parent, under the image face / title chrome at layer ≥ 0.
-  if (kids.some((c) => c.visible && c.layer < 0)) {
-    el.style.isolation = "isolate";
-  }
+  // Bedrock paints children in declaration order, `layer` low to high.
+  const kids = paintChildOrder(node.children);
   for (const child of kids) {
-    paintNode(child, el, opts, { x: box.x, y: box.y });
+    paintNode(child, el, opts, { x: box.x, y: box.y }, abs);
+  }
+  // Translucent image face paints over its own children at the same
+  // effective layer (cell J: white 0.5 over red = 255,128,128). An opaque
+  // parent does not — cell D's bars stay above the grey plate. A higher
+  // child layer still wins via z-index.
+  const alpha =
+    typeof node.element.props.alpha === "number" ? node.element.props.alpha : 1;
+  if (alpha < 1) {
+    const faces: Element[] = [];
+    for (const child of el.children) {
+      if (child.classList.contains("jsonui-image-face")) faces.push(child);
+    }
+    for (const face of faces) el.appendChild(face);
   }
 }
 
 /**
- * CSS z-index for a laid-out control. Button chrome stays under label content.
+ * Absolute paint layer. `layer` is an offset from the parent.
  *
- * @param name - Resolved element name.
- * @param layer - Pack `layer` value.
- * @returns z-index used on the DOM node.
+ * @param parentLayer - Parent absolute layer (0 at the JSON UI root).
+ * @param layer - This element's authored `layer` (default 0).
+ * @returns parent + child.
  */
-export function paintLayerZIndex(name: string, layer: number): number {
-  if (name === "button_content") return Math.max(layer, 2);
-  if (name === "button_image") return Math.min(layer, 1);
-  // Keep pack negatives (e.g. hollow control layer -1). Parents with
-  // negative-layer children set `isolation: isolate` so the fill stays
-  // behind sibling chrome instead of vanishing under the composited parent.
-  return layer;
+export function absolutePaintLayer(parentLayer: number, layer: number): number {
+  return parentLayer + layer;
 }
 
 /**
- * Sibling paint order rank (lower first). Button chrome before label content.
+ * Sibling paint order: lower `layer` first, then declaration index.
+ * Later siblings with the same layer paint on top.
  *
- * @param node - Layout child.
- * @returns sort key.
+ * @param children - Layout children in declaration order.
+ * @returns sorted copy.
  */
-function paintSiblingRank(node: LayoutNode): number {
-  const name = node.element.name;
-  if (name === "button_image") return -1000 + node.layer;
-  if (name === "button_content") return 1000 + node.layer;
-  return node.layer;
+export function paintChildOrder<T extends { layer: number }>(
+  children: readonly T[],
+): T[] {
+  return children
+    .map((child, index) => ({ child, index }))
+    .sort((a, b) => a.child.layer - b.child.layer || a.index - b.index)
+    .map((row) => row.child);
 }
 
 function applyImage(
   el: HTMLElement,
   node: LayoutNode,
   opts: RenderOptions,
+  absLayer: number,
+  liftFace: boolean,
 ): void {
   const texture =
     typeof node.element.props.texture === "string"
@@ -386,20 +428,14 @@ function applyImage(
   face.style.imageRendering = "pixelated";
   face.style.backgroundRepeat = "no-repeat";
   face.style.backgroundColor = "transparent";
-  face.style.zIndex = "0";
+  // Host is a stacking context on leaves. When the image has children, the
+  // host stays auto and the face takes the absolute layer so those children
+  // can paint above uncles.
+  face.style.zIndex = liftFace ? String(absLayer) : "0";
 
-  const tint = asColor(node.element.props.color);
+  const tint = colorChannels(node.element.props.color);
   const info = lookupTextureInfo(texture, opts);
-  // Sidebar dock: prefer native 61×405 aspect over texture-json nineslice /
-  // stretch — nineslice was filling the wide clipped box into a fat black slab.
-  if (node.element.props.$viewer_dock_natural === true) {
-    face.style.backgroundImage = `url("${cssUrl(url)}")`;
-    const eh = Math.max(0, node.box.h * opts.guiScale);
-    const tw = eh * (61 / 405);
-    face.style.backgroundSize = `${tw}px ${eh}px`;
-    face.style.backgroundPosition = "right center";
-    face.style.backgroundRepeat = "no-repeat";
-  } else if (node.element.props.tiled === true) {
+  if (node.element.props.tiled === true) {
     // Pack loadingScreen uses common.dirt_background (tiled bg32). Black
     // underlay covers the world if the tile texture 404s.
     el.style.backgroundColor = "#000";
@@ -449,7 +485,12 @@ function applyImage(
       const uvSize = asIntPair(node.element.props.uv_size);
       const hasUvSize = !!(uvSize && uvSize[0]! > 0 && uvSize[1]! > 0);
       const uv = resolveImageUv(node.element.props.uv, hasUvSize);
-      if (
+      const keep = imageKeepsRatio(node.element.props.keep_ratio);
+      const elemCss = {
+        w: Math.max(0, node.box.w * opts.guiScale),
+        h: Math.max(0, node.box.h * opts.guiScale),
+      };
+      const canCrop = !!(
         uv &&
         uvSize &&
         info &&
@@ -457,24 +498,18 @@ function applyImage(
         info.h > 0 &&
         uvSize[0]! > 0 &&
         uvSize[1]! > 0
-      ) {
-        const css = uvBackgroundCss({ w: info.w, h: info.h }, uv, uvSize, {
-          w: Math.max(0, node.box.w * opts.guiScale),
-          h: Math.max(0, node.box.h * opts.guiScale),
-        });
+      );
+      const canFit = !!(info && info.w > 0 && info.h > 0);
+      if (canCrop || (keep && canFit)) {
+        const css = fitImageBackgroundCss(
+          { w: info!.w, h: info!.h },
+          canCrop ? uv! : null,
+          canCrop ? uvSize! : null,
+          elemCss,
+          keep,
+        );
         face.style.backgroundSize = css.size;
         face.style.backgroundPosition = css.position;
-      } else if (
-        node.element.props.$viewer_bg_align === "left" ||
-        node.element.props.$viewer_bg_align === "right"
-      ) {
-        // Clipped overflow image: paint as if still full-width. Prefer left —
-        // right-align showed only the opaque end of textures with a left pad.
-        const scale = Number(node.element.props.$viewer_bg_scale_x) || 1;
-        const align =
-          node.element.props.$viewer_bg_align === "right" ? "right" : "left";
-        face.style.backgroundSize = `${scale * 100}% 100%`;
-        face.style.backgroundPosition = `${align} center`;
       } else {
         face.style.backgroundSize = "100% 100%";
         face.style.backgroundPosition = "0 0";
@@ -482,35 +517,15 @@ function applyImage(
     }
   }
 
-  // Colorable whites (battle white_transparency): replace RGB with tint,
-  // keep texture alpha. 404 background → nothing to filter → transparent.
-  // Skip identity white `[1,1,1]` — common_buttons sets that as "no tint";
-  // applying feFlood white turns moveSelection / plates into solid white
-  // slabs (run-42 mid-left battle chrome).
-  if (tint && !isIdentityWhiteTint(node.element.props.color)) {
-    face.style.filter = svgTintFilter(tint);
-  }
+  // Bedrock `color` multiplies texture RGB. Alpha channel stays the texture's.
+  // `[1,1,1]` is the identity matrix (no visible change).
+  if (tint) face.style.filter = svgMultiplyTintFilter(tint);
 
   const alpha =
     typeof node.element.props.alpha === "number" ? node.element.props.alpha : 1;
   face.style.opacity = alpha < 1 ? String(alpha) : "1";
 
   el.appendChild(face);
-}
-
-/**
- * True when `color` is Bedrock's "untinted" white (`[1,1,1]` / `[1,1,1,1]`).
- *
- * @param raw - Element `color` prop.
- * @returns whether tinting should be skipped.
- */
-function isIdentityWhiteTint(raw: unknown): boolean {
-  if (!Array.isArray(raw) || raw.length < 3) return false;
-  const r = Number(raw[0]);
-  const g = Number(raw[1]);
-  const b = Number(raw[2]);
-  if (![r, g, b].every(Number.isFinite)) return false;
-  return r >= 0.999 && g >= 0.999 && b >= 0.999;
 }
 
 /**
@@ -526,17 +541,19 @@ function looksLikeTexturePath(texture: string): boolean {
 }
 
 /**
- * Build a CSS `filter: url(...)` that paints `tint` through the source alpha.
+ * CSS filter that multiplies source RGB by `tint`. Alpha is unchanged.
  *
- * @param tint - CSS `rgb(r, g, b)` color.
- * @returns filter value.
+ * @param tint - Bedrock `color` channels in 0..1.
+ * @returns `filter` value.
  */
-function svgTintFilter(tint: string): string {
+function svgMultiplyTintFilter(tint: [number, number, number]): string {
+  const f = (n: number): string => String(Math.round(n * 1000) / 1000);
+  const [r, g, b] = tint;
+  const values = `${f(r)} 0 0 0 0 0 ${f(g)} 0 0 0 0 0 ${f(b)} 0 0 0 0 0 1 0`;
   const svg =
     `<svg xmlns="http://www.w3.org/2000/svg">` +
     `<filter id="t" color-interpolation-filters="sRGB">` +
-    `<feFlood flood-color="${tint}" result="f"/>` +
-    `<feComposite in="f" in2="SourceAlpha" operator="in"/>` +
+    `<feColorMatrix type="matrix" values="${values}"/>` +
     `</filter></svg>`;
   return `url("data:image/svg+xml,${encodeURIComponent(svg)}#t")`;
 }
@@ -684,41 +701,30 @@ function applyLabel(
     localizeLabelText(unbound, node.element.props.localize, opts.lang),
   );
   const fontScale = resolveLabelFontScale(node.element.props);
-  // Same constants as hud/forms measureText — not ceil(font*1.125) drift.
-  let fontPx = LABEL_FONT_SIZE_GUI * opts.guiScale * fontScale;
-  let linePx = LABEL_LINE_HEIGHT_GUI * opts.guiScale * fontScale;
-  const boxH = Math.max(0, node.box.h * opts.guiScale);
-  const multiline = text.includes("\n");
-  // Subpixel boxes (e.g. 8.4gui×2 = 16.8) floor the overflow clip edge —
-  // ceil so the last ink/shadow row isn't cut.
-  let paintH = boxH > 0 ? Math.ceil(boxH - 1e-6) : 0;
-  // Tight single-line: CSS Minecraft ink paints ~1px past the ceiled layout
-  // box (descenders / last glyph row). Grow the paint box — not a per-label
-  // hack; any short single-line overflow:hidden label hits this.
-  if (paintH > 0 && !multiline && linePx >= paintH * 0.8) paintH += 1;
-  if (paintH > boxH) el.style.height = `${paintH}px`;
-  // Root `.jsonui-root` inherits `text-shadow: 1px 1px`; explicit shadow uses
-  // guiScale. Budget that into the fit so overflow:hidden keeps the outline.
-  const shadowPx =
-    node.element.props.shadow === true ? opts.guiScale : paintH > 0 ? 1 : 0;
-  const inkHeight = measureCssInkHeight(fontPx, text);
-  const fitted = fitLabelPaintMetrics({
-    fontPx,
-    linePx,
-    boxH: paintH || boxH,
-    shadowPx,
-    multiline,
-    inkHeight,
-  });
-  fontPx = fitted.fontPx;
-  linePx = fitted.linePx;
+  // Probe cell I: `font_scale_factor` 2 in a 12-tall box and `font_size`
+  // large in an 8-tall box draw no glyphs (the cell is shorter than the
+  // 8px glyph). Default (exactly 8) and `small` (4) still draw.
+  if (LABEL_FONT_SIZE_GUI * fontScale > node.box.h + 0.01) {
+    return;
+  }
+  // Single-line boxes truncate with "...". Multi-line / max_width wrap.
+  const shown = labelClipsWithEllipsis(
+    text,
+    node.box.h,
+    fontScale,
+    node.element.props.max_width,
+  )
+    ? ellipsizeMojangles(text, node.box.w, fontScale)
+    : text;
+  // Bedrock clips; it does not shrink the font to fit the box.
+  const fontPx = LABEL_FONT_SIZE_GUI * opts.guiScale * fontScale;
+  const linePx = LABEL_LINE_HEIGHT_GUI * opts.guiScale * fontScale;
   el.style.fontSize = `${fontPx}px`;
   el.style.lineHeight = `${linePx}px`;
+  el.style.fontFamily = MOJANGLES_STACK;
   el.style.whiteSpace = "pre-wrap";
   el.style.overflowWrap = "anywhere";
-  // Dialogue body (`main_label`) sits under a hollow title band; keep glyphs
-  // visible when the measured box is a hair short (avoid first-line clip).
-  el.style.overflow = node.element.name === "main_label" ? "visible" : "hidden";
+  el.style.overflow = "hidden";
   const align = node.element.props.text_alignment;
   if (align === "center" || align === "left" || align === "right") {
     el.style.textAlign = align;
@@ -727,24 +733,65 @@ function applyLabel(
   const color = asColor(node.element.props.color);
   if (color) el.style.color = color;
 
-  if (node.element.props.shadow === true) {
-    el.style.textShadow = `${opts.guiScale}px ${opts.guiScale}px 0 #000`;
-  }
-
   const alpha =
     typeof node.element.props.alpha === "number" ? node.element.props.alpha : 1;
   if (alpha < 1) el.style.opacity = String(alpha);
 
-  el.appendChild(formatCodesToFragment(text));
+  el.appendChild(
+    formatCodesToFragment(shown, {
+      guiScale: opts.guiScale * fontScale,
+      shadow: node.element.props.shadow === true,
+    }),
+  );
+  // Block canvas ignores text-align. inline-block honors center/right
+  // after the line has been ellipsized to the box.
+  const canvas = el.querySelector("canvas");
+  if (canvas instanceof HTMLElement) {
+    canvas.style.display = "inline-block";
+    canvas.style.verticalAlign = "top";
+  }
 }
 
-function asColor(raw: unknown): string | null {
+/**
+ * True when a too-wide label should end in `...` instead of wrapping.
+ *
+ * Skips explicit newlines and `max_width` (vanilla hover / body wrap).
+ * A box tall enough for two line boxes is a wrap target.
+ *
+ * @param text - Display text.
+ * @param boxH - Laid-out height in gui px.
+ * @param fontScale - Effective font scale.
+ * @param maxWidth - Element `max_width`, if any.
+ * @returns whether to ellipsize.
+ */
+export function labelClipsWithEllipsis(
+  text: string,
+  boxH: number,
+  fontScale: number,
+  maxWidth: unknown,
+): boolean {
+  if (text.includes("\n")) return false;
+  if (maxWidth !== undefined && maxWidth !== null && maxWidth !== "") {
+    return false;
+  }
+  const line = LABEL_LINE_HEIGHT_GUI * (fontScale > 0 ? fontScale : 1);
+  if (boxH >= line * 2 - 0.01) return false;
+  return true;
+}
+
+function colorChannels(raw: unknown): [number, number, number] | null {
   if (!Array.isArray(raw) || raw.length < 3) return null;
   const r = clamp01(Number(raw[0]));
   const g = clamp01(Number(raw[1]));
   const b = clamp01(Number(raw[2]));
   if (![r, g, b].every(Number.isFinite)) return null;
-  return `rgb(${Math.round(r * 255)}, ${Math.round(g * 255)}, ${Math.round(b * 255)})`;
+  return [r, g, b];
+}
+
+function asColor(raw: unknown): string | null {
+  const rgb = colorChannels(raw);
+  if (!rgb) return null;
+  return `rgb(${Math.round(rgb[0] * 255)}, ${Math.round(rgb[1] * 255)}, ${Math.round(rgb[2] * 255)})`;
 }
 
 function clamp01(n: number): number {

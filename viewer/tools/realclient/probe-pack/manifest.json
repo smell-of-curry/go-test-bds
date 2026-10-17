@@ -1,0 +1,17 @@
+{
+  "format_version": 2,
+  "header": {
+    "name": "go-test-bds JSON UI probe",
+    "description": "Empirical JSON UI semantic probe. Generated textures only.",
+    "uuid": "5586ccac-1efe-4eb8-a46f-328cd1d318d9",
+    "version": [1, 0, 0],
+    "min_engine_version": [1, 21, 0]
+  },
+  "modules": [
+    {
+      "type": "resources",
+      "uuid": "6f5e031e-e812-40d6-8e20-3f57152e6866",
+      "version": [1, 0, 0]
+    }
+  ]
+}

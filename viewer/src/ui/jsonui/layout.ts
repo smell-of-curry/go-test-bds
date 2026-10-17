@@ -153,22 +153,8 @@ function layoutElement(
     };
   }
 
-  // Hidden subtrees are stubs. Laying them out made large forms take
-  // seconds. An extension can keep children of specific hidden hosts
-  // (`layoutHiddenChildren`); paint draws those children if they stay visible.
+  // Hidden subtrees are stubs. Laying them out made large forms take seconds.
   if (!visible) {
-    const keepKids = opts.rules?.layoutHiddenChildren?.some((r) =>
-      ruleMatches(r, el),
-    );
-    if (keepKids && el.controls.length > 0) {
-      return {
-        element: el,
-        box: { x: parentBox.x, y: parentBox.y, w: 0, h: 0 },
-        children: layoutControls(el.controls, parentBox, viewport, opts),
-        layer,
-        visible: false,
-      };
-    }
     return {
       element: el,
       box: { x: parentBox.x, y: parentBox.y, w: 0, h: 0 },
@@ -315,20 +301,14 @@ function layoutAnchored(
   visible: boolean,
   layer: number,
 ): LayoutNode {
-  // Sidebar ball/ring hosts omit size — wiki "default"=100% would fill the
-  // row and center the square mid-plate. Pack plate `offset: [-11%,0]` matches
-  // data.png's ~12% left pad so the square can sit on the plate's left edge;
-  // treat omitted size as content (`100%c`) and default anchors as left_middle.
-  const sidebarIconHost = isIconHost(el, opts);
-  const sizeSpec = sidebarIconHost
-    ? (["100%c", "100%c"] as [unknown, unknown])
-    : readSizePair(el.props.size);
+  // Omitted / "default" size is 100% of the parent. Default anchors are center.
+  const sizeSpec = readSizePair(el.props.size);
   const minSpec = readSizePair(el.props.min_size);
   const maxSpec = readSizePair(el.props.max_size);
   const wParsed = parseSize(sizeSpec[0]);
   const hParsed = parseSize(sizeSpec[1]);
-  const anchorFromDefault: Anchor = sidebarIconHost ? "left_middle" : "center";
-  const anchorToDefault: Anchor = sidebarIconHost ? "left_middle" : "center";
+  const anchorFromDefault: Anchor = "center";
+  const anchorToDefault: Anchor = "center";
 
   const needsChildPass = wParsed.needsChildren || hParsed.needsChildren;
   let childrenW = 0;
@@ -439,15 +419,6 @@ function layoutAnchored(
     remainingH: fill.remainingH,
   });
 
-  const widthCap = opts.rules?.maxWidth?.find((r) => ruleMatches(r, el));
-  if (widthCap) {
-    const maxW = Math.min(
-      widthCap.maxPx,
-      Math.max(widthCap.minPx, viewport.width * widthCap.viewportRatio),
-    );
-    if (boxSize.w > maxW) boxSize = { ...boxSize, w: maxW };
-  }
-
   const offset = resolveOffset(el.props.offset, boxSize, parentBox, viewport);
   const pos = positionWithAnchors(
     parentBox,
@@ -458,70 +429,12 @@ function layoutAnchored(
   );
 
   const selfBox: LayoutBox = { x: pos.x, y: pos.y, w: boxSize.w, h: boxSize.h };
-  const anchorFrom = readAnchor(el.props.anchor_from, anchorFromDefault);
-  clampHorizontalInParent(selfBox, parentBox, anchorFrom);
-  applyViewportClamp(selfBox, el, viewport, opts);
 
-  // Right-anchored panels an extension asked to cap (a wide %y-derived
-  // host otherwise paints a slab). Inset so an overflowing child stays on
-  // screen after the dock clip below.
-  const cap = opts.rules?.capRight?.find(
-    (r) => r.namespace === el.namespace && r.name === el.name,
-  );
-  if (cap && ANCHORS[anchorFrom].x >= 0.999) {
-    const maxW = viewport.width * cap.maxWidthRatio;
-    if (selfBox.w > maxW + 1) {
-      selfBox.w = maxW;
-      selfBox.x = parentBox.x + parentBox.w - selfBox.w;
-    }
-    const inset = Math.max(cap.minInset, selfBox.w * cap.insetRatio);
-    const parentRight = parentBox.x + parentBox.w;
-    if (selfBox.x + selfBox.w > parentRight - inset) {
-      selfBox.x = parentRight - inset - selfBox.w;
-    }
-    clampHorizontalInParent(selfBox, parentBox, anchorFrom);
-  }
-
-  // Right-anchored dock an extension named: clip the *paint* box to the
-  // on-screen slice but lay out children against the full authored width.
-  let childLayoutBox = selfBox;
-  const clipDock = opts.rules?.clipDock?.some(
-    (r) => r.namespace === el.namespace && r.name === el.name,
-  );
-  if (clipDock && ANCHORS[anchorFrom].x >= 0.999) {
-    const fullDock = { ...selfBox };
-    const parentRight = parentBox.x + parentBox.w;
-    const overflow = selfBox.x + selfBox.w - parentRight;
-    if (overflow > 1) {
-      selfBox.w = Math.max(0, parentRight - selfBox.x);
-    }
-    if (selfBox.w > 0) el.props.$viewer_dock_natural = true;
-    childLayoutBox = fullDock;
-  } else if (ANCHORS[anchorFrom].x >= 0.999) {
-    const parentRight = parentBox.x + parentBox.w;
-    const overflow = selfBox.x + selfBox.w - parentRight;
-    if (overflow > 1) {
-      const fullW = selfBox.w;
-      selfBox.w = Math.max(0, parentRight - selfBox.x);
-      if (selfBox.w > 0) {
-        // Non-dock right overflow: pin left of stretched texture so
-        // transparent pads are not stretched across the visible slice.
-        el.props.$viewer_bg_align = "left";
-        el.props.$viewer_bg_scale_x = fullW / selfBox.w;
-      }
-    }
-  }
-
-  // Re-layout children into final absolute parent box when we have controls.
+  // Children may hang outside this box. `clips_children` and the screen
+  // root clip paint; layout does not shrink or shove the box back in.
   if (el.controls.length > 0) {
-    childNodes = layoutControls(el.controls, childLayoutBox, viewport, opts);
+    childNodes = layoutControls(el.controls, selfBox, viewport, opts);
   }
-
-  clampMatchingSubtrees(
-    { element: el, box: selfBox, children: childNodes, layer, visible },
-    viewport,
-    opts,
-  );
 
   return {
     element: el,
@@ -721,12 +634,6 @@ function layoutStack(
     w: stackSize.w,
     h: stackSize.h,
   };
-  {
-    const anchorFrom = readAnchor(el.props.anchor_from, "center");
-    clipRightOverflow(selfBox, parentBox, anchorFrom);
-    clampHorizontalInParent(selfBox, parentBox, anchorFrom);
-    applyViewportClamp(selfBox, el, viewport, opts);
-  }
 
   // Final pass: place children along the stack.
   //
@@ -804,18 +711,8 @@ function layoutStack(
       cursor += w;
     }
 
-    // Viewport clamps during child layout use pre-shift coords. Re-clamp
-    // `clampToViewport` subtrees after flow translation.
-    clampMatchingSubtrees(stacked, viewport, opts);
-
     outChildren.push(stacked);
   }
-
-  clampMatchingSubtrees(
-    { element: el, box: selfBox, children: outChildren, layer, visible },
-    viewport,
-    opts,
-  );
 
   return {
     element: el,
@@ -916,12 +813,6 @@ function layoutFactoryOverlay(
     w: boxSize.w,
     h: boxSize.h,
   };
-  {
-    const anchorFrom = readAnchor(el.props.anchor_from, "center");
-    clipRightOverflow(selfBox, parentBox, anchorFrom);
-    clampHorizontalInParent(selfBox, parentBox, anchorFrom);
-    applyViewportClamp(selfBox, el, viewport, opts);
-  }
   const children = layoutControls(el.controls, selfBox, viewport, opts);
   return { element: el, box: selfBox, children, layer, visible };
 }
@@ -1045,11 +936,6 @@ function layoutGrid(
     w: finalSize.w,
     h: finalSize.h,
   };
-  {
-    const anchorFrom = readAnchor(el.props.anchor_from, "center");
-    clipRightOverflow(selfBox, parentBox, anchorFrom);
-    clampHorizontalInParent(selfBox, parentBox, anchorFrom);
-  }
 
   const children: LayoutNode[] = [];
   for (let i = 0; i < items.length; i++) {
@@ -1369,152 +1255,6 @@ function positionWithAnchors(
 }
 
 /**
- * Extension-listed icon hosts. They omit `size`; wiki default `100%`+`center`
- * would fill the row. Treat them as content-sized and left-anchored, ignoring
- * a latched fill size from a previous frame.
- *
- * @param el - Element being laid out.
- * @param opts - Layout options (rules.iconHosts).
- * @returns true when this host should content-size + left-anchor.
- */
-function isIconHost(el: ResolvedElement, opts: LayoutOptions): boolean {
-  return (
-    opts.rules?.iconHosts?.some(
-      (r) => r.namespace === el.namespace && r.name === el.name,
-    ) ?? false
-  );
-}
-
-/**
- * Clip a right-anchored box that hangs past the parent (sidebar dock `+47%`).
- * Keep the left edge (offset stays meaningful) and shrink width so the right
- * edge meets the parent — flushing left painted the full stretched dock as a
- * black slab.
- *
- * @param box - Positioned box (mutated in place when clipped).
- * @param parent - Parent layout box.
- * @param anchorFrom - Element `anchor_from`.
- */
-function clipRightOverflow(
-  box: LayoutBox,
-  parent: LayoutBox,
-  anchorFrom: Anchor,
-): void {
-  if (ANCHORS[anchorFrom].x < 0.999) return;
-  const parentRight = parent.x + parent.w;
-  if (box.x + box.w <= parentRight) return;
-  box.w = Math.max(0, parentRight - box.x);
-}
-
-/**
- * Shift a non-right-anchored box back inside its parent when more than half
- * of it hangs off. Small overhangs (about half a 40px chip) stay put.
- * `clampToViewport` rules pull named elements in separately.
- *
- * Full-width (or wider) children are skipped: a `["100%","100%"]` host
- * with a positive offset must keep that offset. Clamping it to `x=0`
- * stacks it on its siblings.
- *
- * @param box - Positioned box (mutated in place when clamped).
- * @param parent - Parent layout box.
- * @param anchorFrom - Element `anchor_from`.
- */
-function clampHorizontalInParent(
-  box: LayoutBox,
-  parent: LayoutBox,
-  anchorFrom: Anchor,
-): void {
-  if (ANCHORS[anchorFrom].x >= 0.999) return;
-  // `>=` — equal-width + offset must keep the offset (not flush to 0).
-  if (box.w <= 0 || box.w >= parent.w) return;
-  const parentRight = parent.x + parent.w;
-  if (box.x < parent.x && parent.x - box.x > box.w * 0.5) {
-    box.x = parent.x;
-  }
-  if (
-    box.x + box.w > parentRight &&
-    box.x + box.w - parentRight > box.w * 0.5
-  ) {
-    box.x = parentRight - box.w;
-  }
-}
-
-/**
- * True when an extension layout rule applies to this element.
- *
- * @param rule - Matcher from {@link LayoutQuirkRules}.
- * @param el - Element being laid out.
- * @returns whether every set field matches.
- */
-function ruleMatches(
-  rule: {
-    namespace?: string;
-    name?: string;
-    nameIncludes?: string;
-    size?: readonly [number, number];
-  },
-  el: ResolvedElement,
-): boolean {
-  if (rule.namespace && rule.namespace !== el.namespace) return false;
-  if (rule.name && rule.name !== el.name) return false;
-  if (rule.nameIncludes && !el.name.includes(rule.nameIncludes)) return false;
-  if (rule.size) {
-    const sz = el.props.size;
-    if (
-      !Array.isArray(sz) ||
-      Number(sz[0]) !== rule.size[0] ||
-      Number(sz[1]) !== rule.size[1]
-    ) {
-      return false;
-    }
-  }
-  return Boolean(rule.namespace || rule.name || rule.nameIncludes || rule.size);
-}
-
-/**
- * Pull a box inside the viewport when a `clampToViewport` rule matches.
- *
- * @param box - Positioned box (mutated when clamped).
- * @param el - Element being laid out.
- * @param viewport - Viewport in gui pixels.
- * @param opts - Layout options.
- */
-function applyViewportClamp(
-  box: LayoutBox,
-  el: ResolvedElement,
-  viewport: Viewport,
-  opts: LayoutOptions,
-): void {
-  const rule = opts.rules?.clampToViewport?.find((r) => ruleMatches(r, el));
-  if (!rule) return;
-  if (box.w <= 0 || box.w > viewport.width) return;
-  const inset = rule.inset;
-  if (box.x < inset) box.x = inset;
-  if (box.x + box.w > viewport.width - inset) {
-    box.x = Math.max(inset, viewport.width - inset - box.w);
-  }
-}
-
-/**
- * Shift subtrees whose `clampToViewport` rule sets `subtree`.
- *
- * @param node - Subtree root.
- * @param viewport - Viewport in gui pixels.
- * @param opts - Layout options.
- */
-function clampMatchingSubtrees(
-  node: LayoutNode,
-  viewport: Viewport,
-  opts: LayoutOptions,
-): void {
-  const rule = opts.rules?.clampToViewport?.find(
-    (r) => r.subtree && ruleMatches(r, node.element),
-  );
-  if (rule) clampLayoutTreeToViewport(node, viewport, rule.inset);
-  for (const c of node.children) clampMatchingSubtrees(c, viewport, opts);
-}
-
-/**
  * Shift a laid-out subtree by `(dx, dy)` gui px (mutates in place).
  *
  * @param node - Layout subtree root.
@@ -1526,37 +1266,6 @@ function shiftLayoutTree(node: LayoutNode, dx: number, dy: number): void {
   node.box.x += dx;
   node.box.y += dy;
   for (const c of node.children) shiftLayoutTree(c, dx, dy);
-}
-
-/**
- * Translate a laid-out subtree so its visible AABB stays inside the viewport
- * with a small inset (hanging children included).
- *
- * @param node - Subtree root (box may be a skinny host; children can overhang).
- * @param viewport - Form viewport in gui pixels.
- * @param inset - Minimum margin from each edge.
- */
-function clampLayoutTreeToViewport(
-  node: LayoutNode,
-  viewport: Viewport,
-  inset: number,
-): void {
-  let minX = Infinity;
-  let maxX = -Infinity;
-  (function walk(n: LayoutNode): void {
-    if (!n.visible || n.box.w <= 0 || n.box.h <= 0) return;
-    minX = Math.min(minX, n.box.x);
-    maxX = Math.max(maxX, n.box.x + n.box.w);
-    for (const c of n.children) walk(c);
-  })(node);
-  if (!Number.isFinite(minX) || !Number.isFinite(maxX)) return;
-  let dx = 0;
-  if (minX < inset) dx = inset - minX;
-  if (maxX + dx > viewport.width - inset) {
-    dx = viewport.width - inset - maxX;
-  }
-  if (minX + dx < inset) dx = inset - minX;
-  shiftLayoutTree(node, dx, 0);
 }
 
 function resolveOffset(
