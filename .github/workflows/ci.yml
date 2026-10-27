@@ -149,7 +149,7 @@ jobs:
         id: bds
         env:
           BDS_LINKS_API: https://net-secondary.web.minecraft-services.net/api/v1.0/download/links
-          BDS_FALLBACK_URL: https://www.minecraft.net/bedrockdedicatedserver/bin-linux/bedrock-server-1.26.34.3.zip
+          BDS_FALLBACK_URL: https://www.minecraft.net/bedrockdedicatedserver/bin-linux/bedrock-server-1.26.60.6.zip
           BDS_UA: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36
         run: |
           set -euo pipefail
