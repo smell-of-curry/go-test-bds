@@ -1,6 +1,8 @@
 node_modules/
 dist/
 dist-capture/
+dist-film/
+dist-film-app/
 test-results/
 playwright-report/
 blob-report/
@@ -8,3 +10,4 @@ blob-report/
 *.tsbuildinfo
 # Real-pack diagnose dumps Mojang/server atlas pixels — never commit.
 testdata/diagnose/
+tools/realclient/build/

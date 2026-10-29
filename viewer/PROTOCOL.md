@@ -148,6 +148,9 @@ reach the bot and do not change the stream.
 | `stream` | absolute SSE URL | derived from `bot` | Used by the Vite dev server / tests |
 | `camera` | `follow` \| `first` \| `firstPerson` \| `orbit` | `firstPerson` | Initial camera mode. Capture harness opens with `camera=follow` so the bot body and surroundings are in frame; press **C** to cycle first-person → follow → orbit |
 | `bobbing` | `1` / `true` / `on` | off | Opt-in view bobbing in follow mode. Default off so goldens/captures stay deterministic |
+| `film` | `1` | off | Offline film render. The page does **not** open an EventSource. It fetches `GET /film/sse?bot=<name>` (finite SSE body, same bytes as `GET /stream`) and applies frames from `window.__film` when `(tick - firstKeyframeTick) * 50` ms has arrived on the virtual clock. Hides the diagnostic overlay, caption, crosshair, loading screen, HUD, and name tags. Disables view bobbing. Paint is not throttled to 20 Hz. `Math.random` and the particle RNG are seeded |
+| `hud` | `1` | off | With `film=1`, keep the game HUD (chat, hotbar, JSON UI, waypoint strip) |
+| `nametags` | `1` | off | With `film=1`, keep in-scene name tags |
 
 Follow mode sits behind and slightly above the observed actor (over-the-shoulder;
 Bedrock third-person distance = 4 blocks, with a single terrain occlusion ray).
@@ -465,6 +468,41 @@ components carry geometry / material_instances (network palette wins over any
   (dropped stacks) the stack rides `held.main` — the Go world stores it on
   `Item.Item()`, and the encoder copies that into `held.main` so the viewer
   needs no extra field.
+- `skin` is present on a player entity when that player's UUID has a skin from
+  `packet.PlayerList` (add) or `packet.PlayerSkin`. The observed bot's own
+  player entity is included when its skin was applied at login or echoed in
+  the player list. Removed with the player-list entry. Omitted on every other
+  entity.
+
+```json
+{
+  "hash": "sha1-hex",
+  "url": "/skin/<hash>.png",
+  "width": 64,
+  "height": 64,
+  "slim": false,
+  "geometry": "geometry.humanoid.custom"
+}
+```
+
+  - `hash` is the sha1 of the little-endian uint32 width, the little-endian
+    uint32 height, then the raw RGBA bytes.
+  - `url` is served by this hub. See `GET /skin/<hash>.png`.
+  - `slim` is true when the resource-patch default geometry name contains
+    `slim`, or when the geometry is empty and the protocol arm size is slim.
+    `geometry.humanoid.custom` is wide.
+  - `geometry` is the resource patch's `geometry.default`, or `""` when the
+    patch is missing or unparsable.
+- `emote` is the latest `packet.Emote` for that entity's runtime id (and the
+  emote the bot itself just sent). A newer emote replaces it. It stays until
+  the entity is removed; the renderer decides how long to play it.
+
+```json
+{ "id": "4c8ae710-df2e-47cd-814d-cc7bf21a3d67", "startTick": 120 }
+```
+
+  `startTick` is the bot's tick counter when the emote was received. `0` is a
+  real value and is always present on the object.
 
 ### Item
 
@@ -731,10 +769,14 @@ whose verdict the viewer changed.
 
 ## Assets
 
-Resource packs are the appearance source of truth. Go never decodes images or
-evaluates Molang; it only resolves paths and serves bytes. Behaviour packs are
-never an input. The vanilla baseline is `Mojang/bedrock-samples` at the tag in
-`viewer/baseline.tag`, fetched into a gitignored cache — never committed.
+Resource packs are the appearance source of truth. Go never decodes pack
+images or evaluates Molang; it only resolves paths and serves bytes. One
+exception: `GET /skin/<hash>.png` **encodes** RGBA that already arrived on the
+player-list wire (`image/png`). That is not pack-image decoding.
+
+Behaviour packs are never an input. The vanilla baseline is
+`Mojang/bedrock-samples` at the tag in `viewer/baseline.tag`, fetched into a
+gitignored cache — never committed.
 
 Endpoints (available when the viewer was started with an asset manager):
 
@@ -775,6 +817,45 @@ Path traversal (`..`, absolute paths) is rejected with `400`.
 
 Winning bytes for that path after stack resolution. `404` when no pack has it.
 Same traversal rules as `/pack/…`.
+
+### `GET /skin/<hash>.png`
+
+PNG of a player skin stored from `packet.PlayerList` / `packet.PlayerSkin`
+(and the observed bot's own login skin, when one was applied). `<hash>` is the
+`skin.hash` field on the entity.
+
+`Content-Type: image/png`. The body is `image/png` of the wire RGBA — encoding
+only, not a decode of a resource-pack file. `404` when that hash has not been
+seen. The URL is content-addressed; a `Cache-Control: immutable` header is set.
+
+When `--record <dir>` is set, the same PNG is also written to
+`<dir>/skins/<hash>.png`.
+
+## Recording
+
+`--record <dir>` (`GOTESTBDS_RECORD`, config key `Record`) attaches one
+internal subscriber per bot while the viewer is enabled. Each subscriber
+writes the SSE frames `GET /stream?bot=<name>` would send — `hello`, then
+`keyframe`, `delta`, and the event lanes — to `<dir>/<botname>.sse` in the
+same `event:` / `data:` wire format. The writer runs off the tick loop. If it
+falls behind, the normal newest-world-frame and keyframe-resync rules apply.
+Files are flushed on process shutdown (`SIGINT` / `SIGTERM`).
+
+`<dir>/packs.json` is the JSON body of `GET /packs` (an empty array when no
+asset manager is attached). `<dir>/take.json`:
+
+```json
+{
+  "cacheDir": "<viewer pack cache>",
+  "baselineTag": "v1.26.60",
+  "bots": ["TestBot"],
+  "startTime": "2026-10-28T18:30:00Z",
+  "protocol": "1.26.60"
+}
+```
+
+`cacheDir` is where the pack files already live. `protocol` is the gophertunnel
+version string (`1.26.60`). `startTime` is UTC RFC3339.
 
 ## Configuration
 

@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import type { PlayerSkin } from "../protocol";
 import type { AssetClient } from "../terrain/assetClient";
 import { normalizePath } from "../terrain/assetClient";
 import {
@@ -37,6 +38,8 @@ export interface EntityLike {
     off: { name: string; count: number } | null;
   };
   armour?: Array<{ name: string; count: number } | null>;
+  /** Player skin. Absent → Steve + `geometry.humanoid.custom`. */
+  skin?: PlayerSkin;
 }
 
 /**
@@ -170,10 +173,13 @@ export class EntityModelRegistry {
       const passes = resolveRenderPasses(def, this.controllers, inputs);
       if (passes.length === 0) return null;
 
-      const key = modelCacheKey(inputs, passes);
+      const skinTag = ent.skin
+        ? `;skin=${ent.skin.hash}|${ent.skin.slim ? 1 : 0}|${ent.skin.geometry}`
+        : "";
+      const key = modelCacheKey(inputs, passes) + skinTag;
       let pending = this.modelCache.get(key);
       if (!pending) {
-        pending = this.buildModel(def, passes);
+        pending = this.buildModel(def, passes, ent.skin);
         this.modelCache.set(key, pending);
       }
       const model = await pending;
@@ -375,19 +381,27 @@ export class EntityModelRegistry {
   private async buildModel(
     def: ClientEntityDef,
     passes: Awaited<ReturnType<typeof resolveRenderPasses>>,
+    skin?: PlayerSkin,
   ): Promise<BuiltEntityModel | null> {
     // Stage 7: first successful pass only (multi-pass materials later).
     const pass = passes[0];
     if (!pass) return null;
 
-    const geoJson = await this.loadGeometryJson(pass.geometryId);
-    if (!geoJson) return null;
-    const geometry = geometryById(geoJson, pass.geometryId);
+    const geometryId = skin ? skinGeometryId(skin) : pass.geometryId;
+    let geoJson = await this.loadGeometryJson(geometryId);
+    let geometry = geoJson ? geometryById(geoJson, geometryId) : null;
+    if (!geometry) {
+      geoJson = await this.loadGeometryJson(pass.geometryId);
+      geometry = geoJson ? geometryById(geoJson, pass.geometryId) : null;
+    }
     if (!geometry) return null;
 
     const texPath = pass.texturePaths[0];
-    if (!texPath) return null;
-    const bitmap = await this.client.fetchImage(texPath);
+    if (!texPath && !skin?.url) return null;
+    const bitmap = skin?.url
+      ? ((await fetchSkinBitmap(skin.url)) ??
+        (texPath ? await this.client.fetchImage(texPath) : null))
+      : await this.client.fetchImage(texPath!);
     if (!bitmap) return null;
 
     const texture = await bitmapToTexture(bitmap);
@@ -451,6 +465,13 @@ export class EntityModelRegistry {
         if (!this.geoPaths.has(id)) this.geoPaths.set(id, path);
       }
     });
+    // Legacy `models/mobs.json` holds geometry.humanoid.customSlim (no .geo.json).
+    const mobs = await this.fetchGeoPath("models/mobs.json");
+    if (mobs && typeof mobs === "object") {
+      for (const id of extractGeometryIdentifiers(mobs)) {
+        if (!this.geoPaths.has(id)) this.geoPaths.set(id, "models/mobs.json");
+      }
+    }
   }
 }
 
@@ -565,6 +586,38 @@ async function evalScale(scaleExpr: string | undefined): Promise<number> {
  * @param bitmap - Decoded image.
  * @returns three.js texture.
  */
+/**
+ * Geometry id for a player skin. Explicit `geometry` wins; otherwise slim
+ * vs classic humanoid.
+ *
+ * @param skin - Wire skin.
+ * @returns `geometry.*` id.
+ */
+function skinGeometryId(skin: PlayerSkin): string {
+  const g = skin.geometry?.trim();
+  if (g) return g;
+  return skin.slim
+    ? "geometry.humanoid.customSlim"
+    : "geometry.humanoid.custom";
+}
+
+/**
+ * Load a same-origin skin PNG. Failure → null (caller falls back to Steve).
+ *
+ * @param url - `/skin/<hash>.png` or absolute URL.
+ * @returns bitmap or null.
+ */
+async function fetchSkinBitmap(url: string): Promise<ImageBitmap | null> {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const blob = await res.blob();
+    return await createImageBitmap(blob);
+  } catch {
+    return null;
+  }
+}
+
 async function bitmapToTexture(bitmap: ImageBitmap): Promise<THREE.Texture> {
   // WebGL ignores UNPACK_FLIP_Y for ImageBitmap uploads (three's flipY is a
   // silent no-op), so flip at decode time to keep the texelToGl convention
@@ -593,6 +646,13 @@ function cloneBuiltModel(model: BuiltEntityModel): BuiltEntityModel {
   const root = model.root.clone(true);
   const bones = new Map<string, THREE.Group>();
   root.traverse((obj) => {
+    const mesh = obj as THREE.Mesh;
+    if (mesh.isMesh) {
+      // Per-instance materials so world light (`uLight`) is not shared.
+      mesh.material = Array.isArray(mesh.material)
+        ? mesh.material.map((m) => m.clone())
+        : mesh.material.clone();
+    }
     if (obj instanceof THREE.Group && obj.name && obj.name !== "entityModel") {
       bones.set(obj.name, obj);
     }
@@ -607,7 +667,15 @@ function cloneBuiltModel(model: BuiltEntityModel): BuiltEntityModel {
     bones,
     scale: model.scale,
     dispose(): void {
-      // Shared geometry/material/texture — only detach from scene.
+      // Geometry + textures stay with the cache entry. Cloned materials do not.
+      root.traverse((obj) => {
+        const mesh = obj as THREE.Mesh;
+        if (!mesh.isMesh) return;
+        const mats = Array.isArray(mesh.material)
+          ? mesh.material
+          : [mesh.material];
+        for (const m of mats) m.dispose();
+      });
       root.removeFromParent();
     },
   };

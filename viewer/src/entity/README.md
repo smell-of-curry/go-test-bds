@@ -69,7 +69,36 @@ RC tint: evaluate `color` / `overlay_color` / `on_fire_color` / `is_hurt_color`
 (Molang RGBA); `overlay_color` (and hurt/fire) lerps RGB toward the overlay by
 its alpha. Hurt flash needs `query.hurt_time` on the wire — not exported yet.
 
-`emissive` is documented intent only: `MeshBasicMaterial` is already unlit.
+## Entity light
+
+Non-emissive materials use the Java/Bedrock entity two-light (`lighting.ts`):
+
+```
+L0 = normalize(0.2, 1, -0.7)
+L1 = normalize(-0.2, 1, 0.7)
+shade = min(1, (max(0, N·L0) + max(0, N·L1)) * 0.6 + 0.4)
+```
+
+Axis boxes: up ≈ 1, ±Z ≈ 0.74, ±X ≈ 0.50, down = 0.4. World light at the
+feet (sky × daylight, max with block light, brightness curve `L/(4−3L)`)
+multiplies `shade`. Emissive materials stay unlit `MeshBasicMaterial`.
+
+## Blob shadows
+
+A generated radial disc (bedrock-samples ships no `textures/misc/shadow.png`)
+is projected onto block tops within 4 blocks under the feet, sized by
+collision width, fading with height. Items get none.
+
+## Player skins and emotes
+
+`skin` on the entity loads `url` (same origin) and
+`geometry.humanoid.custom` / `geometry.humanoid.customSlim` (the slim geo
+lives in vanilla `models/mobs.json`). Missing skin → Steve.
+
+Persona emotes are **not** in any resource pack. `src/entity/emotes/` is the
+documented exception: Bedrock animation JSON parsed by `parseAnimations`.
+Wave id `4c8ae710-df2e-47cd-814d-cc7bf21a3d67` raises `rightArm` and swings
+it for 3 s, then idle. Unknown ids do nothing.
 
 ## Equipment / items / name tags
 
@@ -85,8 +114,8 @@ its alpha. Hurt flash needs `query.hurt_time` on the wire — not exported yet.
 
 ## Known gaps
 
-- **Player skins:** the stream does not carry skin PNG / persona data. Players
-  always use the vanilla Steve texture (`textures/entity/steve`).
+- **Player skins:** carried on the entity as `skin` when the bot has one.
+  Absent → Steve. Cape / persona geometry beyond classic vs slim is not drawn.
 - Attachables (full item geometry / animations) — flat held quad only.
 - Particle / sound effect keyframes from animations — not played.
 - Multi-pass / overlay render controllers — first matching pass only.

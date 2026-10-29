@@ -81,27 +81,121 @@ export function resolveFov(
 }
 
 /**
- * Bedrock `rot: [yaw, pitch]` (degrees) → Three.js camera orientation.
+ * Bedrock yaw/pitch (degrees) → Three.js camera pose.
  *
- * Convention used here:
+ * Convention:
  * - Bedrock yaw 0 faces +Z (south); yaw increases westward (90 = west, 180 = north).
  * - Bedrock pitch 0 is horizontal; positive pitch looks down.
  * - Three.js camera default looks down −Z; Y-up; rotation order `YXZ`.
  * - Mapping: `rotation.y = π − yawRad`, `rotation.x = pitchRad`.
  *   (yaw 180 → north/−Z → y=0; yaw 0 → south/+Z → y=π; positive pitch → look down.)
+ *
+ * @param camera - Perspective camera to place.
+ * @param pos - World position.
+ * @param yawDeg - Bedrock yaw degrees.
+ * @param pitchDeg - Bedrock pitch degrees.
  */
-export function applyActorEye(
+export function applyBedrockLook(
   camera: THREE.PerspectiveCamera,
-  actor: Actor,
+  pos: [number, number, number],
+  yawDeg: number,
+  pitchDeg: number,
 ): void {
-  const [x, y, z] = actor.eyePos;
-  camera.position.set(x, y, z);
-  const yaw = THREE.MathUtils.degToRad(actor.rot[0]);
-  const pitch = THREE.MathUtils.degToRad(actor.rot[1]);
+  camera.position.set(pos[0], pos[1], pos[2]);
+  const yaw = THREE.MathUtils.degToRad(yawDeg);
+  const pitch = THREE.MathUtils.degToRad(pitchDeg);
   camera.rotation.order = "YXZ";
   camera.rotation.x = pitch;
   camera.rotation.y = Math.PI - yaw;
   camera.rotation.z = 0;
+}
+
+/** Place the camera at the actor's eyes using {@link applyBedrockLook}. */
+export function applyActorEye(
+  camera: THREE.PerspectiveCamera,
+  actor: Actor,
+): void {
+  applyBedrockLook(camera, actor.eyePos, actor.rot[0], actor.rot[1]);
+}
+
+/** One authored film-track sample. `t` is seconds after the first keyframe. */
+export interface FilmCameraKeyframe {
+  t: number;
+  pos: [number, number, number];
+  yaw: number;
+  pitch: number;
+  fov?: number;
+  /** Interpolation into this key from the previous one. */
+  ease?: "linear" | "inOutSine";
+}
+
+export interface FilmCameraSample {
+  pos: [number, number, number];
+  yaw: number;
+  pitch: number;
+  fov: number;
+}
+
+/**
+ * Shortest-path lerp for Bedrock yaw degrees.
+ *
+ * @param from - Start angle.
+ * @param to - End angle.
+ * @param u - Blend in `[0, 1]`.
+ * @returns interpolated degrees.
+ */
+function lerpYaw(from: number, to: number, u: number): number {
+  let d = to - from;
+  d = ((((d + 180) % 360) + 360) % 360) - 180;
+  return from + d * u;
+}
+
+/**
+ * Sample an authored camera track at `tSec` (seconds on the take clock).
+ *
+ * Holds the first key before `t0` and the last key after the end. `ease` on
+ * the destination key shapes that segment (`linear` or `inOutSine`).
+ *
+ * @param keys - Track, unsorted ok.
+ * @param tSec - Time in seconds from the first keyframe.
+ * @returns world pose.
+ */
+export function sampleFilmCamera(
+  keys: readonly FilmCameraKeyframe[],
+  tSec: number,
+): FilmCameraSample {
+  if (keys.length === 0) throw new Error("film camera track is empty");
+  const sorted =
+    keys.length === 1 ? keys : keys.slice().sort((a, b) => a.t - b.t);
+  const hold = (k: FilmCameraKeyframe): FilmCameraSample => ({
+    pos: [k.pos[0], k.pos[1], k.pos[2]],
+    yaw: k.yaw,
+    pitch: k.pitch,
+    fov: k.fov ?? DEFAULT_FOV,
+  });
+  const first = sorted[0]!;
+  if (tSec <= first.t) return hold(first);
+  const last = sorted[sorted.length - 1]!;
+  if (tSec >= last.t) return hold(last);
+  let i = 1;
+  while (i < sorted.length && sorted[i]!.t < tSec) i++;
+  const a = sorted[i - 1]!;
+  const b = sorted[i]!;
+  const span = b.t - a.t;
+  let u = span <= 0 ? 1 : (tSec - a.t) / span;
+  if (b.ease === "inOutSine") u = (1 - Math.cos(Math.PI * u)) / 2;
+  const fovA = a.fov ?? DEFAULT_FOV;
+  const fovB = b.fov ?? DEFAULT_FOV;
+  return {
+    pos: [
+      lerp(a.pos[0], b.pos[0], u),
+      lerp(a.pos[1], b.pos[1], u),
+      lerp(a.pos[2], b.pos[2], u),
+    ],
+    yaw: lerpYaw(a.yaw, b.yaw, u),
+    pitch: lerp(a.pitch, b.pitch, u),
+    fov: lerp(fovA, fovB, u),
+  };
 }
 
 /**
@@ -278,6 +372,8 @@ export class CameraController {
   private lastOverrideKey = "";
   private bobTimeSec = 0;
   private occludeMeshes: THREE.Object3D[] = [];
+  /** Authored override. When set, wins over the actor and server camera. */
+  private filmTrack: FilmCameraKeyframe[] | null = null;
 
   constructor(
     aspect: number,
@@ -296,6 +392,15 @@ export class CameraController {
 
   setMode(mode: CameraMode): void {
     this.mode = mode;
+  }
+
+  /**
+   * Replace the film camera track. Empty / null returns to actor follow.
+   *
+   * @param track - Keyframes in world space (Bedrock yaw/pitch).
+   */
+  setFilmTrack(track: readonly FilmCameraKeyframe[] | null): void {
+    this.filmTrack = track && track.length > 0 ? track.slice() : null;
   }
 
   /**
@@ -414,6 +519,15 @@ export class CameraController {
    * @param nowMs - `performance.now()` for ease.
    */
   update(actor: Actor | null, dtSec = 0, nowMs = 0): void {
+    if (this.filmTrack && this.filmTrack.length > 0) {
+      const sample = sampleFilmCamera(this.filmTrack, nowMs / 1000);
+      applyBedrockLook(this.perspective, sample.pos, sample.yaw, sample.pitch);
+      if (this.perspective.fov !== sample.fov) {
+        this.perspective.fov = sample.fov;
+        this.perspective.updateProjectionMatrix();
+      }
+      return;
+    }
     this.bobTimeSec += dtSec;
     const fov = resolveFov(
       DEFAULT_FOV,

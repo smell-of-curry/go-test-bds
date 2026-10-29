@@ -67,6 +67,12 @@ export interface CubeModel {
   >;
   renderClass: RenderClass;
   /**
+   * Vertical extent inside the cell, in blocks. Omitted = full cube (0..1),
+   * which occludes neighbours. A partial box (carpet) does not.
+   */
+  yBot?: number;
+  yTop?: number;
+  /**
    * When set and {@link BlockGeometryCache} has the id, mesher emits that
    * geometry instead of the unit cube (still carries faces for atlas / fallback).
    */

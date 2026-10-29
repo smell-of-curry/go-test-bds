@@ -81,6 +81,57 @@ remesh budget). Playwright writes the webm at 25 fps, so a quiet stretch of a
 run can still look short — read the caption's elapsed time and the overlay
 `tick` for real timing.
 
+## Film mode
+
+Offline, frame-exact render of a recorded take. No live bot. The page clock is
+Playwright's (`install` at t=0, then `runFor` one output step at a time), so
+motion lerp, animation, particles, and the sky all read virtual time.
+`?film=1` does not open an EventSource: the page fetches `GET /film/sse?bot=`
+and applies frames from `window.__film` when their tick is due
+(`(tick - firstKeyframeTick) * 50` ms). The Playwright clock is installed and
+paused, then stepped with `runFor`. `performance.now` is pinned to the output
+timestamp on top of that, because the clock's install log replays the wall gap
+between `install` and `pauseAt` (about 1 ms) and that is enough to make two
+runs disagree. Each output frame is `canvas.toDataURL` in the same turn as the
+draw (`preserveDrawingBuffer` is already on). Diagnostic UI, HUD, crosshair, and name tags are hidden;
+`--hud` / `--nametags` put those back. View bobbing stays off. The default
+camera is the actor (first person), including server camera instructions.
+`--camera camera.json` replaces that with an authored track.
+
+```bash
+npm run film -- render \
+  --take ./take --bot TestBot \
+  --from 0 --to 8 \
+  --width 1080 --height 1920 --fps 60 \
+  --camera camera.json \
+  --out ./shorts/clip.mp4
+```
+
+| Flag | Default | Notes |
+| --- | --- | --- |
+| `--from` / `--to` | required | Seconds (`1.5`, `1.5s`) or absolute server ticks (`30t`, `30tick`). The range is half-open. Tick `0` of the take is the first keyframe, so `--from 0` and `--from <that tick>t` are the same instant |
+| `--width` / `--height` / `--fps` | `1080` / `1920` / `60` | `devicePixelRatio` is 1. Odd sizes are padded by one pixel only when encoding yuv420p |
+| `--out` | required | A directory of `frame_%05d.png` (from 0), or a `.mp4` (H.264 yuv420p CRF 16, no audio; PNGs in `frames/` beside it) |
+| `--gpu` | SwiftShader | ANGLE Metal / the default GPU |
+| `--dev` | off | Vite instead of `viewer/dist` |
+| `--packs-from <url>` | off | Mirror whatever the app requests into `<take>/packs-mirror/` |
+
+Packs, when present, are served on the same origin. `take.json` `cacheDir` is
+the Go cache (`packs/<uuid>/<version>/`) and `baselineTag` selects
+`../.cache/baseline/<tag>/resource_pack` (tier 5 subpack, same rule as the
+hub). `packs.json` is the `GET /packs` body and names which cached packs are
+on the stack. If that cache is not on this machine, point `--packs-from` at a
+live hub once; later runs read `<take>/packs-mirror/`. No packs is a 404 and
+the app draws placeholder cubes — the determinism test uses that path.
+
+Warm-up applies every frame before `--from`, waits until
+`window.__viewer.assetsSettled` and the remesh queue is empty, then presents.
+The first saved frame is not the loading screen.
+
+```bash
+npm run test:film
+```
+
 ## Frame budget and chunk update strategy
 
 Decided for Stage 2 (placeholder cubes). Stage 6 replaces the mesher insides; the seam stays "dirty section key → meshes".

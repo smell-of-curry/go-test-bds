@@ -1,18 +1,24 @@
 import * as THREE from "three";
 import type { CameraController } from "./camera";
+import { CloudField } from "./clouds";
 import {
   addLocomotionPoses,
   applyBonePoses,
   applyEntityYaw,
   buildItemSprite,
+  builtinEmote,
   createLocomotion,
   createNameTag,
+  EMOTE_DURATION_SEC,
   EntityAnimator,
+  EntityBlobShadow,
   nameTagAnchor,
   pickBone,
   poseHeldItem,
+  sampleAnimationPoses,
   selectArmourLayers,
   selectHeldItem,
+  setEntityLight,
   tickDroppedItem,
   tickLocomotion,
   type BoneAnimPose,
@@ -22,11 +28,14 @@ import {
   type LocomotionState,
   type NameTagSprite,
 } from "./entity";
+import { isShadowEmpty, sampleCell } from "./entity/worldSample";
+import { createDefaultHost } from "./molang";
 import type { ParticleSystem } from "./particles";
 import type { Block, Entity } from "./protocol";
 import { columnKey, sectionIndex } from "./protocol";
 import type { DecodedSection, StoredColumn, WorldState } from "./store";
 import {
+  daylightFactor,
   dayCount,
   moonDirection,
   moonPhase,
@@ -37,6 +46,7 @@ import {
   sunDirection,
   ticksOfDay,
 } from "./sky";
+import { lightBrightness } from "./terrain/light";
 
 /** Soft budget for remeshing work per animation frame (ms). */
 export const REMESH_BUDGET_MS = 4;
@@ -394,6 +404,10 @@ interface EntityNode {
   lifeSec: number;
   /** Last equipment signature (skip redundant reloads). */
   gearKey: string;
+  /** Skin hash/geometry signature; change reloads the player model. */
+  skinKey: string;
+  /** Blob shadow projected onto block tops. */
+  shadow: EntityBlobShadow;
 }
 
 interface HighlightNode {
@@ -423,11 +437,29 @@ export class ViewerScene {
   private entityRegistry: EntityModelRegistry | null = null;
   private readonly pendingSections: string[] = [];
   private pendingSet = new Set<string>();
+  /** In-flight entity/actor model and texture fetches. Film waits on this. */
+  private modelLoadsInFlight = 0;
   /** True while a keyframe/dimension wipe still has old meshes to dispose. */
   private worldClearPending = false;
   private storeRef: WorldState | null = null;
   /** When false, world geometry stays on scene but is not drawn (loading). */
   private worldVisible = true;
+  /**
+   * Film mode sets this false so name-tag billboards stay out of the picture.
+   * Live viewing leaves it true.
+   */
+  nameTagsEnabled = true;
+
+  /**
+   * Alias of {@link nameTagsEnabled} for film mode (`showNameTags = false`).
+   */
+  get showNameTags(): boolean {
+    return this.nameTagsEnabled;
+  }
+
+  set showNameTags(value: boolean) {
+    this.nameTagsEnabled = value;
+  }
   private actorWantedVisible = false;
   private skyMesh: THREE.Mesh | null = null;
   private envRadiusBlocks = 128;
@@ -440,6 +472,11 @@ export class ViewerScene {
   /** Null = fixed noon look (no sun/moon/stars drawn). */
   private worldTime: number | null = null;
   private assetBaseUrl = "";
+  private clouds: CloudField | null = null;
+  /** False while the cloud texture (or its failure) is still outstanding. */
+  private envReady = true;
+  /** Horizon fog colour last applied, for the cloud shader. */
+  private fogHex = NOON_HORIZON;
   private readonly nameTagScratch = new THREE.Vector3();
   private static readonly highlightGeo = new THREE.EdgesGeometry(
     new THREE.BoxGeometry(1.02, 1.02, 1.02),
@@ -705,12 +742,20 @@ export class ViewerScene {
     if (!opts.enabled) {
       this.removeSkyDome();
       this.removeCelestials();
+      this.removeClouds();
       this.scene.fog = null;
       this.applyFogToMesher(null);
+      this.envReady = true;
       return;
     }
     this.ensureSkyDome();
+    this.ensureClouds();
     this.applySkyTime(this.worldTime);
+  }
+
+  /** True once the sky extras (cloud texture) have settled. */
+  get environmentReady(): boolean {
+    return this.envReady;
   }
 
   /**
@@ -753,8 +798,12 @@ export class ViewerScene {
     for (const h of this.highlights) h.lines.visible = visible;
     this.actorGroup.visible = visible && this.actorWantedVisible;
     for (const node of this.entities.values()) {
-      if (!visible) node.nameTag.setVisible(false);
+      if (!visible) {
+        node.nameTag.setVisible(false);
+        node.shadow.hide();
+      }
     }
+    if (this.clouds) this.clouds.root.visible = visible;
   }
 
   /**
@@ -811,12 +860,15 @@ export class ViewerScene {
           ent.swing ?? 0,
         );
         addLocomotionPoses(node.loco, node.model.bones.keys(), poses);
+        this.applyEmote(ent, poses);
         applyBonePoses(node.model.bones, poses, ent.rot[1] ?? 0);
         applyEntityYaw(node.model.root, ent.rot[0]);
+        setEntityLight(node.model.root, this.entityBrightness(ent.pos));
       } else {
         this.setEntityPos(rid, ent.pos, ent.rot);
       }
       this.syncEntityGear(node, ent);
+      this.updateEntityShadow(node, ent);
     }
     // Stage 11 particle emitters (additive hook; null until main wires it).
     this.particles?.tick(dtSec);
@@ -850,6 +902,19 @@ export class ViewerScene {
   }
 
   render(camera: CameraController): void {
+    const camPos = camera.perspective.position;
+    if (this.skyMesh) this.skyMesh.position.copy(camPos);
+    if (this.celestialRoot) this.celestialRoot.position.copy(camPos);
+    // Drift only once world time exists, so goldens (absent time) stay put.
+    // Film mode fakes performance.now(); a noon `time` unlocks that clock.
+    const cloudMs = this.worldTime == null ? 0 : performance.now();
+    const dim = this.storeRef?.world?.dimension;
+    const overworld = dim == null || dim === 0;
+    if (this.clouds) {
+      this.clouds.root.visible = overworld && this.worldVisible;
+      if (overworld)
+        this.clouds.update(camPos.x, camPos.z, cloudMs, this.fogHex);
+    }
     // Pose name tags before draw — after render would leave them a frame late
     // and (worse) sample bone matrices that had not been updated yet on the
     // first frames after a model load, parking the plate at the feet.
@@ -1034,13 +1099,21 @@ export class ViewerScene {
         itemSprite: null,
         lifeSec: 0,
         gearKey: "",
+        skinKey: skinKeyOf(ent),
+        shadow: new EntityBlobShadow(),
       };
+      this.scene.add(node.shadow.mesh);
       this.entities.set(rid, node);
       // Initial pose only — subsequent poses come from motion-lerped tickEntities.
       node.group.position.set(ent.pos[0], ent.pos[1], ent.pos[2]);
       this.requestEntityModel(node, ent);
     } else if (node.type !== ent.type) {
       node.type = ent.type;
+      node.skinKey = skinKeyOf(ent);
+      this.clearEntityModel(node);
+      this.requestEntityModel(node, ent);
+    } else if (node.skinKey !== skinKeyOf(ent)) {
+      node.skinKey = skinKeyOf(ent);
       this.clearEntityModel(node);
       this.requestEntityModel(node, ent);
     } else if (!node.model && !node.itemSprite && this.entityRegistry) {
@@ -1072,6 +1145,7 @@ export class ViewerScene {
     (node.wire.material as THREE.Material).dispose();
     this.scene.remove(node.nameTag.root);
     node.nameTag.dispose();
+    node.shadow.dispose();
     this.entities.delete(rid);
   }
 
@@ -1089,39 +1163,47 @@ export class ViewerScene {
     if (ent.type === "minecraft:item") {
       const name = ent.held?.main?.name;
       if (!name) return;
-      void registry.getItemTexture(name).then((tex) => {
-        if (token !== node.loadToken) {
-          tex?.dispose();
-          return;
-        }
-        if (!tex) return;
-        this.clearEntityModel(node);
-        const sprite = buildItemSprite(tex);
-        node.itemSprite = sprite;
-        node.wire.visible = false;
-        node.group.add(sprite.root);
-        node.group.rotation.set(0, 0, 0);
-      });
+      const done = this.trackModelLoad();
+      void registry
+        .getItemTexture(name)
+        .then((tex) => {
+          if (token !== node.loadToken) {
+            tex?.dispose();
+            return;
+          }
+          if (!tex) return;
+          this.clearEntityModel(node);
+          const sprite = buildItemSprite(tex);
+          node.itemSprite = sprite;
+          node.wire.visible = false;
+          node.group.add(sprite.root);
+          node.group.rotation.set(0, 0, 0);
+        })
+        .finally(done);
       return;
     }
 
-    void registry.getModel(ent).then((model) => {
-      if (token !== node.loadToken) {
-        model?.dispose();
-        return;
-      }
-      if (!model) return;
-      this.clearEntityModel(node);
-      node.model = model;
-      node.wire.visible = false;
-      node.group.add(model.root);
-      // Model owns yaw; clear group yaw so we don't double-apply.
-      node.group.rotation.set(0, 0, 0);
-      registry.applyPose(model, ent.rot);
-      node.animator = this.createAnimator(ent);
-      node.gearKey = "";
-      this.syncEntityGear(node, ent);
-    });
+    const done = this.trackModelLoad();
+    void registry
+      .getModel(ent)
+      .then((model) => {
+        if (token !== node.loadToken) {
+          model?.dispose();
+          return;
+        }
+        if (!model) return;
+        this.clearEntityModel(node);
+        node.model = model;
+        node.wire.visible = false;
+        node.group.add(model.root);
+        // Model owns yaw; clear group yaw so we don't double-apply.
+        node.group.rotation.set(0, 0, 0);
+        registry.applyPose(model, ent.rot);
+        node.animator = this.createAnimator(ent);
+        node.gearKey = "";
+        this.syncEntityGear(node, ent);
+      })
+      .finally(done);
   }
 
   /**
@@ -1184,47 +1266,52 @@ export class ViewerScene {
     if (key === node.gearKey) return;
     node.gearKey = key;
     const token = node.loadToken;
+    const done = this.trackModelLoad();
 
     void (async () => {
-      this.clearEntityGear(node);
-      if (token !== node.loadToken || !node.model) return;
+      try {
+        this.clearEntityGear(node);
+        if (token !== node.loadToken || !node.model) return;
 
-      for (const layer of selectArmourLayers(ent.armour)) {
-        const built = await registry.getLayerModel(
-          layer.geometryId,
-          layer.texturePath,
-        );
-        if (token !== node.loadToken || !node.model || !built) {
-          built?.dispose();
-          continue;
-        }
-        // Reparent armour meshes onto matching body bones (follow Stage 9 pose).
-        for (const [boneName, armourBone] of built.bones) {
-          const bodyBone = node.model.bones.get(boneName);
-          if (!bodyBone) continue;
-          for (const child of [...armourBone.children]) {
-            bodyBone.add(child);
-            node.armourMeshes.push(child);
+        for (const layer of selectArmourLayers(ent.armour)) {
+          const built = await registry.getLayerModel(
+            layer.geometryId,
+            layer.texturePath,
+          );
+          if (token !== node.loadToken || !node.model || !built) {
+            built?.dispose();
+            continue;
           }
+          // Reparent armour meshes onto matching body bones (follow Stage 9 pose).
+          for (const [boneName, armourBone] of built.bones) {
+            const bodyBone = node.model.bones.get(boneName);
+            if (!bodyBone) continue;
+            for (const child of [...armourBone.children]) {
+              bodyBone.add(child);
+              node.armourMeshes.push(child);
+            }
+          }
+          built.dispose();
         }
-        built.dispose();
-      }
 
-      const held = selectHeldItem(ent.held);
-      if (!held || !node.model) return;
-      const boneName = pickBone(node.model.bones, held.boneCandidates);
-      const tex = await registry.getItemTexture(held.item.name);
-      if (token !== node.loadToken || !tex || !node.model) {
-        tex?.dispose();
-        return;
+        const held = selectHeldItem(ent.held);
+        if (!held || !node.model) return;
+        const boneName = pickBone(node.model.bones, held.boneCandidates);
+        const tex = await registry.getItemTexture(held.item.name);
+        if (token !== node.loadToken || !tex || !node.model) {
+          tex?.dispose();
+          return;
+        }
+        const sprite = buildItemSprite(tex, 0.4);
+        poseHeldItem(sprite.root);
+        const parent = boneName
+          ? (node.model.bones.get(boneName) ?? node.model.root)
+          : node.model.root;
+        parent.add(sprite.root);
+        node.itemSprite = sprite;
+      } finally {
+        done();
       }
-      const sprite = buildItemSprite(tex, 0.4);
-      poseHeldItem(sprite.root);
-      const parent = boneName
-        ? (node.model.bones.get(boneName) ?? node.model.root)
-        : node.model.root;
-      parent.add(sprite.root);
-      node.itemSprite = sprite;
     })();
   }
 
@@ -1247,6 +1334,7 @@ export class ViewerScene {
     const registry = this.entityRegistry;
     if (!registry) return;
     const token = ++this.actorLoadToken;
+    const done = this.trackModelLoad();
     void registry
       .getModel({
         type: "minecraft:player",
@@ -1268,7 +1356,8 @@ export class ViewerScene {
         this.actorWire.visible = false;
         this.actorGroup.rotation.set(0, 0, 0);
         this.actorGroup.add(model.root);
-      });
+      })
+      .finally(done);
   }
 
   /**
@@ -1326,7 +1415,7 @@ export class ViewerScene {
       const ent = this.storeRef?.entities.get(node.rid);
       const text = ent?.name ?? "";
       const sneaking = !!ent?.flags?.sneaking;
-      if (!this.worldVisible || !text || sneaking) {
+      if (!this.nameTagsEnabled || !this.worldVisible || !text || sneaking) {
         node.nameTag.setVisible(false);
         continue;
       }
@@ -1350,6 +1439,30 @@ export class ViewerScene {
   /** Exposed for tests that need to peek at pending remesh work. */
   get pendingRemeshCount(): number {
     return this.pendingSections.length;
+  }
+
+  /**
+   * Entity, armour, held-item, and actor model/texture fetches still running.
+   * Zero once every request issued so far has settled (hit or miss).
+   */
+  get pendingModelLoads(): number {
+    return this.modelLoadsInFlight;
+  }
+
+  /**
+   * Count one model/texture fetch. Call the returned function exactly once
+   * when it settles.
+   *
+   * @returns end callback.
+   */
+  private trackModelLoad(): () => void {
+    this.modelLoadsInFlight++;
+    let ended = false;
+    return () => {
+      if (ended) return;
+      ended = true;
+      this.modelLoadsInFlight--;
+    };
   }
 
   get entityCount(): number {
@@ -1440,6 +1553,7 @@ export class ViewerScene {
     if (time == null) {
       this.paintSkyDome(SKY_ZENITH, SKY_HORIZON);
       this.scene.background = new THREE.Color(SKY_ZENITH);
+      this.fogHex = SKY_HORIZON;
       const fog = new THREE.Fog(SKY_HORIZON, far * 0.5, far * 0.92);
       this.scene.fog = fog;
       this.applyFogToMesher(fog);
@@ -1456,6 +1570,7 @@ export class ViewerScene {
     const pal = skyPaletteAt(tod);
     this.paintSkyDome(pal.zenith, pal.horizon);
     this.scene.background = new THREE.Color(pal.zenith);
+    this.fogHex = pal.fog;
     const fog = new THREE.Fog(pal.fog, far * 0.5, far * 0.92);
     this.scene.fog = fog;
     this.applyFogToMesher(fog);
@@ -1625,6 +1740,85 @@ export class ViewerScene {
     this.starsPoints = null;
   }
 
+  private ensureClouds(): void {
+    if (this.clouds) return;
+    const field = new CloudField();
+    this.clouds = field;
+    this.scene.add(field.root);
+    field.root.visible = this.worldVisible;
+    const base = this.assetBaseUrl.replace(/\/$/, "");
+    if (!base) {
+      field.ready = true;
+      this.envReady = true;
+      return;
+    }
+    this.envReady = false;
+    void field
+      .load(`${base}/asset/textures/environment/clouds.png`)
+      .finally(() => {
+        if (this.clouds === field) this.envReady = true;
+      });
+  }
+
+  private removeClouds(): void {
+    this.clouds?.dispose();
+    this.clouds = null;
+  }
+
+  /**
+   * Overlay a built-in emote onto the pose map. Unknown ids are ignored.
+   * Time is `(snapshotTick - startTick) / 20`.
+   *
+   * @param ent - Entity snapshot.
+   * @param poses - Pose accumulator (mutated).
+   */
+  private applyEmote(ent: Entity, poses: Map<string, BoneAnimPose>): void {
+    const emote = ent.emote;
+    if (!emote) return;
+    const anim = builtinEmote(emote.id);
+    if (!anim) return;
+    const tick = this.storeRef?.tick ?? this.worldTime ?? 0;
+    const elapsed = (tick - emote.startTick) / 20;
+    if (elapsed < 0 || elapsed > EMOTE_DURATION_SEC) return;
+    const extra = sampleAnimationPoses(anim, elapsed, createDefaultHost());
+    for (const [bone, pose] of extra) poses.set(bone, pose);
+  }
+
+  /**
+   * World-light brightness at an entity. Noon outdoors (sky 15) → 1.
+   *
+   * @param pos - Feet position.
+   * @returns 0..1.
+   */
+  private entityBrightness(pos: [number, number, number]): number {
+    const cell = sampleCell(this.storeRef, pos[0], pos[1] + 0.1, pos[2]);
+    const day = daylightFactor(this.worldTime);
+    const skyEff = Math.round(Math.min(15, cell.sky) * day);
+    const level = Math.max(cell.blockLight & 15, Math.min(15, skyEff));
+    return lightBrightness(level);
+  }
+
+  /**
+   * Project the blob shadow. Items and a hidden world get none.
+   *
+   * @param node - Entity node.
+   * @param ent - Latest pose.
+   */
+  private updateEntityShadow(node: EntityNode, ent: Entity): void {
+    if (!this.worldVisible || ent.type === "minecraft:item") {
+      node.shadow.hide();
+      return;
+    }
+    const state = this.storeRef;
+    node.shadow.update(
+      ent.pos[0],
+      ent.pos[1],
+      ent.pos[2],
+      ent.bbox[0] || 0.6,
+      (x, y, z) => !isShadowEmpty(sampleCell(state, x, y, z).block),
+    );
+  }
+
   private removeSkyDome(): void {
     if (!this.skyMesh) return;
     this.scene.remove(this.skyMesh);
@@ -1644,4 +1838,14 @@ export class ViewerScene {
       }
     }
   }
+}
+
+/**
+ * @param ent - Entity snapshot.
+ * @returns stable skin signature (empty when Steve).
+ */
+function skinKeyOf(ent: Entity): string {
+  const s = ent.skin;
+  if (!s) return "";
+  return `${s.hash}|${s.slim ? 1 : 0}|${s.geometry}`;
 }

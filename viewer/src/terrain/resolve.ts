@@ -4,6 +4,7 @@ import { renderClassFromComponents } from "./customGeometry";
 import {
   canonicalizeBlockId,
   expandTexturesField,
+  legacyBlocksJsonId,
   parseBlocksJson,
   type BlocksJson,
 } from "./parse";
@@ -164,6 +165,15 @@ export class BlockModelResolver {
       const byCanon = this.blocks[canon];
       if (byCanon) return byCanon;
     }
+    const legacy = legacyBlocksJsonId(canon);
+    if (legacy) {
+      const byLegacy =
+        this.blocks[legacy] ??
+        this.blocks[
+          legacy.startsWith("minecraft:") ? legacy.slice(10) : legacy
+        ];
+      if (byLegacy) return byLegacy;
+    }
     if (name.startsWith("minecraft:")) {
       return this.blocks[name.slice("minecraft:".length)];
     }
@@ -213,6 +223,7 @@ export class BlockModelResolver {
     // Custom geometry / block entities are not full cubes — never occlude.
     if (this.usesCustomGeometry(block)) return false;
     if (blockEntityKind(block.name)) return false;
+    if (partialExtents(block.name)) return false;
     const rc = this.renderClassOf(block);
     return rc === "opaque";
   }
@@ -246,9 +257,12 @@ export class BlockModelResolver {
     if (isInvisible(block)) return null;
     if (this.renderClassOf(block) === "liquid") return null;
 
+    const shaped = (model: CubeModel): CubeModel =>
+      applyPartialExtents(block, model);
+
     // Unnamed rid → magenta (bug marker).
     if (block.name === "" && block.rid !== 0) {
-      return this.solidCube(FALLBACK_TEXTURE, "opaque");
+      return shaped(this.solidCube(FALLBACK_TEXTURE, "opaque"));
     }
 
     // Pack textures win when present; palette covers gaps (custom blocks).
@@ -256,11 +270,11 @@ export class BlockModelResolver {
       const def = this.defOf(block.name)!;
       const faces = this.baseFaces(def, block);
       this.applyStateRemap(faces, block);
-      return {
+      return shaped({
         faces,
         renderClass: this.renderClassOf(block),
         customGeometryKey: undefined,
-      };
+      });
     }
 
     const reg = this.registryByName.get(block.name);
@@ -273,7 +287,7 @@ export class BlockModelResolver {
         const geoId = comps.geometry;
         const useGeo =
           !!geoId && !comps.unitCube && !!this.geoCache?.has(geoId);
-        return {
+        return shaped({
           faces: fromMats.faces,
           renderClass: fromMats.renderClass,
           customGeometryKey: useGeo ? geoId : undefined,
@@ -283,18 +297,18 @@ export class BlockModelResolver {
           ambientOcclusion: flags.ambientOcclusion,
           boneVisibility: comps.boneVisibility,
           materialInstances: comps.materialInstances,
-        };
+        });
       }
       // Palette entry without material_instances → neutral grey, not magenta.
-      return this.solidCube(NEUTRAL_TEXTURE, "opaque");
+      return shaped(this.solidCube(NEUTRAL_TEXTURE, "opaque"));
     }
 
     // Named but unknown to pack + palette → neutral (magenta reserved for bugs).
     if (block.name !== "") {
-      return this.solidCube(NEUTRAL_TEXTURE, "opaque");
+      return shaped(this.solidCube(NEUTRAL_TEXTURE, "opaque"));
     }
 
-    return this.solidCube(FALLBACK_TEXTURE, "opaque");
+    return shaped(this.solidCube(FALLBACK_TEXTURE, "opaque"));
   }
 
   /**
@@ -491,6 +505,33 @@ export function isWaterlogFluid(block: Block): boolean {
     block.name === "minecraft:lava" ||
     block.name === "minecraft:flowing_lava"
   );
+}
+
+/**
+ * Vertical span for a vanilla block whose blocks.json row is textures only.
+ * Carpet collision is 1 pixel. Custom geometry keeps its own bounds.
+ *
+ * @param name - Block identifier.
+ * @returns yBot/yTop in blocks, or null for a full cube.
+ */
+function partialExtents(name: string): { yBot: number; yTop: number } | null {
+  const bare = name.startsWith("minecraft:") ? name.slice(10) : name;
+  if (bare === "carpet" || bare.endsWith("_carpet")) {
+    return { yBot: 0, yTop: 1 / 16 };
+  }
+  return null;
+}
+
+/**
+ * @param block - Block being resolved.
+ * @param model - Cube from textures or the palette.
+ * @returns model with a partial box when {@link partialExtents} matches.
+ */
+function applyPartialExtents(block: Block, model: CubeModel): CubeModel {
+  if (model.customGeometryKey) return model;
+  const ext = partialExtents(block.name);
+  if (!ext) return model;
+  return { ...model, yBot: ext.yBot, yTop: ext.yTop };
 }
 
 function tintFor(block: Block, face: Cardinal): FaceAppearance["tint"] {

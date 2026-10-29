@@ -630,8 +630,11 @@ series. ✓ `tests/entity.animation.spec.ts`
       fog (10b); when snapshot `time` is present — 4-keyframe palette lerp
       (sunrise/noon/sunset/midnight), sun + moon quads (`textures/environment/`),
       seeded star field, ambient/dir light scale. **Absent `time` = fixed noon
-      look (goldens unchanged).** Clouds punted (flat drifting plane not worth
-      the atlas cost for captures). Per-dimension horizon tables still open.
+      look, and the cloud bank stays put** (drift uses `performance.now()` only
+      once `time` is set, so film mode's fake clock moves it). Fancy clouds:
+      `textures/environment/clouds.png`, 12×12×4 cells at Y=192, +X at 0.03
+      blocks/tick, face shade 1 / 0.9 / 0.8 / 0.7, alpha 0.8, fog-faded.
+      Per-dimension horizon tables still open.
 - [ ] Implement fog from client biome definitions and `fog` JSON, including
       distance fog, water fog and the dimension defaults. **Partial (10b):**
       basic distance fog only (horizon colour follows sky palette when `time`

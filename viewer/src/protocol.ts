@@ -91,6 +91,31 @@ export interface Item {
   customName?: string;
 }
 
+/**
+ * Player skin the Go snapshot may attach. `url` is same-origin
+ * (`/skin/<hash>.png`). Absent → vanilla Steve.
+ */
+export interface PlayerSkin {
+  hash: string;
+  url: string;
+  width: number;
+  height: number;
+  slim: boolean;
+  /** Geometry id, e.g. `geometry.humanoid.custom` or `geometry.humanoid.customSlim`. */
+  geometry: string;
+}
+
+/**
+ * Persona emote. Animations are not in the resource pack — the viewer has a
+ * built-in table for known ids (see `entity/emotes`).
+ */
+export interface EntityEmote {
+  /** Emote UUID. */
+  id: string;
+  /** Absolute world tick when the emote started. */
+  startTick: number;
+}
+
 export interface Entity {
   rid: number;
   uid: number;
@@ -109,6 +134,10 @@ export interface Entity {
   armour: [Item | null, Item | null, Item | null, Item | null];
   /** Arm-swing counter (increments per Animate swing). Absent = never swung. */
   swing?: number;
+  /** Present on player entities when the bot observed a skin. */
+  skin?: PlayerSkin;
+  /** Present while a persona emote is playing. */
+  emote?: EntityEmote;
 }
 
 export interface LookingAt {

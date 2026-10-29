@@ -52,9 +52,16 @@ placement concern for stage 7's renderer, not this module's model-local output.
 
 ### 3. Rotation order and pivots
 
-Bone and cube rotations are **extrinsic XYZ Euler angles in degrees** — apply
-X, then Y, then Z to the point — equivalent to matrix `R = Rz · Ry · Rx`.
-Rotations are about the bone/cube **pivot**: `T(p) · R · T(−p)`.
+Bone rotations (rest pose and animation) are **extrinsic XYZ** file angles,
+euler order `ZYX`. The bone matrix is conjugated by the X mirror in
+`bedrockMatrixToThree`, so the file angles are used as stored.
+
+Cube rotations are baked into vertices **before** that mirror. Matching
+Blockbench's importer (mirror X, negate `rx`/`ry`, then rotate) means the
+cube matrix uses `(-rx, ry, -rz)`. A cube `[90, 0, 0]` then swings `+Z`
+up to `+Y` instead of through the floor.
+
+Both are about the bone/cube **pivot**: `T(p) · R · T(−p)`.
 
 Parent chain (all pivots in the same model space):
 
@@ -83,7 +90,7 @@ M_bone  = T(pivot) · R(rotation) · R(bind_pose_rotation)? · T(−pivot)
 - cube on `arm`: origin `(16,0,0)`, size `(16,16,16)`
 - known vertex = cube max corner `(32, 16, 16)`
 
-Hand evaluation (Rx then Ry):
+Hand evaluation (bone rotations use the file angles; Rx then Ry):
 
 1. Arm: `(32,16,16) − (16,0,0) = (16,16,16)` → Rx(90°) → `(16,−16,16)` →
    `+ pivot` → `(32,−16,16)`

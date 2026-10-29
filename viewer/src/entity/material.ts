@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { compile, type MolangValue } from "../molang";
+import { applyTintToLitMaterial, createLitEntityMaterial } from "./lighting";
 import { createEntityMolangHost } from "./queries";
 import type { EntityRenderInputs, RenderControllerColor } from "./types";
 
@@ -11,7 +12,7 @@ export interface MaterialRenderState {
   transparency: TransparencyMode;
   /** When true, cull back faces (FrontSide). */
   cull: boolean;
-  /** Fullbright — ignore scene lighting (MeshBasicMaterial is already unlit). */
+  /** Fullbright — MeshBasicMaterial, no face shade and no world light. */
   emissive: boolean;
   /** Alpha-test threshold when transparency === alpha_test. */
   alphaTest: number;
@@ -212,16 +213,20 @@ export function composeControllerTint(colors: {
 /**
  * Build a THREE material from texture + material state + optional tint.
  *
+ * Non-emissive materials get the two-light entity shader
+ * ({@link createLitEntityMaterial}). Emissive stays unlit MeshBasicMaterial.
+ *
  * @param texture - Skin / layer texture.
  * @param state - Mapped material state.
  * @param tint - Optional composed RC tint.
- * @returns MeshBasicMaterial (entities are unlit in this viewer).
+ * @returns lit shader material, or unlit basic when emissive.
  */
 export function createEntityMaterial(
   texture: THREE.Texture,
   state: MaterialRenderState = DEFAULT_ENTITY_MATERIAL,
   tint: Rgba = WHITE,
-): THREE.MeshBasicMaterial {
+): THREE.Material {
+  if (!state.emissive) return createLitEntityMaterial(texture, state, tint);
   const transparent = state.transparency === "blend";
   const mat = new THREE.MeshBasicMaterial({
     map: texture,
@@ -231,16 +236,14 @@ export function createEntityMaterial(
     alphaTest: state.transparency === "alpha_test" ? state.alphaTest : 0,
     side: state.cull ? THREE.FrontSide : THREE.DoubleSide,
     depthWrite: state.transparency !== "blend",
-    // ponytail: MeshBasicMaterial is always unlit; `emissive` only documents
-    // intent / future lit materials. Ceiling: no light-reactive entity shaders.
   });
-  mat.userData.emissive = state.emissive;
+  mat.userData.emissive = true;
   mat.userData.materialState = state;
   return mat;
 }
 
 /**
- * Apply a composed tint onto every MeshBasicMaterial under a root.
+ * Apply a composed tint onto every entity material under a root.
  *
  * @param root - Model root.
  * @param tint - Composed RGBA.
@@ -251,6 +254,7 @@ export function applyTintToRoot(root: THREE.Object3D, tint: Rgba): void {
     if (!mesh.isMesh) return;
     const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
     for (const m of mats) {
+      if (applyTintToLitMaterial(m, tint)) continue;
       if (!(m instanceof THREE.MeshBasicMaterial)) continue;
       m.color.setRGB(tint.r, tint.g, tint.b);
       m.opacity = tint.a;

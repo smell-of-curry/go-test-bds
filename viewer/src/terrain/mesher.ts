@@ -374,8 +374,8 @@ export class TexturedMesher implements Mesher {
               uv,
               rotation: app.rotation,
               color,
-              yTop: 1,
-              yBot: 0,
+              yTop: cube.yTop ?? 1,
+              yBot: cube.yBot ?? 0,
               skipFaceShade: !faceDim,
               skipAo,
             });

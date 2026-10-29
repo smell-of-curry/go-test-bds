@@ -26,6 +26,25 @@ export function canonicalizeBlockId(id: string): string {
 }
 
 /**
+ * Network ids whose vanilla `blocks.json` row kept the pre-flattening key.
+ *
+ * A pack that defines the modern id is preferred; this is only the fallback
+ * when that row is absent. `grass_block` is the one vanilla id the bot emits
+ * that this file still stores as `grass`.
+ */
+const LEGACY_BLOCKS_JSON_ID: Record<string, string> = {
+  "minecraft:grass_block": "minecraft:grass",
+};
+
+/**
+ * @param id - Snapshot / network block name.
+ * @returns blocks.json id to try after the modern id misses, if any.
+ */
+export function legacyBlocksJsonId(id: string): string | undefined {
+  return LEGACY_BLOCKS_JSON_ID[canonicalizeBlockId(id)];
+}
+
+/**
  * Parse blocks.json. Strips the `format_version` key and namespaces bare ids.
  *
  * @param raw - JSON root object.

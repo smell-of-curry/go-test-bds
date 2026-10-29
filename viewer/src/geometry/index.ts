@@ -24,7 +24,7 @@ export {
   transformDir,
   transformPoint,
 } from "./math";
-export { parseGeometryDocument } from "./parse";
+export { parseGeometryById, parseGeometryDocument } from "./parse";
 export { buildGeometryMeshes } from "./mesh";
 export { resolveFaceUv, texelToGl } from "./uv";
 export type {

@@ -280,6 +280,18 @@ function appendCube(
     for (const idx of order) mesh.indices.push(base + idx);
     mesh.materialInstances.push(uv.materialInstance);
     mesh.faces.push(face);
+    // Paper sprites (size 0 on one axis) are a single plane. Cull would hide
+    // whichever side faces the camera. Emit the opposite winding too.
+    const flat =
+      Math.abs(x1 - x0) < 1e-4 ||
+      Math.abs(y1 - y0) < 1e-4 ||
+      Math.abs(z1 - z0) < 1e-4;
+    if (flat) {
+      const back = flipWinding ? [0, 1, 2, 0, 2, 3] : [0, 2, 1, 0, 3, 2];
+      for (const idx of back) mesh.indices.push(base + idx);
+      mesh.materialInstances.push(uv.materialInstance);
+      mesh.faces.push(face);
+    }
   }
 }
 

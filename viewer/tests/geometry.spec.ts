@@ -8,10 +8,13 @@ import {
   computeBoneWorldMatrices,
   computeBoneWorldMatricesBedrock,
   GeometryParseError,
+  parseGeometryById,
   parseGeometryDocument,
+  rotateAboutPivot,
   transformModelPoint,
   transformPoint,
 } from "../src/geometry/index";
+import { Euler, Matrix4, Vector3 } from "three";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fixtures = join(here, "fixtures", "geometry");
@@ -88,12 +91,50 @@ test.describe("geometry parser", () => {
       }),
     ).toThrow(/missing bone 'missing'/);
   });
+
+  test("one invalid sibling does not hide another geometry", () => {
+    // geometry.hyde's duplicate bone otherwise rejects the whole combined
+    // file, and geometry.substitute (2D sprites) never loads.
+    const doc = {
+      format_version: "1.21.0",
+      "minecraft:geometry": [
+        {
+          description: { identifier: "geometry.bad" },
+          bones: [
+            { name: "Phone", pivot: [0, 0, 0] },
+            { name: "Phone", pivot: [0, 1, 0] },
+          ],
+        },
+        {
+          description: {
+            identifier: "geometry.substitute",
+            texture_width: 16,
+            texture_height: 16,
+          },
+          bones: [
+            {
+              name: "main",
+              pivot: [0, 0, 0],
+              cubes: [{ origin: [-8, 0, 0], size: [16, 16, 0], uv: [0, 0] }],
+            },
+          ],
+        },
+      ],
+    };
+    expect(() => parseGeometryDocument(doc)).toThrow(/duplicate bone name/);
+    expect(parseGeometryById(doc, "geometry.bad")).toBeNull();
+    const sub = parseGeometryById(doc, "geometry.substitute");
+    expect(sub?.description.identifier).toBe("geometry.substitute");
+    expect(sub?.bones[0]?.cubes[0]?.size).toEqual([16, 16, 0]);
+    expect(parseGeometryById(doc, "geometry.missing")).toBeNull();
+  });
 });
 
 test.describe("bone hierarchy and nested rotations", () => {
   test("hand-computed world position of a known vertex through two rotations", () => {
     // Fixture: root Ry(90°) about origin, arm Rx(90°) about (16,0,0),
     // cube origin (16,0,0) size 16³. Known vertex = cube max corner (32,16,16).
+    // Bone rotations use file angles (not the cube-rotation sign flip).
     //
     // Arm: (32,16,16) - (16,0,0) = (16,16,16)
     //      Rx(90): (16, -16, 16) + pivot = (32, -16, 16)
@@ -136,6 +177,50 @@ test.describe("bone hierarchy and nested rotations", () => {
       }
     }
     expect(found).toBe(true);
+  });
+});
+
+test.describe("rotation sign vs Blockbench X-mirror", () => {
+  test("file [90, 0, 0] swings +Z up to +Y", () => {
+    // Zapdos-style wing: a slab at +Z rotated 90° on X must rise to shoulder
+    // height. The old sign sent it through the floor (y negative).
+    const wing = transformPoint(
+      rotateAboutPivot([0, 0, 0], [90, 0, 0]),
+      [0, 0, 16],
+    );
+    expect(wing[0]).toBeCloseTo(0, 5);
+    expect(wing[1]).toBeCloseTo(16, 5);
+    expect(wing[2]).toBeCloseTo(0, 5);
+  });
+
+  test("combined angles match Blockbench's mirrored-space rotation", () => {
+    const rx = 22.5;
+    const ry = -15;
+    const rz = 40;
+    const point = new Vector3(3, -4, 12);
+    const flipX = new Matrix4().makeScale(-1, 1, 1);
+    // Pipeline: rotate in file space, then mirror X into three.js.
+    const ours = point
+      .clone()
+      .applyMatrix4(rotateAboutPivot([0, 0, 0], [rx, ry, rz]))
+      .applyMatrix4(flipX);
+    // Blockbench: mirror X first, then R_zyx(-rx, -ry, rz).
+    const blockbench = point
+      .clone()
+      .applyMatrix4(flipX)
+      .applyMatrix4(
+        new Matrix4().makeRotationFromEuler(
+          new Euler(
+            (-rx * Math.PI) / 180,
+            (-ry * Math.PI) / 180,
+            (rz * Math.PI) / 180,
+            "ZYX",
+          ),
+        ),
+      );
+    expect(ours.x).toBeCloseTo(blockbench.x, 5);
+    expect(ours.y).toBeCloseTo(blockbench.y, 5);
+    expect(ours.z).toBeCloseTo(blockbench.z, 5);
   });
 });
 

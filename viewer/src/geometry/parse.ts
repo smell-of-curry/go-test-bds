@@ -73,6 +73,56 @@ export function parseGeometryDocument(input: unknown): GeometryDocument {
 }
 
 /**
+ * Parse one geometry out of a multi-model document.
+ *
+ * A sibling entry that fails validation (duplicate bone name, missing
+ * parent, …) must not hide every other model in the same file. Packs ship
+ * hundreds of geometries in one `.geo.json`; `geometry.hyde`'s duplicate
+ * `Phone` bone otherwise drops `geometry.substitute` and every 2D sprite.
+ *
+ * @param input - Parsed JSON value (object).
+ * @param identifier - `geometry.*` id to extract.
+ * @returns That geometry, or null when it is absent or itself invalid.
+ */
+export function parseGeometryById(
+  input: unknown,
+  identifier: string,
+): ParsedGeometry | null {
+  if (!isObject(input) || !identifier) return null;
+  const formatVersion = optionalString(input.format_version, "format_version");
+  const modern = input["minecraft:geometry"];
+  if (Array.isArray(modern)) {
+    const hit = modern.find((entry) => geometryEntryId(entry) === identifier);
+    if (!hit) return null;
+    try {
+      return parseGeometryEntry(
+        hit,
+        formatVersion,
+        `minecraft:geometry[${identifier}]`,
+      );
+    } catch {
+      return null;
+    }
+  }
+  if (!Object.prototype.hasOwnProperty.call(input, identifier)) return null;
+  try {
+    return parseLegacyGeometry(identifier, input[identifier], formatVersion);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * @param entry - One `minecraft:geometry` element.
+ * @returns `description.identifier`, or null.
+ */
+function geometryEntryId(entry: unknown): string | null {
+  if (!isObject(entry) || !isObject(entry.description)) return null;
+  const id = entry.description.identifier;
+  return typeof id === "string" && id ? id : null;
+}
+
+/**
  * @param entry - One `minecraft:geometry` element.
  * @param formatVersion - Document-level format version.
  * @param path - Error path prefix.

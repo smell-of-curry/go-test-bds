@@ -67,10 +67,10 @@ test.describe("applyBonePoses (pivot correctness)", () => {
     expect(pivot[0]).toBeCloseTo(0, 5);
     expect(pivot[1]).toBeCloseTo(1, 5);
     expect(pivot[2]).toBeCloseTo(0, 5);
-    // Point 6 units above the pivot swings to 6 units +Z (bedrock R_x(90°)).
+    // Bedrock Rx(90°) nods forward: 6 units above the pivot swings to -Z.
     const top = apply(world, [0, 1 + 6 / 16, 0]);
     expect(top[1]).toBeCloseTo(1, 5);
-    expect(top[2]).toBeCloseTo(6 / 16, 5);
+    expect(top[2]).toBeCloseTo(-6 / 16, 5);
     model.dispose();
   });
 
@@ -120,6 +120,18 @@ test.describe("applyBonePoses (pivot correctness)", () => {
     expect(pivot[0]).toBeCloseTo(0, 5);
     expect(pivot[1]).toBeCloseTo(1, 5);
     expect(pivot[2]).toBeCloseTo(0, 5);
+    model.dispose();
+  });
+
+  test("positive head pitch tilts the face (-Z) down", () => {
+    const geometry = loadGeometry();
+    const model = buildModel(geometry);
+
+    applyHeadPitch(model.bones, 45);
+    model.root.updateMatrixWorld(true);
+
+    const face = apply(model.bones.get("head")!.matrixWorld, [0, 1, -0.5]);
+    expect(face[1]).toBeLessThan(1);
     model.dispose();
   });
 

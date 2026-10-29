@@ -3,7 +3,7 @@ import {
   buildBoneHierarchy,
   buildGeometryMeshes,
   computeBoneWorldMatrices,
-  parseGeometryDocument,
+  parseGeometryById,
   type ParsedGeometry,
 } from "../geometry";
 import { emptyBonePose, setBoneLocalPose } from "./animation";
@@ -247,15 +247,7 @@ export function geometryById(
   json: unknown,
   identifier: string,
 ): ParsedGeometry | null {
-  try {
-    const doc = parseGeometryDocument(json);
-    const hit = doc.geometries.find(
-      (g) => g.description.identifier === identifier,
-    );
-    return hit ?? doc.geometries[0] ?? null;
-  } catch {
-    return null;
-  }
+  return parseGeometryById(json, identifier);
 }
 
 /**

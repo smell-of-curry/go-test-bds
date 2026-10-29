@@ -33,6 +33,11 @@ export interface ViewerHandle {
   /** True once the remesh queue is empty after the latest frames. */
   settled: boolean;
   /**
+   * Entity / actor model and texture fetches still in flight. Film capture
+   * waits for 0 so the first frame is not a wireframe placeholder.
+   */
+  readonly pendingModelLoads: number;
+  /**
    * True once texture-atlas loading has finished — either ready (textured
    * mesher installed) or failed (placeholder fallback). False only while the
    * pack fetch / atlas build is still in flight. Capture waits on this so a
@@ -207,6 +212,9 @@ export function installViewerHandle(
     },
     get settled() {
       return getSettled();
+    },
+    get pendingModelLoads() {
+      return scene.pendingModelLoads;
     },
     set settled(_v: boolean) {
       /* settled is derived; setter kept so tests can assign without throwing */

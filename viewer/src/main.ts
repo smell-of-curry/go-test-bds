@@ -3,12 +3,13 @@ import {
   CameraController,
   cameraModeFromSearch,
 } from "./camera";
+import { createFilmRandom, installFilmMode } from "../film/client";
 import { installViewerHandle } from "./debug";
 import { EntityModelRegistry } from "./entity";
 import { MotionLerp } from "./motion";
 import { Overlay } from "./overlay";
 import { ParticleRegistry, ParticleSystem } from "./particles";
-import type { Actor } from "./protocol";
+import type { Actor, Frame } from "./protocol";
 import { LOADING_CLEAR, ViewerScene } from "./scene";
 import { SnapshotStream, streamUrlFromSearch } from "./stream";
 import { Store } from "./store";
@@ -26,8 +27,18 @@ const uiEl = document.getElementById("ui-panel") as HTMLElement;
 const crosshairEl = document.getElementById("crosshair") as HTMLElement;
 const loadingEl = document.getElementById("loading") as HTMLElement;
 
+const pageParams = new URLSearchParams(location.search);
+/** Offline frame-exact render. See film/ and PROTOCOL.md `film`. */
+const filmMode = pageParams.get("film") === "1";
+const filmHud =
+  pageParams.get("hud") === "1" || pageParams.get("hud") === "true";
+const filmNametags =
+  pageParams.get("nametags") === "1" || pageParams.get("nametags") === "true";
+
 const store = new Store();
 const scene = new ViewerScene(canvas, labelsEl);
+scene.nameTagsEnabled = !filmMode || filmNametags;
+if (filmMode) scene.renderer.setPixelRatio(1);
 
 /**
  * Asset load lifecycle:
@@ -45,7 +56,7 @@ let lastActorRef: Actor | null = null;
 let lastMotionRevision = -1;
 
 function assetsSettled(): boolean {
-  return assetsPhase !== "loading";
+  return assetsPhase !== "loading" && scene.environmentReady;
 }
 
 function setLoadingVisible(visible: boolean, detail?: string): void {
@@ -126,6 +137,11 @@ void firstKeyframe
     assetsPhase = "failed";
     showWorld();
     paintOverlay();
+  })
+  .finally(() => {
+    if (!filmMode || !window.__film) return;
+    window.__film.bootstrapped = true;
+    window.__film.assetNote = assetError || "ready";
   });
 
 /**
@@ -165,7 +181,10 @@ const camera = new CameraController(
   bobbingFromSearch(location.search),
 );
 const overlay = new Overlay(overlayEl, errorEl, captionEl, uiEl);
-const particles = new ParticleSystem(scene.scene);
+const particles = new ParticleSystem(
+  scene.scene,
+  filmMode ? { random: createFilmRandom(1) } : {},
+);
 scene.particles = particles;
 let particleRegistry: ParticleRegistry | null = null;
 const hud = initHud({
@@ -251,7 +270,10 @@ function paintOverlay(): void {
     sectionMeshCount: scene.sectionMeshCount,
     streamError: streamError || assetLine,
   });
-  crosshairEl.style.display = camera.mode === "firstPerson" ? "block" : "none";
+  if (!filmMode) {
+    crosshairEl.style.display =
+      camera.mode === "firstPerson" ? "block" : "none";
+  }
 }
 
 store.subscribe((state) => {
@@ -320,7 +342,7 @@ const stream = new SnapshotStream(streamUrl, {
     streamError = "";
   },
 });
-stream.start();
+if (!filmMode) stream.start();
 
 /**
  * Minimum gap between renders, in milliseconds.
@@ -336,10 +358,90 @@ const PAINT_INTERVAL_MS = 50;
 let lastPaintAt = Number.NEGATIVE_INFINITY;
 
 kickViewer = () => {
+  if (filmMode) return;
   stream.resync(true);
   // Nudge the paint clock so the next rAF is not interval-throttled away.
   lastPaintAt = Number.NEGATIVE_INFINITY;
 };
+
+/**
+ * Hide diagnostic chrome. Canvas readback ignores DOM, but name tags are in
+ * the scene and a page screenshot must match the film.
+ */
+function hideFilmChrome(): void {
+  if (!filmMode) return;
+  for (const el of [
+    overlayEl,
+    captionEl,
+    crosshairEl,
+    uiEl,
+    labelsEl,
+    loadingEl,
+    errorEl,
+  ]) {
+    el.style.display = "none";
+  }
+  if (!filmHud) {
+    for (const id of ["player-hud", "json-hud", "waypoint-strip"]) {
+      const el = document.getElementById(id);
+      if (el) el.style.display = "none";
+    }
+  }
+  scene.nameTagsEnabled = filmNametags;
+}
+
+/**
+ * One presented frame. Live mode keeps the 50 ms throttle. Film mode passes
+ * `force` so every virtual output sample draws, using the (virtual) clock.
+ *
+ * @param force - Skip the live paint interval (film presents).
+ */
+function paintFrame(force = false): void {
+  const now = performance.now();
+  if (!force && now - lastPaintAt < PAINT_INTERVAL_MS) return;
+  // First live frame keeps the historical 0.25 s cap from a -Infinity origin.
+  // First film frame is dt 0 so warmup wall time cannot skip the opening pose.
+  const dtSec =
+    force && lastPaintAt === Number.NEGATIVE_INFINITY
+      ? 0
+      : Math.min(force ? 1 : 0.25, (now - lastPaintAt) / 1000);
+  lastPaintAt = now;
+
+  const state = store.getState();
+  if (state.schemaOk) {
+    // Keyframe/dimension wipes dispose old meshes across frames so a dense
+    // subway clear cannot freeze the rAF loop (recordVideo dies if paint stops).
+    if (scene.hasPendingWorldClear) scene.drainPendingWorldClear();
+    if (scene.pendingRemeshCount > 0) {
+      scene.tickRemesh(state);
+    }
+    const nowMs = performance.now();
+    scene.tickHighlights(nowMs);
+    hud.tick(nowMs);
+
+    const actor = motion.sampleActor() ?? state.actor;
+    const entities = motion.sampleEntities();
+    // MotionLerp (~inter-arrival / ~3 ticks) + Stage 9 bone animation.
+    const step = force
+      ? Math.max(0, dtSec)
+      : dtSec > 0
+        ? dtSec
+        : PAINT_INTERVAL_MS / 1000;
+    scene.tickEntities(step, entities);
+
+    camera.setOccludeMeshes(scene.terrainMeshes());
+    camera.update(actor, step, now);
+    scene.setActorVisible(
+      showActorBody(),
+      actor ? actor.pos : null,
+      actor?.rot,
+    );
+    scene.render(camera);
+  }
+  paintOverlay();
+  hideFilmChrome();
+  paintGeneration++;
+}
 
 function frame(): void {
   // Always re-schedule via finally: an uncaught throw in remesh/render used
@@ -347,46 +449,25 @@ function frame(): void {
   // only emits video frames when the page paints) while page.screenshot() /
   // evaluate still succeed — the showcase-01 stall.
   try {
-    const now = performance.now();
-    if (now - lastPaintAt < PAINT_INTERVAL_MS) return;
-    const dtSec = Math.min(0.25, (now - lastPaintAt) / 1000);
-    lastPaintAt = now;
-
-    const state = store.getState();
-    if (state.schemaOk) {
-      // Keyframe/dimension wipes dispose old meshes across frames so a dense
-      // subway clear cannot freeze the rAF loop (recordVideo dies if paint stops).
-      if (scene.hasPendingWorldClear) scene.drainPendingWorldClear();
-      if (scene.pendingRemeshCount > 0) {
-        scene.tickRemesh(state);
-      }
-      const nowMs = performance.now();
-      scene.tickHighlights(nowMs);
-      hud.tick(nowMs);
-
-      const actor = motion.sampleActor() ?? state.actor;
-      const entities = motion.sampleEntities();
-      // MotionLerp (~inter-arrival / ~3 ticks) + Stage 9 bone animation.
-      scene.tickEntities(
-        dtSec > 0 ? dtSec : PAINT_INTERVAL_MS / 1000,
-        entities,
-      );
-
-      camera.setOccludeMeshes(scene.terrainMeshes());
-      camera.update(actor, dtSec > 0 ? dtSec : PAINT_INTERVAL_MS / 1000, now);
-      scene.setActorVisible(
-        showActorBody(),
-        actor ? actor.pos : null,
-        actor?.rot,
-      );
-      scene.render(camera);
-    }
-    paintOverlay();
-    paintGeneration++;
+    paintFrame(false);
   } catch (err) {
     console.warn("viewer: paint frame failed (kept alive):", err);
   } finally {
     requestAnimationFrame(frame);
   }
 }
-requestAnimationFrame(frame);
+
+if (filmMode) {
+  camera.bobbingEnabled = false;
+  hideFilmChrome();
+  installFilmMode({
+    applyFrame: (frame: Frame) => store.apply(frame),
+    setCameraTrack: (track) => camera.setFilmTrack(track),
+    paint: () => paintFrame(true),
+    canvas,
+    glFinish: () => scene.renderer.getContext().finish(),
+    hideChrome: hideFilmChrome,
+  });
+} else {
+  requestAnimationFrame(frame);
+}

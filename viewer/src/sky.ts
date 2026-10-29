@@ -10,9 +10,13 @@ export const DAY_TICKS = 24_000;
 export const NOON_TICKS = 6_000;
 export const MIDNIGHT_TICKS = 18_000;
 
-/** Fixed noon palette matching Stage 10b `SKY_ZENITH` / `SKY_HORIZON`. */
-export const NOON_ZENITH = 0x3a6ea5;
-export const NOON_HORIZON = 0xa8d4f0;
+/**
+ * Noon zenith / horizon sampled from the reference savanna frames
+ * (clear pixels, not cloud texels): zenith ~(129, 177, 251), sky just above
+ * the treeline ~(169, 210, 251).
+ */
+export const NOON_ZENITH = 0x81b1fb;
+export const NOON_HORIZON = 0xa9d2fb;
 
 export interface SkyPalette {
   zenith: number;
@@ -142,6 +146,19 @@ export function sunDirection(tod: number): [number, number, number] {
 export function moonDirection(tod: number): [number, number, number] {
   const [x, y, z] = sunDirection(tod);
   return [-x, -y, -z];
+}
+
+/**
+ * Daylight factor for entity sky light. 1 at noon, ~0.15 at night so an
+ * outdoor mob is not pure black. `null` time stays at full daylight (goldens).
+ *
+ * @param time - Absolute world ticks, or null.
+ * @returns multiplier in 0.15..1.
+ */
+export function daylightFactor(time: number | null): number {
+  if (time == null) return 1;
+  const [, y] = sunDirection(ticksOfDay(time));
+  return 0.15 + 0.85 * Math.max(0, Math.min(1, y));
 }
 
 function lerpChan(a: number, b: number, t: number): number {
