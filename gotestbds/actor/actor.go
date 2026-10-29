@@ -560,13 +560,18 @@ func (a *Actor) UseItem() error {
 	}
 
 	heldItem, _ := a.Inventory().ItemInstance(a.heldSlot)
+	// Same zero-field drop as UseItemOnBlock: a click-air throw (snowball,
+	// projectile items) with TriggerTypeUnknown never launches.
 	action := &protocol.UseItemTransactionData{
-		ActionType: protocol.UseItemActionClickAir,
-		HotBarSlot: int32(a.heldSlot),
-		HeldItem:   heldItem,
-		BlockFace:  -1,
+		ActionType:       protocol.UseItemActionClickAir,
+		TriggerType:      protocol.TriggerTypePlayerInput,
+		HotBarSlot:       int32(a.heldSlot),
+		HeldItem:         heldItem,
+		BlockFace:        -1,
+		Position:         mcmath.Vec64To32(a.EyePos()),
+		ClientPrediction: protocol.ClientPredictionSuccess,
 	}
-
+	a.pendingItemUse = action
 	return a.useItem(action)
 }
 

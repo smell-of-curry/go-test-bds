@@ -91,3 +91,36 @@ func TestUseItemOnBlockSendsAcceptedClick(t *testing.T) {
 		t.Fatalf("use position %v, auth position %v", use.Position, auth.Position)
 	}
 }
+
+// TestUseItemSendsAcceptedThrow covers the click-air path (throwables such as
+// snowballs and projectile items): BDS drops it with an unknown trigger and
+// only launches when the next PlayerAuthInput carries the same use.
+func TestUseItemSendsAcceptedThrow(t *testing.T) {
+	a, conn := newRecordingActor(t)
+	conn.written = nil
+	if err := a.UseItem(); err != nil {
+		t.Fatal(err)
+	}
+	var data *protocol.UseItemTransactionData
+	for _, pk := range conn.written {
+		if tx, ok := pk.(*packet.InventoryTransaction); ok {
+			data, _ = tx.TransactionData.(*protocol.UseItemTransactionData)
+		}
+	}
+	if data == nil || data.ActionType != protocol.UseItemActionClickAir {
+		t.Fatalf("no click-air transaction: %+v", data)
+	}
+	if data.TriggerType != protocol.TriggerTypePlayerInput || data.ClientPrediction != protocol.ClientPredictionSuccess {
+		t.Fatalf("trigger %d prediction %d", data.TriggerType, data.ClientPrediction)
+	}
+	conn.written = nil
+	a.SendMovement()
+	for _, pk := range conn.written {
+		if auth, ok := pk.(*packet.PlayerAuthInput); ok && auth.InputData.Load(packet.InputFlagPerformItemInteraction) {
+			if use, ok := auth.ItemInteractionData.Value(); ok && use.ActionType == protocol.UseItemActionClickAir {
+				return
+			}
+		}
+	}
+	t.Fatal("throw did not ride the next PlayerAuthInput")
+}
