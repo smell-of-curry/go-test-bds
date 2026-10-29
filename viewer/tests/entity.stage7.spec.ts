@@ -41,6 +41,8 @@ test.describe("material name → render state", () => {
       transparency: "alpha_test",
       cull: false,
       emissive: true,
+      // Authored glow sits near alpha 0.25; 0.5 would cut it out.
+      alphaTest: 0.1,
     });
     expect(materialStateFromName("charged_creeper")).toMatchObject({
       transparency: "blend",

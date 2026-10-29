@@ -106,6 +106,32 @@ test.describe("animation keyframes (node)", () => {
     expect(poses.get("body")!.rotation[0]).toBeCloseTo(180, 5);
   });
 
+  test("molang channels see the sample time, not a stale query.anim_time", () => {
+    const bob = parseAnimations({
+      format_version: "1.8.0",
+      animations: {
+        "animation.test.bob": {
+          loop: true,
+          animation_length: 4,
+          bones: {
+            root: {
+              position: [0, "math.sin(query.anim_time * 90) * 4", 0],
+            },
+          },
+        },
+      },
+    }).get("animation.test.bob")!;
+    // Host left at anim_time 0. sin(90°) = 1 → y = 4. Stale 0 would yield 0.
+    const poses = sampleAnimationPoses(bob, 1, createDefaultHost());
+    expect(poses.get("root")!.position[1]).toBeCloseTo(4, 5);
+  });
+
+  test("loop playhead parked on the length keeps the end key", () => {
+    const nod = anims.get("animation.test.blocky.nod")!;
+    expect(resolveSampleTime(nod, 1)).toBeCloseTo(1, 5);
+    expect(resolveSampleTime(nod, 1.25)).toBeCloseTo(0.25, 5);
+  });
+
   test("position channel samples model-unit raise", () => {
     const raise = anims.get("animation.test.blocky.raise")!;
     const host = createDefaultHost();

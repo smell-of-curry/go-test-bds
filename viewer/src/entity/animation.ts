@@ -77,6 +77,10 @@ export function sampleAnimation(
   if (weight === 0 || !Number.isFinite(weight)) return;
   const t = resolveSampleTime(anim, animTime);
   if (t === null) return; // stopped (loop false, past end)
+  // Keyframe time and molang `query.anim_time` are the same clock. Callers
+  // that leave the host at 0 (or at the unwrapped playhead) desync sin/cos
+  // channels from the keys.
+  publishSampleClock(host, t);
 
   for (const [bone, channels] of anim.bones) {
     let pose = out.get(bone);
@@ -109,6 +113,19 @@ export function sampleAnimation(
 }
 
 /**
+ * Publish the sample clock onto hosts that support `setQuery`.
+ *
+ * @param host - Molang host.
+ * @param sampleTime - Resolved (wrapped) animation time.
+ */
+function publishSampleClock(host: MolangHost, sampleTime: number): void {
+  const writable = host as MolangHost & {
+    setQuery?: (name: string, value: number) => void;
+  };
+  writable.setQuery?.("anim_time", sampleTime);
+}
+
+/**
  * Resolve the time used for sampling given loop mode.
  *
  * @param anim - Animation.
@@ -123,8 +140,10 @@ export function resolveSampleTime(
   if (!(len > 0)) return Math.max(0, animTime);
 
   if (anim.loop === true) {
-    // Wrap into [0, len). Exact len → 0.
-    const m = animTime % len;
+    if (animTime <= 0) return 0;
+    // Blockbench's loop playhead is `((t - 0.001) % len) + 0.001`, so a
+    // playhead parked exactly on the length shows the end key, not t=0.
+    const m = ((animTime - 0.001) % len) + 0.001;
     return m < 0 ? m + len : m;
   }
   if (anim.loop === "hold_on_last_frame") {

@@ -61,17 +61,20 @@ const EXACT: Record<string, MaterialRenderState> = {
     emissive: true,
     alphaTest: 0,
   },
+  // Glow skins (Regieleki coils, Miraidon energy) are authored around alpha
+  // 0.25. A 0.5 cutout discards them; Blockbench's bedrock preview keeps
+  // texels above ~0.15.
   entity_emissive_alpha: {
     transparency: "alpha_test",
     cull: false,
     emissive: true,
-    alphaTest: 0.5,
+    alphaTest: 0.1,
   },
   entity_emissive_alpha_one_sided: {
     transparency: "alpha_test",
     cull: true,
     emissive: true,
-    alphaTest: 0.5,
+    alphaTest: 0.1,
   },
   entity_nocull: {
     transparency: "opaque",

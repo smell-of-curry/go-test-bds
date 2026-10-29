@@ -69,6 +69,26 @@ function resolvePackFile(rel) {
 }
 
 /**
+ * Base skin for a client entity. Gendered species omit `default` and ship
+ * `male_default` / `female_default` instead.
+ *
+ * @param {Record<string, string> | undefined} textures
+ * @returns {string | undefined}
+ */
+function pickTexture(textures) {
+  if (!textures) return undefined;
+  if (textures.default) return textures.default;
+  for (const key of ["male_default", "female_default"]) {
+    if (textures[key]) return textures[key];
+  }
+  for (const [key, rel] of Object.entries(textures)) {
+    if (key === "evo_aura" || key.startsWith("shiny")) continue;
+    if (typeof rel === "string" && rel.length) return rel;
+  }
+  return undefined;
+}
+
+/**
  * @param {string} id species id without namespace
  */
 function loadSpecies(id) {
@@ -91,7 +111,7 @@ function loadSpecies(id) {
     format_version: geoDoc.format_version ?? "1.16.0",
     "minecraft:geometry": [geo],
   };
-  const texRel = desc.textures?.default;
+  const texRel = pickTexture(desc.textures);
   const texAbs = texRel
     ? resolvePackFile(texRel.endsWith(".png") ? texRel : `${texRel}.png`)
     : null;
