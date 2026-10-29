@@ -97,12 +97,17 @@ vanilla pack is absent (CI without the cache).
 3. Else named custom / unknown → generated stone-grey `__neutral__` tile.
 4. Else try `textures/blocks/<short-name>.png` for a known short-name miss.
 5. Magenta/black `__missing__` only for unnamed non-zero `rid` or a short-name
-   that failed to load (bug marker — not "custom block").
+   that failed to load (bug marker — not "custom block"). An unnamed `rid` is a
+   network hash the recorder's dragonfly block list does not know: keep the
+   bot's dragonfly on the server's protocol.
 
 ## Culling / passes
 
-- Unknown / `requested` neighbour column → **exposed** (same as placeholder).
-- Absent section in a known column → air.
+- Unknown / `requested` neighbour column → **exposed** on the live viewer
+  (same as placeholder). Film (`?film=1`) hides that face: a column that
+  never arrived is sky, not a grass or water wall. A requested column that
+  already has the section is meshed.
+- Absent section in a complete column → air.
 - Opaque full cubes occlude; cutout/translucent do not occlude opaques.
 - Adjacent same glass/leaves cull the shared face.
 - Transparent / cutout / liquid faces → second mesh (`userData.pass = "transparent"`).

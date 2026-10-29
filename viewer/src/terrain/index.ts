@@ -15,6 +15,7 @@ import {
 } from "./merge";
 import { BlockModelResolver } from "./resolve";
 import { TexturedMesher } from "./mesher";
+import type { UnloadedColumnPolicy } from "./unloaded";
 import { loadBiomeColormaps } from "./biome";
 import {
   diagnosePaletteCoverage,
@@ -153,6 +154,11 @@ export interface CreateTexturedMesherOptions {
    * when the keyframe arrives so custom-block tiles enter the atlas.
    */
   registries?: Registries | null;
+  /**
+   * Faces toward a column that never arrived. Default `expose` (live).
+   * Film (`?film=1`) defaults to `hide` so the hole is sky, not a wall.
+   */
+  unloadedColumns?: UnloadedColumnPolicy;
 }
 
 export interface TexturedMesherBundle {
@@ -174,6 +180,19 @@ export interface TexturedMesherBundle {
    * @param registries - Keyframe registries or null.
    */
   applyRegistries(registries: Registries | null): Promise<void>;
+}
+
+/**
+ * Film renders hide faces toward columns that never arrived. Live keeps the
+ * frontier face so a hole is not a finished void until the neighbour lands.
+ *
+ * @returns `hide` on a `?film=1` page, otherwise `expose`.
+ */
+function filmUnloadedPolicy(): UnloadedColumnPolicy {
+  if (typeof window === "undefined") return "expose";
+  return new URLSearchParams(window.location.search).get("film") === "1"
+    ? "hide"
+    : "expose";
 }
 
 /**
@@ -244,6 +263,7 @@ export async function createTexturedMesher(
     customGeometry: opts.customGeometry ?? null,
     geometryCache,
     smoothLighting: opts.smoothLighting,
+    unloadedColumns: opts.unloadedColumns ?? filmUnloadedPolicy(),
   });
 
   const bundle: TexturedMesherBundle = {

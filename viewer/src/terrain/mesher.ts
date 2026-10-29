@@ -24,6 +24,11 @@ import {
   isWaterlogFluid,
   type BlockModelResolver,
 } from "./resolve";
+import {
+  neighbourDisposition,
+  UNLOADED_NEIGHBOUR,
+  type UnloadedColumnPolicy,
+} from "./unloaded";
 import type {
   AtlasUv,
   BiomeAt,
@@ -59,7 +64,8 @@ interface EmitStats {
 
 /**
  * Textured terrain mesher — drop-in {@link Mesher}.
- * Face culling matches PlaceholderMesher's unknown-neighbour policy.
+ * Face culling matches PlaceholderMesher's unknown-neighbour policy, unless
+ * `unloadedColumns` is `hide` (film): a column that never arrived is sky.
  * Coplanar same-texture faces are greedily merged; translucent/cutout/liquid
  * faces go into a second transparent pass.
  */
@@ -73,6 +79,11 @@ export class TexturedMesher implements Mesher {
   readonly smoothLighting: boolean;
   /** Daylight factor 0..1 applied to sky light (1 = noon). */
   skyDarken: number;
+  /**
+   * `expose` draws the frontier face (live). `hide` omits it (film) so a
+   * never-loaded column is sky instead of a grass or water wall.
+   */
+  readonly unloadedColumns: UnloadedColumnPolicy;
   private texture: THREE.CanvasTexture;
   private readonly matOpaque: THREE.RawShaderMaterial;
   private readonly matTransparent: THREE.RawShaderMaterial;
@@ -100,6 +111,8 @@ export class TexturedMesher implements Mesher {
       smoothLighting?: boolean;
       /** Sky daylight factor 0..1. Default 1 (noon). */
       skyDarken?: number;
+      /** Frontier faces. Default `expose` (live). Film passes `hide`. */
+      unloadedColumns?: UnloadedColumnPolicy;
     },
   ) {
     this.atlas = atlas;
@@ -109,6 +122,7 @@ export class TexturedMesher implements Mesher {
     this.geoCache = opts?.geometryCache ?? null;
     this.smoothLighting = opts?.smoothLighting !== false;
     this.skyDarken = opts?.skyDarken ?? 1;
+    this.unloadedColumns = opts?.unloadedColumns ?? "expose";
 
     this.texture = new THREE.CanvasTexture(atlas.imageSource());
     this.texture.magFilter = THREE.NearestFilter;
@@ -211,8 +225,21 @@ export class TexturedMesher implements Mesher {
     const beByPos = indexBlockEntities(column.blockEntities ?? []);
     const beMeshes: THREE.Mesh[] = [];
 
-    const blockAt = (lx: number, ly: number, lz: number): Block | undefined => {
-      return neighbourBlock(state, cx, cz, sy, lx, ly, lz);
+    const blockAt = (
+      lx: number,
+      ly: number,
+      lz: number,
+    ): Block | undefined | typeof UNLOADED_NEIGHBOUR => {
+      return neighbourBlock(
+        state,
+        cx,
+        cz,
+        sy,
+        lx,
+        ly,
+        lz,
+        this.unloadedColumns,
+      );
     };
 
     const lightCtx: LightCtx = {
@@ -546,7 +573,11 @@ export class TexturedMesher implements Mesher {
     originY: number,
     originZ: number,
     tick: number,
-    blockAt: (x: number, y: number, z: number) => Block | undefined,
+    blockAt: (
+      x: number,
+      y: number,
+      z: number,
+    ) => Block | undefined | typeof UNLOADED_NEIGHBOUR,
     biomeAt: BiomeAt,
     emits: MergeQuad[],
     onQuad: () => void,
@@ -580,7 +611,11 @@ export class TexturedMesher implements Mesher {
     wy: number,
     wz: number,
     tick: number,
-    blockAt: (x: number, y: number, z: number) => Block | undefined,
+    blockAt: (
+      x: number,
+      y: number,
+      z: number,
+    ) => Block | undefined | typeof UNLOADED_NEIGHBOUR,
     biomeAt: BiomeAt,
     emits: MergeQuad[],
     onQuad: () => void,
@@ -595,9 +630,13 @@ export class TexturedMesher implements Mesher {
     const useFlow = model.flowYaw != null;
     const flowRot = useFlow ? yawToRot(model.flowYaw!) : 0;
 
-    // Top surface always (unless blocked by liquid above).
+    // Top surface always (unless blocked by liquid above, or the section
+    // above was never delivered — that face would be a water ceiling).
     const above = blockAt(x, y + 1, z);
-    if (!above || this.resolver.renderClassOf(above) !== "liquid") {
+    if (
+      above !== UNLOADED_NEIGHBOUR &&
+      (!above || this.resolver.renderClassOf(above) !== "liquid")
+    ) {
       onQuad();
       const key = `transparent|2|${model.textureStill}|${model.tint}|top`;
       emits.push({
@@ -621,9 +660,10 @@ export class TexturedMesher implements Mesher {
     for (const d of DIRS) {
       if (d.dy !== 0) continue;
       const nb = blockAt(x + d.dx, y + d.dy, z + d.dz);
+      if (nb === UNLOADED_NEIGHBOUR) continue;
       if (nb && this.resolver.renderClassOf(nb) === "liquid") continue;
       if (nb && this.resolver.occludes(nb)) continue;
-      // Unknown neighbour → exposed (same policy).
+      // Unknown neighbour → exposed, unless film hid the unloaded column.
       onQuad();
       const key = `transparent|${d.dir}|${model.textureFlow}|${model.tint}|side`;
       emits.push({
@@ -678,8 +718,12 @@ export class TexturedMesher implements Mesher {
 }
 
 /**
- * Unknown-neighbour policy (match PlaceholderMesher): missing/requested column
- * → not occluding (face kept). Absent section in known column → air.
+ * Unknown-neighbour policy (match PlaceholderMesher) when `policy` is
+ * `expose`: missing/requested column → not occluding (face kept). Absent
+ * section in a complete column → air. `hide` (film) returns
+ * {@link UNLOADED_NEIGHBOUR} for a column or section that never arrived, so
+ * the face is skipped. A requested column that already has the section is
+ * read either way — those blocks are real.
  *
  * @param state - World.
  * @param cx - Column X.
@@ -688,7 +732,8 @@ export class TexturedMesher implements Mesher {
  * @param lx - Local neighbour X (may be outside 0..15).
  * @param ly - Local neighbour Y.
  * @param lz - Local neighbour Z.
- * @returns neighbour block or undefined when air/unknown.
+ * @param policy - Frontier faces. Default `expose`.
+ * @returns neighbour block, undefined for air, or {@link UNLOADED_NEIGHBOUR}.
  */
 export function neighbourBlock(
   state: WorldState,
@@ -698,7 +743,8 @@ export function neighbourBlock(
   lx: number,
   ly: number,
   lz: number,
-): Block | undefined {
+  policy: UnloadedColumnPolicy = "expose",
+): Block | undefined | typeof UNLOADED_NEIGHBOUR {
   let ncx = cx;
   let ncz = cz;
   let nsy = sy;
@@ -728,9 +774,10 @@ export function neighbourBlock(
   }
 
   const col = state.columns.get(columnKey(ncx, ncz));
-  if (!col || col.state === "requested") return undefined;
-  const sec = col.sections.get(nsy);
-  if (!sec) return undefined;
+  const sec = col?.sections.get(nsy);
+  const how = neighbourDisposition(col?.state, sec != null, policy);
+  if (how === "unloaded") return UNLOADED_NEIGHBOUR;
+  if (how === "air" || !sec) return undefined;
   const idx = sec.indices[sectionIndex(x, y, z)]!;
   return sec.palette[idx];
 }
@@ -738,8 +785,10 @@ export function neighbourBlock(
 function shouldDrawFace(
   resolver: BlockModelResolver,
   self: Block,
-  neighbour: Block | undefined,
+  neighbour: Block | undefined | typeof UNLOADED_NEIGHBOUR,
 ): boolean {
+  // Never-loaded column (film): no face. The hole is sky.
+  if (neighbour === UNLOADED_NEIGHBOUR) return false;
   // Unknown / air → exposed.
   if (!neighbour || isAir(neighbour)) return true;
   if (resolver.occludes(neighbour)) return false;
@@ -1176,7 +1225,7 @@ function cellOccludes(
     ly,
     lz,
   );
-  if (!b || isAir(b)) return false;
+  if (b === UNLOADED_NEIGHBOUR || !b || isAir(b)) return false;
   return light.resolver.occludes(b);
 }
 

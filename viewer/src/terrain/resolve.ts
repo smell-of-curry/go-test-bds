@@ -107,6 +107,7 @@ const CROSS_BLOCKS = new Set([
   "tall_dry_grass",
   "web",
   "cobweb",
+  "fire",
   "seagrass",
   "firefly_bush",
   "bush",
@@ -652,6 +653,8 @@ function partialExtents(name: string): { yBot: number; yTop: number } | null {
   if (bare === "carpet" || bare.endsWith("_carpet")) {
     return { yBot: 0, yTop: 1 / 16 };
   }
+  // Dust sits on the block below.
+  if (bare === "redstone_wire") return { yBot: 0, yTop: 1 / 16 };
   return null;
 }
 

@@ -601,7 +601,9 @@ export class ViewerScene {
     for (const key of [...this.pendingSet]) {
       const [xs, zs, ys] = key.split(",");
       const col = state.columns.get(`${xs},${zs}`);
-      if (!col || col.state === "requested" || !col.sections.has(Number(ys))) {
+      // Requested columns with a section already hold blocks — mesh them.
+      // An empty requested column has no section key and drops out here.
+      if (!col || !col.sections.has(Number(ys))) {
         this.removeSection(key);
         this.dequeueSection(key);
       }
@@ -983,7 +985,10 @@ export class ViewerScene {
       const cz = Number(zs);
       const sy = Number(ys);
       const col = state.columns.get(`${cx},${cz}`);
-      if (!col || col.state === "requested") {
+      // `requested` with no section is still empty. A section on a requested
+      // column is real blocks the sub-chunk carried before the column
+      // promoted — draw them.
+      if (!col || !col.sections.has(sy)) {
         this.removeSection(key);
         return;
       }
@@ -1841,7 +1846,6 @@ export class ViewerScene {
   remeshAll(): void {
     if (!this.storeRef) return;
     for (const [key, col] of this.storeRef.columns) {
-      if (col.state === "requested") continue;
       const [xs, zs] = key.split(",");
       for (const sy of col.sections.keys()) {
         this.enqueueSection(`${xs},${zs},${sy}`);
