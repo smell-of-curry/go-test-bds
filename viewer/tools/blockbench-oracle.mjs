@@ -37,19 +37,19 @@ const timeFlag = argv.indexOf("--time");
 const animTime = timeFlag >= 0 ? Number(argv[timeFlag + 1]) : 1;
 const outFlag = argv.indexOf("--out");
 const outRoot =
-  outFlag >= 0
-    ? argv[outFlag + 1]
-    : process.env.ORACLE_OUT || "/tmp/oracle";
+  outFlag >= 0 ? argv[outFlag + 1] : process.env.ORACLE_OUT || "/tmp/oracle";
 const ids = argv.filter((a) => a.startsWith("pokemon:"));
-const species = (ids.length ? ids : ["pokemon:charizard", "pokemon:glaceon"]).map(
-  (s) => s.replace(/^pokemon:/, ""),
-);
+const species = (
+  ids.length ? ids : ["pokemon:charizard", "pokemon:glaceon"]
+).map((s) => s.replace(/^pokemon:/, ""));
 const doRest = !flags.has("--idle-only");
 const doIdle = !flags.has("--rest-only");
 
 if (!existsSync(join(bbRoot, "dist/bundle.js"))) {
   console.error("Blockbench web build missing at", bbRoot);
-  console.error("Clone https://github.com/JannisX11/blockbench and run: npm run build-web");
+  console.error(
+    "Clone https://github.com/JannisX11/blockbench and run: npm run build-web",
+  );
   process.exit(1);
 }
 
@@ -62,7 +62,8 @@ function resolvePackFile(rel) {
   for (const root of [packRoot, packFallback]) {
     const abs = join(root, clean);
     if (existsSync(abs)) return abs;
-    if (!clean.endsWith(".png") && existsSync(abs + ".png")) return abs + ".png";
+    if (!clean.endsWith(".png") && existsSync(abs + ".png"))
+      return abs + ".png";
   }
   return null;
 }
@@ -82,14 +83,18 @@ function loadSpecies(id) {
   const geoId = desc.geometry?.default;
   const geoDoc = JSON.parse(readFileSync(geoPath, "utf8"));
   const geometries = geoDoc["minecraft:geometry"] ?? [];
-  const geo = geometries.find((g) => g.description?.identifier === geoId) ?? geometries[0];
+  const geo =
+    geometries.find((g) => g.description?.identifier === geoId) ??
+    geometries[0];
   if (!geo) throw new Error(`no geometry in ${geoPath}`);
   const singleGeo = {
     format_version: geoDoc.format_version ?? "1.16.0",
     "minecraft:geometry": [geo],
   };
   const texRel = desc.textures?.default;
-  const texAbs = texRel ? resolvePackFile(texRel.endsWith(".png") ? texRel : `${texRel}.png`) : null;
+  const texAbs = texRel
+    ? resolvePackFile(texRel.endsWith(".png") ? texRel : `${texRel}.png`)
+    : null;
   if (!texAbs) throw new Error(`missing texture ${texRel} for ${id}`);
   const textureDataUrl =
     "data:image/png;base64," + readFileSync(texAbs).toString("base64");
@@ -250,7 +255,9 @@ const bbServer = createServer((req, res) => {
   res.end(readFileSync(abs));
 });
 await new Promise((resolve) => bbServer.listen(0, "127.0.0.1", resolve));
-const bbPort = /** @type {import('node:net').AddressInfo} */ (bbServer.address()).port;
+const bbPort = /** @type {import('node:net').AddressInfo} */ (
+  bbServer.address()
+).port;
 const bbBase = `http://127.0.0.1:${bbPort}/index.html`;
 
 const vite = await createVite({
@@ -265,7 +272,11 @@ if (!appBase) throw new Error("no vite url");
 
 const browser = await chromium.launch({
   headless: true,
-  args: ["--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader"],
+  args: [
+    "--use-gl=angle",
+    "--use-angle=swiftshader",
+    "--enable-unsafe-swiftshader",
+  ],
 });
 const bbPage = await browser.newPage({
   viewport: { width: 1280, height: 800 },
@@ -486,17 +497,23 @@ async function shootBlockbench(page, spec, animName, time) {
  */
 async function shootViewer(page, spec, animName, time, cameras) {
   return page.evaluate(
-    async ({ singleGeo, textureDataUrl, animJson, animName, time, cameras, size }) => {
+    async ({
+      singleGeo,
+      textureDataUrl,
+      animJson,
+      animName,
+      time,
+      cameras,
+      size,
+    }) => {
       const THREE = await import("/node_modules/three/build/three.module.js");
       const { parseGeometryDocument } = await import("/src/geometry/index.ts");
       const { buildEntityModel } = await import("/src/entity/buildModel.ts");
-      const { materialStateFromName, createEntityMaterial } = await import(
-        "/src/entity/material.ts"
-      );
+      const { materialStateFromName, createEntityMaterial } =
+        await import("/src/entity/material.ts");
       const { parseAnimations } = await import("/src/entity/parseAnimation.ts");
-      const { applyBonePoses, sampleAnimationPoses } = await import(
-        "/src/entity/animation.ts"
-      );
+      const { applyBonePoses, sampleAnimationPoses } =
+        await import("/src/entity/animation.ts");
       const { createDefaultHost } = await import("/src/molang/host.ts");
 
       const img = await new Promise((resolve, reject) => {
@@ -555,7 +572,11 @@ async function shootViewer(page, spec, animName, time, cameras) {
           cam.near / U,
           cam.far / U,
         );
-        camera.position.set(cam.position[0] / U, cam.position[1] / U, cam.position[2] / U);
+        camera.position.set(
+          cam.position[0] / U,
+          cam.position[1] / U,
+          cam.position[2] / U,
+        );
         camera.up.set(0, 1, 0);
         camera.lookAt(cam.target[0] / U, cam.target[1] / U, cam.target[2] / U);
         camera.updateProjectionMatrix();
@@ -593,9 +614,29 @@ for (const id of species) {
   }
   const poses = [];
   if (doRest) poses.push({ pose: "rest", anim: null });
-  if (doIdle && spec.animName) poses.push({ pose: "idle", anim: spec.animName });
+  if (doIdle && spec.animName)
+    poses.push({ pose: "idle", anim: spec.animName });
   for (const { pose, anim } of poses) {
     console.log("oracle", id, pose, anim ?? "");
+    try {
+      await shootPose(id, spec, pose, anim);
+    } catch (err) {
+      console.error(" ", id, pose, err.message);
+      summary.push({ id, pose, error: String(err.message ?? err) });
+    }
+  }
+}
+
+/**
+ * Render one pose in both renderers, write the images, and append the scores.
+ *
+ * @param {string} id
+ * @param {ReturnType<typeof loadSpecies>} spec
+ * @param {string} pose
+ * @param {string | null} anim
+ */
+async function shootPose(id, spec, pose, anim) {
+  {
     const bb = await shootBlockbench(bbPage, spec, anim, animTime);
     if (bb.errors?.length) console.log("  bb", bb.errors.join(" | "));
     console.log(
