@@ -64,7 +64,7 @@ func TestEmotePacket(t *testing.T) {
 
 func TestDefaultPullHasCommandAndEmote(t *testing.T) {
 	pull := DefaultPull(nil)
-	for _, name := range []string{"command", "emote", "runCommand"} {
+	for _, name := range []string{"command", "emote", "runCommand", "swingArm"} {
 		if _, ok := pull.Instruction(name); !ok {
 			t.Fatalf("missing %s", name)
 		}

@@ -131,6 +131,7 @@ func DefaultPull(callbacker Callbacker) *Pull {
 	pull.Register(create[RunCommand]())
 	pull.Register(create[Command]())
 	pull.Register(create[Emote]())
+	pull.Register(create[SwingArm]())
 	pull.Register(create[Rejoin]())
 	pull.Register(create[EditSign]())
 	pull.Register(create[ToggleCrafterSlot]())
