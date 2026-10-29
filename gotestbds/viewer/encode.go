@@ -308,10 +308,11 @@ func (e *encoder) delta(cur *viewState) Delta {
 		}
 		// Light/biomes ride on Column payloads, not BlockChange. Re-send the
 		// column when those fields moved so already-delivered clients update.
-		if columnLightOrBiomeChanged(prev, col) {
+		resent := columnLightOrBiomeChanged(prev, col)
+		if resent {
 			d.ColumnsAdded = append(d.ColumnsAdded, col)
 		}
-		d.Blocks = append(d.Blocks, diffBlocks(key, prev, col)...)
+		d.Blocks = append(d.Blocks, diffBlocks(key, prev, col, resent)...)
 	}
 	for key := range e.prev.columns {
 		if _, ok := cur.columns[key]; !ok {
@@ -407,16 +408,31 @@ func encodeCamera(a *actor.Actor) (*Camera, uint64) {
 //
 // Sections whose wire payload is byte-identical are skipped — a column revision
 // bump from one block change must not re-expand every other section.
-func diffBlocks(pos [2]int32, prev, cur Column) []BlockChange {
+// diffBlocks lists block edits between two encodings of one column.
+//
+// Sections that only changed light, and sections added or dropped while the
+// whole column is re-sent, are skipped: the column payload already carries
+// them, and diffing them block by block (light ripples through every loaded
+// neighbour) stalled the recorder's tick loop for seconds.
+//
+// @param pos The column position.
+// @param prev The column as last sent.
+// @param cur The column now.
+// @param resent Whether cur also goes out whole in ColumnsAdded.
+// @returns per-block changes for sections whose blocks changed in place.
+func diffBlocks(pos [2]int32, prev, cur Column, resent bool) []BlockChange {
 	prevByY := sectionsByY(prev)
 	curByY := sectionsByY(cur)
 	var out []BlockChange
 	for y, sec := range curByY {
 		ps, ok := prevByY[y]
-		if ok && sectionWireEqual(ps, sec) {
+		if (ok && sectionBlocksEqual(ps, sec)) || (!ok && resent) {
 			continue
 		}
 		out = append(out, diffSectionBlocks(pos, ps, sec, ok)...)
+	}
+	if resent {
+		return out
 	}
 	for y, ps := range prevByY {
 		if _, ok := curByY[y]; ok {
@@ -435,9 +451,8 @@ func sectionsByY(col Column) map[int]Section {
 	return out
 }
 
-func sectionWireEqual(a, b Section) bool {
+func sectionBlocksEqual(a, b Section) bool {
 	if a.Y != b.Y || a.Blocks != b.Blocks || a.Blocks1 != b.Blocks1 ||
-		a.SkyLight != b.SkyLight || a.BlockLight != b.BlockLight ||
 		len(a.Palette) != len(b.Palette) {
 		return false
 	}

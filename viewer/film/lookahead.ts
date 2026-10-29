@@ -35,7 +35,7 @@ export interface LookaheadRewriteOptions {
 
 interface Generation {
   frames: TimedFilmFrame[];
-  /** First wire column seen for each `x,z` in this dimension. */
+  /** Seed payload for each `x,z` in this dimension (see {@link betterSeed}). */
   first: Map<string, Column>;
 }
 
@@ -112,8 +112,8 @@ export function sampleTrackPoints(
 
 /**
  * Pull columns the bot receives later up to the start of their dimension,
- * but only those within the camera bubble. The object inserted is the first
- * payload on the wire. Later `columnsAdded` and block edits stay on their
+ * but only those within the camera bubble. The object inserted is the column
+ * as complete as the wire had it at the window start. Later `columnsAdded` and block edits stay on their
  * real timestamps. In-bubble `columnsRemoved` before `toMs` is dropped so a
  * chunk the bot walked away from does not vanish mid-shot.
  *
@@ -153,7 +153,10 @@ export function rewriteTimelineForLookahead(
     if (!cols) continue;
     for (const col of cols) {
       const key = columnId(col.x, col.z);
-      if (!current.first.has(key)) current.first.set(key, col);
+      const have = current.first.get(key);
+      if (!have || betterSeed(have, col, item.tMs, opts.fromMs)) {
+        current.first.set(key, col);
+      }
     }
   }
 
@@ -219,6 +222,29 @@ export function actorPointsInWindow(
     out.push({ x: actor.pos[0], z: actor.pos[2] });
   }
   return out;
+}
+
+/**
+ * Whether `next` should replace `have` as a column's seed. A column first
+ * arrives as an empty `requested` shell and is re-sent whole once its
+ * sub-chunks land, often after the shot starts, so seeding the first payload
+ * left the ground void. Prefer complete payloads, and among those the latest
+ * one before the window opens.
+ *
+ * @param have - Current seed.
+ * @param next - Candidate payload.
+ * @param tMs - When `next` arrived.
+ * @param fromMs - Window start.
+ * @returns true to take `next`.
+ */
+function betterSeed(
+  have: Column,
+  next: Column,
+  tMs: number,
+  fromMs: number,
+): boolean {
+  if (next.state !== "complete") return false;
+  return have.state !== "complete" || tMs < fromMs;
 }
 
 function columnId(x: number, z: number): string {

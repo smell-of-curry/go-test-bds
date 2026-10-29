@@ -799,12 +799,26 @@ func (a *Actor) ChunkRadius() int {
 }
 
 // unloadChunks unloads chunks.
+// chunkKeepMargin keeps columns this many chunks past the granted radius.
+// BDS sends a little past it (chunks ~17-18 away at radius 16) and counts
+// them as delivered; pruning them at the radius left holes that BDS never
+// filled once the bot moved closer.
+const chunkKeepMargin = 4
+
 func (a *Actor) unloadChunks() {
-	current := w.ChunkPos{int32(a.loadingCenter.X() >> 4), int32(a.loadingCenter.Z() >> 4)}
+	center := w.ChunkPos{int32(a.loadingCenter.X() >> 4), int32(a.loadingCenter.Z() >> 4)}
+	// After a teleport BDS streams the destination's chunks before its
+	// NetworkChunkPublisherUpdate moves the centre. Pruning on the stale
+	// centre alone dropped those for good (BDS never resends), so keep
+	// anything in range of where the actor now stands too.
+	p := a.Position()
+	self := w.ChunkPos{int32(math.Floor(p[0])) >> 4, int32(math.Floor(p[2])) >> 4}
+	out := func(pos, from w.ChunkPos) bool {
+		dx, dz := pos[0]-from[0], pos[1]-from[1]
+		return math.Sqrt(float64(dx*dx+dz*dz)) > float64(a.chunkRadius+chunkKeepMargin)
+	}
 	for pos := range a.world.Chunks() {
-		diffX, diffZ := pos[0]-current[0], pos[1]-current[1]
-		dist := math.Sqrt(float64(diffX*diffX) + float64(diffZ*diffZ))
-		if int(dist) > a.chunkRadius {
+		if out(pos, center) && out(pos, self) {
 			a.world.RemoveChunk(pos)
 		}
 	}

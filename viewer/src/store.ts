@@ -559,6 +559,10 @@ export class Store {
     if (frame.columnsAdded) {
       for (const col of frame.columnsAdded) {
         const stored = decodeColumn(col);
+        // A re-send replaces the column; sections it no longer has (window
+        // moved, chunk cleared) must drop their meshes too.
+        const old = this.state.columns.get(columnKey(col.x, col.z));
+        if (old) markAllSectionsDirty(this.state, old);
         this.state.columns.set(columnKey(col.x, col.z), stored);
         markAllSectionsDirty(this.state, stored);
         // Existing neighbours may have drawn an "edge of known data" face

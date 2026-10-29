@@ -345,20 +345,45 @@ func TestSectionWindowDropsDistantSections(t *testing.T) {
 		t.Fatalf("sections at y=70 window: low=%v high=%v (want low only)", sawLow, sawHigh)
 	}
 
-	// Walk up so the high section enters and the low one leaves.
+	// Walk up so the high section enters and the low one leaves. The column
+	// is re-sent whole (clients replace it), not diffed block by block.
 	a.Move(mgl64.Vec3{1, 200, 1}, cube.Rotation{})
 	d := encodeDelta(t, enc, a)
-	var lowCleared, highAdded bool
-	for _, ch := range d.Blocks {
-		if ch.Pos == [3]int{1, 70, 1} && ch.Block.Name == "minecraft:air" {
-			lowCleared = true
-		}
-		if ch.Pos == [3]int{1, 200, 1} && ch.Block.Name != "" && ch.Block.Name != "minecraft:air" {
-			highAdded = true
-		}
+	if len(d.Blocks) != 0 || len(d.ColumnsAdded) != 1 {
+		t.Fatalf("window move delta: blocks=%d columnsAdded=%d, want a column re-send", len(d.Blocks), len(d.ColumnsAdded))
 	}
-	if !lowCleared || !highAdded {
-		t.Fatalf("window move delta: lowCleared=%v highAdded=%v blocks=%d", lowCleared, highAdded, len(d.Blocks))
+	var lowKept, highAdded bool
+	for _, sec := range d.ColumnsAdded[0].Sections {
+		lowKept = lowKept || sec.Y == 4
+		highAdded = highAdded || sec.Y == 12
+	}
+	if lowKept || !highAdded {
+		t.Fatalf("window move column: lowKept=%v highAdded=%v", lowKept, highAdded)
+	}
+}
+
+// TestDeltaPatchesEditsButNotLoads keeps in-place edits as one BlockChange
+// while a section that newly appears rides the column re-send only; diffing
+// new sections block by block stalled the recorder.
+func TestDeltaPatchesEditsButNotLoads(t *testing.T) {
+	a := testActor(t, "TestBot")
+	w := a.World()
+	addColumn(w, dfworld.ChunkPos{0, 0})
+	w.SetBlock(cube.Pos{1, 70, 1}, block.Gold{})
+	a.Move(mgl64.Vec3{1, 70, 1}, cube.Rotation{})
+	enc := newEncoder("TestBot", 4, 4)
+	encodeKeyframe(t, enc, a)
+
+	w.SetBlock(cube.Pos{2, 70, 2}, block.Dirt{})
+	d := encodeDelta(t, enc, a)
+	if len(d.Blocks) != 1 || d.Blocks[0].Pos != [3]int{2, 70, 2} {
+		t.Fatalf("edit delta blocks=%+v, want only the dirt at 2,70,2", d.Blocks)
+	}
+
+	w.SetBlock(cube.Pos{3, 90, 3}, block.Stone{})
+	d = encodeDelta(t, enc, a)
+	if len(d.Blocks) != 0 || len(d.ColumnsAdded) != 1 {
+		t.Fatalf("new section delta: blocks=%d columnsAdded=%d, want a column re-send only", len(d.Blocks), len(d.ColumnsAdded))
 	}
 }
 

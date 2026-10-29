@@ -101,6 +101,25 @@ test("lookahead seeds the first column version and keeps later edits", () => {
   assert.equal(arrive.columnsAdded?.[1], far);
 });
 
+test("lookahead seeds the complete column over an earlier requested shell", () => {
+  const shell: Column = { ...col(0, 0), state: "requested" };
+  const loaded = col(0, 0);
+  const relit = col(0, 0);
+  const out = rewriteTimelineForLookahead(
+    [
+      kf([]),
+      delta(500, { columnsAdded: [shell] }),
+      delta(3000, { columnsAdded: [loaded] }),
+      delta(4000, { columnsAdded: [relit] }),
+    ],
+    { fromMs: 2000, toMs: 5000, points: cam },
+  );
+  const key = out[0]!.frame;
+  assert.equal(key.type, "keyframe");
+  if (key.type !== "keyframe") return;
+  assert.equal(key.columns[0], loaded);
+});
+
 test("lookahead does not drop an in-bubble column mid-window", () => {
   const near = col(0, 0);
   const out = rewriteTimelineForLookahead(
