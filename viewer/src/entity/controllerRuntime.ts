@@ -51,6 +51,37 @@ export interface AnimEntityState {
   attributes: Record<string, number>;
 }
 
+/**
+ * One `packet.AnimateEntity` / `playAnimation` request.
+ * `startSec` is `performance.now()/1000` when the event was applied (the film
+ * clock is spoofed to the frame during apply, so a later present seeks in).
+ */
+export interface ServerAnimRequest {
+  /** Full animation id or a client-entity short name. */
+  animation: string;
+  nextState?: string;
+  stopExpression?: string;
+  controller?: string;
+  /** Seconds. 0 = drop on the stop frame. */
+  blendOutTime?: number;
+  /** Clock seconds the play began. Defaults to now. */
+  startSec?: number;
+}
+
+/** One server-triggered play layered over controller output. */
+interface ServerPlay {
+  /** Name the caller asked for (full id or short name). */
+  name: string;
+  anim: ParsedAnimation;
+  startSec: number;
+  blendOutTime: number;
+  stopExpression: string;
+  /** Resolved controller id this play replaces, or "". */
+  controllerId: string;
+  /** Elapsed seconds when a dynamic stop fired; -1 if not yet. */
+  stoppedAt: number;
+}
+
 /** One playing animation instance (root or inside a controller). */
 interface PlayingAnim {
   shortName: string;
@@ -87,6 +118,8 @@ export class EntityAnimator {
   private lastPos: [number, number, number] | null = null;
   private readonly rootPlay = new Map<string, PlayingAnim>();
   private readonly controllers = new Map<string, ControllerInst>();
+  /** Server AnimateEntity plays, newest last. Sampled on top of controllers. */
+  private serverPlays: ServerPlay[] = [];
   /**
    * Virtual time the entity was added (seconds). The first tick catches the
    * controller up to `performance.now()` so a film jump does not sample the
@@ -131,6 +164,49 @@ export class EntityAnimator {
     const out: Record<string, string> = {};
     for (const [id, c] of this.controllers) out[id] = c.state;
     return out;
+  }
+
+  /**
+   * Animation names currently playing from {@link playServerAnimation}.
+   * A non-looping play drops out once `now` passes its length (plus blend).
+   *
+   * @returns requested names still contributing.
+   */
+  serverAnimations(): string[] {
+    const now = performance.now() / 1000;
+    const out: string[] = [];
+    for (const play of this.serverPlays) {
+      if (!this.serverPlayView(play, now)) continue;
+      if (!out.includes(play.name)) out.push(play.name);
+    }
+    return out;
+  }
+
+  /**
+   * Start a server-triggered animation. Unknown names are ignored.
+   * A non-empty controller replaces that controller's pose until the play
+   * ends, then blends back. `nextState` is applied only when that controller
+   * has the state.
+   *
+   * @param req - AnimateEntity / playAnimation fields.
+   */
+  playServerAnimation(req: ServerAnimRequest): void {
+    this.ensureReady();
+    const controllerId = this.resolveControllerId(req.controller ?? "");
+    if (controllerId && req.nextState) {
+      this.jumpController(controllerId, req.nextState);
+    }
+    const anim = this.resolveServerAnim(req.animation);
+    if (!anim) return;
+    this.serverPlays.push({
+      name: req.animation || anim.identifier,
+      anim,
+      startSec: req.startSec ?? performance.now() / 1000,
+      blendOutTime: Math.max(0, req.blendOutTime ?? 0),
+      stopExpression: req.stopExpression ?? "",
+      controllerId,
+      stoppedAt: -1,
+    });
   }
 
   /**
@@ -209,11 +285,7 @@ export class EntityAnimator {
     this.syncQueries(ent, delta);
     this.refreshFlagQueries(ent);
 
-    if (!this.initialized) {
-      this.runScriptList(this.bindings.scripts.initialize);
-      this.initialized = true;
-      this.bootControllers();
-    }
+    this.ensureReady();
 
     this.runScriptList(this.bindings.scripts.pre_animation);
 
@@ -327,6 +399,161 @@ export class EntityAnimator {
       }
       return 0;
     });
+  }
+
+  /** Run initialize + boot controllers once. */
+  private ensureReady(): void {
+    if (this.initialized) return;
+    this.runScriptList(this.bindings.scripts.initialize);
+    this.initialized = true;
+    this.bootControllers();
+  }
+
+  /**
+   * @param id - Resolved controller identifier.
+   * @param state - State name from nextState.
+   */
+  private jumpController(id: string, state: string): void {
+    let inst = this.controllers.get(id);
+    if (!inst) {
+      const def = this.bindings.controllers.get(id);
+      if (!def) return;
+      inst = {
+        def,
+        state: def.initialState,
+        blendFrom: null,
+        blendT: 0,
+        blendDuration: 0,
+        playheads: new Map(),
+      };
+      this.controllers.set(id, inst);
+      this.stateLog.push(`${id}:${inst.state}`);
+    }
+    if (!inst.def.states.has(state) || inst.state === state) return;
+    inst.blendFrom = null;
+    inst.blendT = 0;
+    inst.blendDuration = 0;
+    inst.playheads.clear();
+    inst.state = state;
+    this.stateLog.push(`${id}:${state}`);
+  }
+
+  /**
+   * How strongly a server play replaces this controller (0 = normal, 1 = hidden).
+   *
+   * @param controllerId - Controller identifier.
+   * @param now - Clock seconds.
+   * @returns weight in `[0, 1]`.
+   */
+  private controllerReplaceWeight(controllerId: string, now: number): number {
+    let w = 0;
+    for (const play of this.serverPlays) {
+      if (play.controllerId !== controllerId) continue;
+      const view = this.serverPlayView(play, now);
+      if (view && view.weight > w) w = view.weight;
+    }
+    return w;
+  }
+
+  /**
+   * @param poses - Accumulator.
+   * @param now - Clock seconds.
+   */
+  private sampleServerPlays(
+    poses: Map<string, BoneAnimPose>,
+    now: number,
+  ): void {
+    for (const play of this.serverPlays) {
+      const view = this.serverPlayView(play, now);
+      if (!view || view.weight <= 0) continue;
+      this.host.setQuery("anim_time", view.animTime);
+      sampleAnimation(play.anim, view.animTime, view.weight, this.host, poses);
+    }
+  }
+
+  /**
+   * @param now - Clock seconds.
+   */
+  private pruneServerPlays(now: number): void {
+    if (this.serverPlays.length === 0) return;
+    this.serverPlays = this.serverPlays.filter(
+      (play) => this.serverPlayView(play, now) !== null,
+    );
+  }
+
+  /**
+   * Playhead for one server animation at `now`.
+   *
+   * Length stops (`""`, `query.any_animation_finished`,
+   * `query.all_animations_finished`) end a non-looping animation at
+   * `animation_length`, then fade over `blendOutTime`. Other Molang is
+   * evaluated against the current host and latches the first true sample.
+   *
+   * @param play - Server play.
+   * @param now - Clock seconds.
+   * @returns sample, or null when the play no longer contributes.
+   */
+  private serverPlayView(
+    play: ServerPlay,
+    now: number,
+  ): { animTime: number; weight: number } | null {
+    const elapsed = Math.max(0, now - play.startSec);
+    const stopAt = this.serverStopAt(play, elapsed);
+    if (stopAt === null) return { animTime: elapsed, weight: 1 };
+    const into = elapsed - stopAt;
+    if (into < 0) return { animTime: elapsed, weight: 1 };
+    if (!(play.blendOutTime > 0) || into >= play.blendOutTime) return null;
+    return {
+      animTime: stopAt,
+      weight: 1 - into / play.blendOutTime,
+    };
+  }
+
+  /**
+   * @param play - Server play.
+   * @param elapsed - Seconds since start.
+   * @returns elapsed time the play should stop, or null while it continues.
+   */
+  private serverStopAt(play: ServerPlay, elapsed: number): number | null {
+    if (isLengthStop(play.stopExpression)) {
+      if (play.anim.loop === true) return null;
+      const len = play.anim.animationLength;
+      if (!(len > 0)) return elapsed > 0 ? 0 : null;
+      return len;
+    }
+    if (play.stoppedAt >= 0) return play.stoppedAt;
+    const fin = isAnimationFinished(play.anim, elapsed);
+    this.host.setQuery("anim_time", elapsed);
+    this.host.setQuery("any_animation_finished", fin ? 1 : 0);
+    this.host.setQuery("all_animations_finished", fin ? 1 : 0);
+    if (!isTruthy(this.evalNumber(play.stopExpression))) return null;
+    play.stoppedAt = elapsed;
+    return elapsed;
+  }
+
+  /**
+   * @param name - Full id or client-entity short name.
+   * @returns animation, or undefined when the name is a controller / unknown.
+   */
+  private resolveServerAnim(name: string): ParsedAnimation | undefined {
+    if (!name) return undefined;
+    const direct = this.bindings.animations.get(name);
+    if (direct) return direct;
+    const full = this.bindings.shortNames[name];
+    if (!full || this.bindings.controllers.has(full)) return undefined;
+    return this.bindings.animations.get(full);
+  }
+
+  /**
+   * @param name - Full id or client-entity short name.
+   * @returns controller id, or "" when unknown.
+   */
+  private resolveControllerId(name: string): string {
+    if (!name) return "";
+    if (this.bindings.controllers.has(name)) return name;
+    const full = this.bindings.shortNames[name];
+    if (full && this.bindings.controllers.has(full)) return full;
+    return "";
   }
 
   /** Start controllers referenced from scripts.animate / short-name map. */
@@ -525,16 +752,26 @@ export class EntityAnimator {
       sampleAnimation(play.anim, play.animTime, w, this.host, poses);
     }
 
-    for (const inst of this.controllers.values()) {
+    const now = performance.now() / 1000;
+    for (const [id, inst] of this.controllers) {
+      const keep = 1 - this.controllerReplaceWeight(id, now);
+      if (keep <= 0) continue;
       const blendAlpha =
         inst.blendFrom && inst.blendDuration > 0
           ? Math.min(1, inst.blendT / inst.blendDuration)
           : 1;
-      this.sampleControllerState(inst, inst.state, blendAlpha, poses);
+      this.sampleControllerState(inst, inst.state, blendAlpha * keep, poses);
       if (inst.blendFrom) {
-        this.sampleControllerState(inst, inst.blendFrom, 1 - blendAlpha, poses);
+        this.sampleControllerState(
+          inst,
+          inst.blendFrom,
+          (1 - blendAlpha) * keep,
+          poses,
+        );
       }
     }
+    this.sampleServerPlays(poses, now);
+    this.pruneServerPlays(now);
   }
 
   /**
@@ -654,6 +891,27 @@ export function remapCurve(
     return a.out + (b.out - a.out) * u;
   }
   return last.out;
+}
+
+/**
+ * Stop expressions that mean "this non-looping animation has finished".
+ *
+ * @param expr - Molang from the packet. Empty counts.
+ * @returns true when the play should end at `animation_length`.
+ */
+function isLengthStop(expr: string): boolean {
+  const s = expr.trim().replace(/;$/, "").replace(/\s+/g, "").toLowerCase();
+  return (
+    s === "" ||
+    s === "query.any_animation_finished" ||
+    s === "query.all_animations_finished" ||
+    s === "q.any_animation_finished" ||
+    s === "q.all_animations_finished" ||
+    s === "query.any_animation_finished()" ||
+    s === "query.all_animations_finished()" ||
+    s === "query.any_animation_finished==1" ||
+    s === "query.all_animations_finished==1"
+  );
 }
 
 /** @internal empty pose export for tests */

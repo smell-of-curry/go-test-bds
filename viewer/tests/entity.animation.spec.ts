@@ -289,4 +289,119 @@ test.describe("animation controllers + scripts (node)", () => {
       animator.molangHost.query("modified_distance_moved", []),
     ).toBeCloseTo(5, 5);
   });
+
+  test("server animate plays the named anim, then drops it after its length", () => {
+    const anims = parseAnimations({
+      format_version: "1.8.0",
+      animations: {
+        "animation.test.oneshot": {
+          animation_length: 0.2,
+          loop: false,
+          bones: { head: { rotation: [40, 0, 0] } },
+        },
+      },
+    });
+    const controllers = parseAnimControllers(loadJson("blocky.ac.json"));
+    const bindings = buildAnimationBindings(
+      { shot: "animation.test.oneshot" },
+      { initialize: [], pre_animation: [], animate: [] },
+      anims,
+      controllers,
+    );
+    const orig = performance.now.bind(performance);
+    let now = 10_000;
+    performance.now = () => now;
+    try {
+      const animator = new EntityAnimator(bindings, {
+        type: "test:oneshot",
+        player: false,
+        props: {},
+        flags: {},
+      });
+      animator.playServerAnimation({
+        animation: "animation.test.oneshot",
+        stopExpression: "query.any_animation_finished",
+        nextState: "done",
+        blendOutTime: 0,
+        startSec: now / 1000,
+      });
+      // nextState with no controller is ignored.
+      expect(animator.controllerStates()).toEqual({});
+      expect(animator.serverAnimations()).toContain("animation.test.oneshot");
+      const playing = animator.tickPoses(0.05, ent());
+      expect(playing.get("head")?.rotation[0]).toBeCloseTo(40, 5);
+
+      now += 250;
+      const done = animator.tickPoses(0.05, ent());
+      expect(animator.serverAnimations()).not.toContain(
+        "animation.test.oneshot",
+      );
+      expect(done.get("head")).toBeUndefined();
+
+      // Short name from the client-entity animations map.
+      animator.playServerAnimation({
+        animation: "shot",
+        blendOutTime: 0,
+        startSec: now / 1000,
+      });
+      expect(animator.serverAnimations()).toContain("shot");
+      now += 250;
+      animator.tickPoses(0.05, ent());
+      expect(animator.serverAnimations()).not.toContain("shot");
+    } finally {
+      performance.now = orig;
+    }
+  });
+
+  test("server animate nextState jumps the named controller", () => {
+    const anims = parseAnimations(loadJson("blocky.animation.json"));
+    const extra = parseAnimations({
+      format_version: "1.8.0",
+      animations: {
+        "animation.test.oneshot": {
+          animation_length: 0.2,
+          loop: false,
+          bones: { head: { rotation: [40, 0, 0] } },
+        },
+      },
+    });
+    for (const [id, anim] of extra) anims.set(id, anim);
+    const controllers = parseAnimControllers(loadJson("blocky.ac.json"));
+    const client = parseClientEntity(loadJson("animated.entity.json"))!;
+    const bindings = buildAnimationBindings(
+      { ...client.animations, shot: "animation.test.oneshot" },
+      client.scripts,
+      anims,
+      controllers,
+    );
+    const orig = performance.now.bind(performance);
+    let now = 20_000;
+    performance.now = () => now;
+    try {
+      const animator = new EntityAnimator(bindings, {
+        type: client.identifier,
+        player: false,
+        props: {},
+        flags: {},
+      });
+      animator.tickPoses(0.05, ent());
+      animator.playServerAnimation({
+        animation: "animation.test.oneshot",
+        controller: "controller.animation.test.blocky.move",
+        nextState: "done",
+        blendOutTime: 0,
+        startSec: now / 1000,
+      });
+      expect(
+        animator.controllerStates()["controller.animation.test.blocky.move"],
+      ).toBe("done");
+      expect(animator.serverAnimations()).toContain("animation.test.oneshot");
+      // Controller pose is replaced while the one-shot plays: head is the
+      // oneshot's 40°, not the "done" state's hold animation.
+      const poses = animator.tickPoses(0.05, ent());
+      expect(poses.get("head")?.rotation[0]).toBeCloseTo(40, 5);
+    } finally {
+      performance.now = orig;
+    }
+  });
 });

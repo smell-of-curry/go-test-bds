@@ -43,10 +43,11 @@ type Stream struct {
 
 	// Hud event cursors — bot goroutine only. Chat/title/particle ride the
 	// event lane so a slow world subscriber cannot lose a line a recording needs.
-	lastMsgSeq      uint64
-	lastTitleSeq    uint64
-	lastTitleWrite  uint64
-	lastParticleSeq uint64
+	lastMsgSeq        uint64
+	lastTitleSeq      uint64
+	lastTitleWrite    uint64
+	lastParticleSeq   uint64
+	lastEntityAnimSeq uint64
 
 	// Vitals lane — bot goroutine writes fingerprint/throttle; lastVitalsData
 	// is also read on attach (HTTP goroutine) under mu.
@@ -969,6 +970,27 @@ func (s *Stream) emitHudEvents(a *actor.Actor) {
 		}
 		data, _ := json.Marshal(pf)
 		s.emitRaw("particle", data)
+	}
+
+	anims := a.EntityAnimsFromSeq(s.lastEntityAnimSeq)
+	if seq := a.EntityAnimSeq(); seq > s.lastEntityAnimSeq {
+		s.lastEntityAnimSeq = seq
+	}
+	for _, ev := range anims {
+		af := EntityAnimateFrame{
+			V:              SchemaVersion,
+			Type:           "entityAnimate",
+			Bot:            s.name,
+			Tick:           tick,
+			Animation:      ev.Animation,
+			NextState:      ev.NextState,
+			StopExpression: ev.StopExpression,
+			Controller:     ev.Controller,
+			BlendOutTime:   ev.BlendOutTime,
+			Rids:           ev.RuntimeIDs,
+		}
+		data, _ := json.Marshal(af)
+		s.emitRaw("entityAnimate", data)
 	}
 
 	s.emitVitals(a, true)

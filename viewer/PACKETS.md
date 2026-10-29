@@ -70,7 +70,7 @@ Handled = registered in `Bot.registerHandlers()`.
 | `packet.PlayerArmourDamage` | unhandled | render-relevant — entity pose/appearance/presence |
 | `packet.EmoteList` | unhandled | render-relevant — entity pose/appearance/presence |
 | `packet.MotionPredictionHints` | unhandled | render-relevant — entity pose/appearance/presence |
-| `packet.AnimateEntity` | unhandled | render-relevant — entity pose/appearance/presence |
+| `packet.AnimateEntity` | handled | event-lane `entityAnimate` → viewer one-shot playback |
 | `packet.AddVolumeEntity` | unhandled | render-relevant — entity pose/appearance/presence |
 | `packet.RemoveVolumeEntity` | unhandled | render-relevant — entity pose/appearance/presence |
 | `packet.ChangeMobProperty` | unhandled | render-relevant — entity pose/appearance/presence |

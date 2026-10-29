@@ -298,6 +298,7 @@ func (b *Bot) registerHandlers() {
 		packet.IDRemoveActor:                 &RemoveActorHandler{},
 		packet.IDActorEvent:                  &ActorEventHandler{},
 		packet.IDAnimate:                     &AnimateHandler{},
+		packet.IDAnimateEntity:               &AnimateEntityHandler{},
 		packet.IDChangeDimension:             &ChangeDimensionHandler{},
 		packet.IDChunkRadiusUpdated:          &ChunkRadiusUpdatedHandler{},
 		packet.IDNetworkChunkPublisherUpdate: &NetworkChunkPublisherUpdateHandler{},

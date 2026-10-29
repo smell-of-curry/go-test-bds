@@ -310,6 +310,9 @@ store.subscribe((state) => {
       void spawnStreamParticle(pf.name, pf.pos);
     }
   }
+  if (state.pendingEntityAnims.length) {
+    scene.playEntityAnimations(state.pendingEntityAnims);
+  }
   store.clearDirty();
   paintOverlay();
 });

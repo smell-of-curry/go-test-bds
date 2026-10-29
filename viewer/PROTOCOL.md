@@ -716,6 +716,31 @@ One `packet.SpawnParticleEffect` spawn. Same never-drop queue as `chat` /
 `entityId` is omitted (or absent) when the position is absolute; when present
 and not `-1`, `pos` is relative to that entity's unique id.
 
+### `entityAnimate` (event lane)
+
+One `packet.AnimateEntity` (Script API `playAnimation` / `/playanimation`).
+Same never-drop queue as `particle`. `rids` are entity runtime ids, the same
+key as `Entity.rid`. `tick` is the actor tick at emit, so a film render applies
+the frame when `(tick - firstKeyframeTick) * 50` ms has arrived.
+
+```json
+{
+  "v": 1, "type": "entityAnimate", "bot": "TestBot", "tick": 1025,
+  "animation": "animation.ball.capture",
+  "nextState": "success3",
+  "stopExpression": "query.any_animation_finished",
+  "controller": "",
+  "blendOutTime": 0,
+  "rids": [41]
+}
+```
+
+Empty strings are omitted. The viewer resolves `animation` as a pack animation
+id or a short name from the client entity `animations` map, plays it over the
+controller pose, and drops it at `animation_length` (non-looping) before fading
+for `blendOutTime` seconds. `nextState` is applied only when `controller` names
+a controller that has that state.
+
 ---
 
 ## Backpressure
@@ -726,8 +751,8 @@ never reach it.
 - World state is projected once per tick on the bot goroutine. Each subscriber
   then gets its own paced frame (column bookkeeping differs per connection).
 - Each subscriber keeps at most one pending world frame: a newer frame replaces
-  an unread one. Events (`mark` / `capture` / `chat` / `title` / `particle`)
-  queue separately and never drop for world backpressure.
+  an unread one. Events (`mark` / `capture` / `chat` / `title` / `particle` /
+  `entityAnimate`) queue separately and never drop for world backpressure.
 - Superseding an unsent catch-up `delta` re-queues only that frame's columns
   (its `columnsAdded` batch plus any columns it patched in place). The client
   keeps every column already delivered — a full keyframe restart here is what

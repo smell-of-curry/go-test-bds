@@ -29,6 +29,7 @@ function emptyState(over: Partial<WorldState> = {}): WorldState {
     removedEntities: new Set(),
     dirtyBlocks: [],
     pendingParticles: [],
+    pendingEntityAnims: [],
     fullReset: false,
     time: null,
     camera: null,

@@ -52,6 +52,7 @@ export {
   remapCurve,
   type AnimEntityState,
   type AnimationBindings,
+  type ServerAnimRequest,
 } from "./controllerRuntime";
 export { createEntityMolangHost } from "./queries";
 export {

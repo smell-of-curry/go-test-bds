@@ -11,7 +11,8 @@ export type FrameType =
   | "title"
   | "titleToken"
   | "formHover"
-  | "vitals";
+  | "vitals"
+  | "entityAnimate";
 
 export type ColumnReceiptState = "requested" | "partial" | "complete";
 
@@ -443,6 +444,30 @@ export interface TitleFrame {
   clear?: boolean;
 }
 
+/**
+ * Event-lane server animation (`packet.AnimateEntity` / `playAnimation`).
+ * `rids` are entity runtime ids, the same key as {@link Entity.rid}.
+ * `tick` places the frame on the film clock: `(tick - firstKeyframeTick) * 50` ms.
+ */
+export interface EntityAnimateFrame {
+  v: number;
+  type: "entityAnimate";
+  bot: string;
+  tick: number;
+  /** Full animation id (`animation.ball.capture`) or a client-entity short name. */
+  animation?: string;
+  /** Controller state to enter. Ignored when `controller` is empty. */
+  nextState?: string;
+  /** Molang stop condition. Empty → stop when a non-looping animation finishes. */
+  stopExpression?: string;
+  /** Animation controller this play replaces until it blends out. */
+  controller?: string;
+  /** Seconds to fade back to the controller pose after stop. Absent → 0. */
+  blendOutTime?: number;
+  /** Entity runtime ids. */
+  rids: number[];
+}
+
 /** Event-lane particle spawn from `packet.SpawnParticleEffect`. */
 export interface ParticleFrame {
   v: number;
@@ -521,6 +546,7 @@ export type Frame =
   | ChatFrame
   | TitleFrame
   | ParticleFrame
+  | EntityAnimateFrame
   | TitleTokenFrame
   | FormHoverFrame
   | VitalsFrame;

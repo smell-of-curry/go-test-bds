@@ -511,6 +511,23 @@ type VitalsFrame struct {
 	Hotbar       []*VitalsHotbarSlot `json:"hotbar"`
 }
 
+// EntityAnimateFrame is one AnimateEntity on the event lane.
+// Tick is the actor tick at emit. A recording replays it with the other
+// event-lane frames: tMs = (tick - firstKeyframeTick) * 50.
+type EntityAnimateFrame struct {
+	V              int     `json:"v"`
+	Type           string  `json:"type"`
+	Bot            string  `json:"bot"`
+	Tick           uint64  `json:"tick"`
+	Animation      string  `json:"animation,omitempty"`
+	NextState      string  `json:"nextState,omitempty"`
+	StopExpression string  `json:"stopExpression,omitempty"`
+	Controller     string  `json:"controller,omitempty"`
+	BlendOutTime   float32 `json:"blendOutTime,omitempty"`
+	// Rids are entity runtime ids, the same key as Entity.RID.
+	Rids []uint64 `json:"rids"`
+}
+
 // ParticleFrame is one SpawnParticleEffect on the event lane.
 type ParticleFrame struct {
 	V         int        `json:"v"`

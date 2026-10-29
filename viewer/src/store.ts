@@ -13,6 +13,7 @@ import {
   type HelloFrame,
   type KeyframeFrame,
   type MarkFrame,
+  type EntityAnimateFrame,
   type ParticleFrame,
   type TitleTokenFrame,
   type Registries,
@@ -91,6 +92,8 @@ export interface WorldState {
   dirtyBlocks: Array<[number, number, number]>;
   /** Pending `particle` event-lane spawns since last drain. */
   pendingParticles: ParticleFrame[];
+  /** Pending `entityAnimate` event-lane plays since last drain. */
+  pendingEntityAnims: EntityAnimateFrame[];
   /** True after a wholesale wipe (keyframe or dimension change). */
   fullReset: boolean;
   /**
@@ -150,6 +153,7 @@ function emptyState(): WorldState {
     removedEntities: new Set(),
     dirtyBlocks: [],
     pendingParticles: [],
+    pendingEntityAnims: [],
     fullReset: false,
     time: null,
     camera: null,
@@ -307,6 +311,9 @@ export class Store {
       case "particle":
         this.applyParticle(frame);
         break;
+      case "entityAnimate":
+        this.applyEntityAnimate(frame);
+        break;
       case "titleToken":
         this.applyTitleToken(frame);
         break;
@@ -331,6 +338,7 @@ export class Store {
     this.state.removedEntities.clear();
     this.state.dirtyBlocks.length = 0;
     this.state.pendingParticles.length = 0;
+    this.state.pendingEntityAnims.length = 0;
     this.state.fullReset = false;
   }
 
@@ -360,6 +368,16 @@ export class Store {
   private applyParticle(frame: ParticleFrame): void {
     this.state.tick = frame.tick;
     this.state.pendingParticles.push(frame);
+  }
+
+  /**
+   * Queue a server-triggered entity animation from the event lane.
+   *
+   * @param frame - Event-lane entityAnimate frame.
+   */
+  private applyEntityAnimate(frame: EntityAnimateFrame): void {
+    this.state.tick = frame.tick;
+    this.state.pendingEntityAnims.push(frame);
   }
 
   /**
@@ -460,6 +478,7 @@ export class Store {
     this.state.removedEntities.clear();
     this.state.dirtyBlocks.length = 0;
     this.state.pendingParticles.length = 0;
+    this.state.pendingEntityAnims.length = 0;
     this.state.fullReset = true;
 
     this.state.bot = frame.bot;

@@ -36,6 +36,7 @@ type actorData struct {
 	camera       *cameraState
 	worldTime    *worldTimeState
 	particles    *particleRing
+	entityAnims  *entityAnimRing
 
 	container *Container
 

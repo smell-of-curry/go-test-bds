@@ -74,6 +74,7 @@ export class SnapshotStream {
       "chat",
       "title",
       "particle",
+      "entityAnimate",
       "titleToken",
       "formHover",
       "vitals",

@@ -11,6 +11,7 @@ import {
   createNameTag,
   EMOTE_DURATION_SEC,
   EntityAnimator,
+  type ServerAnimRequest,
   EntityBlobShadow,
   nameTagAnchor,
   pickBone,
@@ -31,7 +32,7 @@ import {
 import { isShadowEmpty, sampleCell } from "./entity/worldSample";
 import { createDefaultHost } from "./molang";
 import type { ParticleSystem } from "./particles";
-import type { Block, Entity } from "./protocol";
+import type { Block, Entity, EntityAnimateFrame } from "./protocol";
 import { columnKey, sectionIndex } from "./protocol";
 import type { DecodedSection, StoredColumn, WorldState } from "./store";
 import {
@@ -389,6 +390,8 @@ interface EntityNode {
   model: BuiltEntityModel | null;
   /** Stage 9 per-instance animation / Molang state. */
   animator: EntityAnimator | null;
+  /** Server plays that arrived before the model (and its animator) loaded. */
+  pendingAnims: ServerAnimRequest[];
   /**
    * `performance.now()/1000` when this rid was added. Film spoofs that clock
    * to the add-frame tick, so the first animation tick can catch up.
@@ -429,6 +432,13 @@ export class ViewerScene {
   private mesher: Mesher;
   private readonly sections = new Map<string, SectionNode>();
   private readonly entities = new Map<number, EntityNode>();
+  /**
+   * Server plays for runtime ids that are not in the scene yet.
+   * Flushed when the entity is added. Cleared on a world reset.
+   *
+   * ponytail: 8 plays per rid. A burst before AddActor drops the oldest.
+   */
+  private readonly earlyAnims = new Map<number, ServerAnimRequest[]>();
   private readonly columnBounds = new Map<string, THREE.LineSegments>();
   private readonly highlights: HighlightNode[] = [];
   private readonly actorGroup: THREE.Group;
@@ -570,6 +580,7 @@ export class ViewerScene {
     this.storeRef = state;
 
     if (state.fullReset) {
+      this.earlyAnims.clear();
       // Budget disposal across frames — see CLEAR_MAX_PER_SYNC.
       this.worldClearPending = true;
       this.pendingSections.length = 0;
@@ -1101,6 +1112,7 @@ export class ViewerScene {
         wire,
         model: null,
         animator: null,
+        pendingAnims: [],
         loco: createLocomotion(),
         loadToken: 0,
         type: ent.type,
@@ -1115,6 +1127,11 @@ export class ViewerScene {
       };
       this.scene.add(node.shadow.mesh);
       this.entities.set(rid, node);
+      const early = this.earlyAnims.get(rid);
+      if (early) {
+        node.pendingAnims.push(...early);
+        this.earlyAnims.delete(rid);
+      }
       // Initial pose only — subsequent poses come from motion-lerped tickEntities.
       node.group.position.set(ent.pos[0], ent.pos[1], ent.pos[2]);
       this.requestEntityModel(node, ent);
@@ -1158,6 +1175,7 @@ export class ViewerScene {
     node.nameTag.dispose();
     node.shadow.dispose();
     this.entities.delete(rid);
+    this.earlyAnims.delete(rid);
   }
 
   /**
@@ -1210,7 +1228,12 @@ export class ViewerScene {
         // Model owns yaw; clear group yaw so we don't double-apply.
         node.group.rotation.set(0, 0, 0);
         registry.applyPose(model, ent.rot);
-        node.animator = this.createAnimator(ent, node.bornSec);
+        node.animator = this.createAnimator(
+          ent,
+          node.bornSec,
+          node.pendingAnims.length > 0,
+        );
+        this.flushPendingAnims(node);
         node.gearKey = "";
         this.syncEntityGear(node, ent);
       })
@@ -1218,15 +1241,67 @@ export class ViewerScene {
   }
 
   /**
+   * Apply event-lane `entityAnimate` frames. `startSec` is captured here,
+   * while the film clock is spoofed to the frame, so a later present seeks
+   * into the one-shot instead of restarting it.
+   *
+   * @param frames - Frames drained from the store this apply.
+   */
+  playEntityAnimations(frames: readonly EntityAnimateFrame[]): void {
+    const now = performance.now() / 1000;
+    for (const frame of frames) {
+      const req: ServerAnimRequest = {
+        animation: frame.animation ?? "",
+        nextState: frame.nextState,
+        stopExpression: frame.stopExpression,
+        controller: frame.controller,
+        blendOutTime: frame.blendOutTime,
+        startSec: now,
+      };
+      for (const rid of frame.rids) {
+        const node = this.entities.get(rid);
+        if (!node) {
+          const list = this.earlyAnims.get(rid) ?? [];
+          list.push(req);
+          // ponytail: cap 8; oldest dropped. See earlyAnims.
+          if (list.length > 8) list.shift();
+          this.earlyAnims.set(rid, list);
+          continue;
+        }
+        if (node.animator) node.animator.playServerAnimation(req);
+        else node.pendingAnims.push(req);
+      }
+    }
+  }
+
+  /**
+   * @param node - Entity whose model just became ready.
+   */
+  private flushPendingAnims(node: EntityNode): void {
+    const animator = node.animator;
+    if (!animator || node.pendingAnims.length === 0) return;
+    const queued = node.pendingAnims;
+    node.pendingAnims = [];
+    for (const req of queued) animator.playServerAnimation(req);
+  }
+
+  /**
    * @param ent - Entity snapshot for type / props seed.
+   * @param bornSec - Virtual time the entity was added.
+   * @param force - Create even with no scripted animations (a server play is waiting).
    * @returns animator or null.
    */
-  private createAnimator(ent: Entity, bornSec: number): EntityAnimator | null {
+  private createAnimator(
+    ent: Entity,
+    bornSec: number,
+    force = false,
+  ): EntityAnimator | null {
     const registry = this.entityRegistry;
     if (!registry) return null;
     const bindings = registry.getAnimationBindings(ent.type);
     if (!bindings) return null;
     if (
+      !force &&
       Object.keys(bindings.shortNames).length === 0 &&
       bindings.scripts.animate.length === 0
     ) {
