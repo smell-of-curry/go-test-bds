@@ -21,6 +21,7 @@ func (h *Hub) routes() http.Handler {
 	mux.HandleFunc("GET /packs/index", h.handlePacksIndex)
 	mux.HandleFunc("GET /pack/{packId}/{path...}", h.handlePackFile)
 	mux.HandleFunc("GET /asset/{path...}", h.handleAsset)
+	mux.HandleFunc("GET /skin/{name}", h.handleSkin)
 	mux.HandleFunc("GET /viewer.json", h.handleViewerConfig)
 	mux.HandleFunc("GET /extensions/{path...}", h.handleExtensionFile)
 	mux.HandleFunc("GET /", h.handleRoot)
@@ -105,7 +106,11 @@ func (h *Hub) handleStream(w http.ResponseWriter, r *http.Request) {
 }
 
 func writeSSE(w http.ResponseWriter, event string, data []byte) {
-	_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, data)
+	_, _ = w.Write(formatSSE(event, data))
+}
+
+func formatSSE(event string, data []byte) []byte {
+	return fmt.Appendf(nil, "event: %s\ndata: %s\n\n", event, data)
 }
 
 func (h *Hub) handleBots(w http.ResponseWriter, _ *http.Request) {
@@ -114,6 +119,23 @@ func (h *Hub) handleBots(w http.ResponseWriter, _ *http.Request) {
 
 func (h *Hub) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, map[string]any{"v": SchemaVersion, "ok": true, "bots": h.botInfos()})
+}
+
+func (h *Hub) handleSkin(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	hash, ok := strings.CutSuffix(name, ".png")
+	if !ok || hash == "" || strings.ContainsAny(hash, `/\`) {
+		http.NotFound(w, r)
+		return
+	}
+	png, ok := h.SkinPNG(hash)
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "image/png")
+	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	_, _ = w.Write(png)
 }
 
 func (h *Hub) handleRoot(w http.ResponseWriter, r *http.Request) {

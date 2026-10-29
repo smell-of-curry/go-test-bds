@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 
@@ -79,6 +80,22 @@ func (m *Manager) Stack() *Stack {
 	return m.stack
 }
 
+// CacheDir is the pack cache root, for an offline take.json.
+func (m *Manager) CacheDir() string {
+	if m == nil {
+		return ""
+	}
+	return m.opts.CacheDir
+}
+
+// BaselineTag is the pinned vanilla baseline tag.
+func (m *Manager) BaselineTag() string {
+	if m == nil {
+		return ""
+	}
+	return m.opts.BaselineTag
+}
+
 // SetStackOrder records the ResourcePackStack apply order from the wire.
 // Safe to call from PacketFunc.
 func (m *Manager) SetStackOrder(packs []protocol.StackResourcePack) {
@@ -104,7 +121,7 @@ func (m *Manager) ShouldDownload(id uuid.UUID, version string) bool {
 }
 
 // IngestServerPacks caches Conn.ResourcePacks() and rebuilds the stack using
-// the captured ResourcePackStack order (first applied first). Packs without a
+// the captured ResourcePackStack order (index 0 highest priority). Packs without a
 // resources module are skipped — behaviour packs are never an asset source.
 //
 // @param downloaded Packs from conn.ResourcePacks().
@@ -160,7 +177,16 @@ func (m *Manager) IngestServerPacks(downloaded []*resource.Pack) error {
 		})
 		_ = byKey // kept for future content-key handling
 	}
-	return m.rebuildLocked(serverEntries)
+	return m.rebuildLocked(applyOrder(serverEntries))
+}
+
+// applyOrder turns ResourcePackStack wire order into BuildStack apply order.
+// The client gives wire index 0 the highest priority (it tops the in-game
+// Active list), so it must be applied last.
+func applyOrder(wire []StackEntry) []StackEntry {
+	out := slices.Clone(wire)
+	slices.Reverse(out)
+	return out
 }
 
 // rebuildLocked rebuilds the stack. Caller must hold m.mu (or be in New).

@@ -36,6 +36,21 @@ func TestStackServerPackWins(t *testing.T) {
 	}
 }
 
+// PokeBedrock's split res sends 3d before core; the 3d entity files must win
+// or every Pokémon renders as core's 2D substitute.
+func TestApplyOrderWireIndexZeroWins(t *testing.T) {
+	top := StackEntry{ID: "top", Dir: filepath.Join("testdata", "server")}
+	below := StackEntry{ID: "below", Dir: filepath.Join("testdata", "vanilla")}
+	entries := append([]StackEntry{{ID: PackIDVanilla, Dir: filepath.Join("testdata", "vanilla")}}, applyOrder([]StackEntry{top, below})...)
+	st, err := BuildStack(entries, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := st.Winner("textures/blocks/stone.png"); got != "top" {
+		t.Fatalf("winner=%q, want wire index 0", got)
+	}
+}
+
 func TestSubpackMemoryPerformanceTier(t *testing.T) {
 	server := filepath.Join("testdata", "server")
 	st, err := BuildStack([]StackEntry{{ID: "srv", Dir: server}}, 1)

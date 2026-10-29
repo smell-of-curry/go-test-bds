@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"iter"
 	"math"
+	"sync"
 	"time"
 	_ "unsafe"
 
@@ -42,6 +43,16 @@ type Actor struct {
 	// wireReg is nil until a viewer asks for join-sequence definitions.
 	// Written only on the bot goroutine.
 	wireReg *wire.Registries
+	// pendingActorProps holds SyncActorProperty packets that arrive during join,
+	// before a viewer enables wireReg.
+	pendingActorProps []*packet.SyncActorProperty
+
+	// skins is keyed by player UUID. Written from packet handlers and read
+	// from the viewer encoder, both on the bot goroutine.
+	skins map[uuid.UUID]Appearance
+
+	cmdMu   sync.Mutex
+	cmdWait map[uuid.UUID]chan CommandResult
 }
 
 // Handler returns Actor's handler.
@@ -732,6 +743,16 @@ func (a *Actor) RunCommand(cmd string) {
 			PlayerUniqueID: a.conn.GameData().EntityUniqueID,
 		},
 	})
+}
+
+// PlayerUniqueID is the unique id a CommandRequest stamps as its origin.
+func (a *Actor) PlayerUniqueID() int64 {
+	return a.conn.GameData().EntityUniqueID
+}
+
+// WritePacket sends a packet on the actor's connection.
+func (a *Actor) WritePacket(pk packet.Packet) error {
+	return a.conn.WritePacket(pk)
 }
 
 // AckDimensionChange tells the server the client finished the dimension

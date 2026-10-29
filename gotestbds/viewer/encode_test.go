@@ -449,7 +449,7 @@ func TestEncodeDroppedItemUsesHeldMain(t *testing.T) {
 		stack: item.NewStack(item.Diamond{}, 3),
 	}
 	enc := newEncoder("TestBot", 8, 0)
-	out := enc.encodeEntity(w)
+	out := enc.encodeEntity(nil, w)
 	if out.Type != "minecraft:item" {
 		t.Fatalf("type=%s", out.Type)
 	}

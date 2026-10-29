@@ -14,6 +14,7 @@ import (
 	"github.com/df-mc/dragonfly/server/item"
 	dfworld "github.com/df-mc/dragonfly/server/world"
 	"github.com/df-mc/dragonfly/server/world/chunk"
+	"github.com/google/uuid"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/actor"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/wire"
 	gw "github.com/smell-of-curry/go-test-bds/gotestbds/world"
@@ -48,6 +49,9 @@ type encoder struct {
 	// titleTokenPrefix splits SetTitle control tokens. Empty leaves titles as
 	// plain text. Copied from Hub options when the stream is created.
 	titleTokenPrefix string
+
+	// noteSkin publishes a skin PNG to the hub the first time a frame carries it.
+	noteSkin func(hash string, png []byte)
 
 	prev     *viewState
 	forceKey bool
@@ -210,7 +214,7 @@ func (e *encoder) project(a *actor.Actor) (*viewState, error) {
 
 	entities := make(map[uint64]Entity)
 	for ent := range w.Entities() {
-		entities[ent.RuntimeID()] = e.encodeEntity(ent)
+		entities[ent.RuntimeID()] = e.encodeEntity(a, ent)
 	}
 
 	act := e.encodeActor(a)
@@ -809,7 +813,55 @@ func airBlock() Block {
 	return Block{Name: name, States: states, RID: rid}
 }
 
-func (e *encoder) encodeEntity(ent gw.Entity) Entity {
+func wireRegistries(a *actor.Actor) *wire.Registries {
+	if a == nil {
+		return nil
+	}
+	return a.WireRegistries()
+}
+
+// withActorProps adds ent's entity property values to props by name, so the
+// viewer's query.property sees what the client would (e.g. a per-entity scale).
+func withActorProps(props map[string]any, reg *wire.Registries, ent gw.Entity) map[string]any {
+	pe, ok := ent.(interface {
+		Properties() (map[uint32]int32, map[uint32]float32)
+	})
+	if !ok {
+		return props
+	}
+	ints, floats := pe.Properties()
+	if len(ints)+len(floats) == 0 {
+		return props
+	}
+	defs, ok := reg.ActorProps(ent.Type())
+	if !ok {
+		return props
+	}
+	for i, d := range defs.Properties {
+		// The wire list a value came in says float vs int; trust it over d.Type.
+		if v, ok := floats[uint32(i)]; ok {
+			props[d.Name] = float64(v)
+			continue
+		}
+		v, ok := ints[uint32(i)]
+		if !ok {
+			continue
+		}
+		switch d.Type {
+		case "bool":
+			props[d.Name] = v != 0
+		case "enum":
+			if int(v) >= 0 && int(v) < len(d.Enum) {
+				props[d.Name] = d.Enum[v]
+			}
+		default:
+			props[d.Name] = v
+		}
+	}
+	return props
+}
+
+func (e *encoder) encodeEntity(a *actor.Actor, ent gw.Entity) Entity {
 	pos := ent.Position()
 	rot := ent.Rotation()
 	vel := ent.Velocity()
@@ -832,7 +884,7 @@ func (e *encoder) encodeEntity(ent gw.Entity) Entity {
 		Name:   st.NameTag(),
 		Player: ent.Type() == "minecraft:player",
 		Flags:  st.Flags(),
-		Props:  st.Props(),
+		Props:  withActorProps(st.Props(), wireRegistries(a), ent),
 		Attributes: map[string]float64{
 			"health":    attrs.Health(),
 			"maxHealth": attrs.MaxHealth(),
@@ -846,6 +898,28 @@ func (e *encoder) encodeEntity(ent gw.Entity) Entity {
 	}
 	if out.Props == nil {
 		out.Props = map[string]any{}
+	}
+	if idn, ok := ent.(interface{ UUID() uuid.UUID }); ok && a != nil {
+		if ap, ok := a.Appearance(idn.UUID()); ok {
+			out.Skin = &EntitySkin{
+				Hash:     ap.Hash,
+				URL:      "/skin/" + ap.Hash + ".png",
+				Width:    ap.Width,
+				Height:   ap.Height,
+				Slim:     ap.Slim,
+				Geometry: ap.Geometry,
+			}
+			if e.noteSkin != nil && ap.Hash != "" && len(ap.PNG) > 0 {
+				e.noteSkin(ap.Hash, ap.PNG)
+			}
+		}
+	}
+	if em, ok := ent.(interface {
+		Emote() (string, uint64, bool)
+	}); ok {
+		if id, tick, ok := em.Emote(); ok {
+			out.Emote = &EntityEmote{ID: id, StartTick: tick}
+		}
 	}
 	return out
 }

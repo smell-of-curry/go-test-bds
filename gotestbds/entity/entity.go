@@ -23,6 +23,15 @@ type Ent struct {
 	rid        uint64
 	uid        int64
 	entityType string
+
+	// intProps and floatProps are entity property values by wire index; the
+	// names live in the SyncActorProperty definitions for entityType.
+	intProps   map[uint32]int32
+	floatProps map[uint32]float32
+
+	emoteID   string
+	emoteTick uint64
+	emoteSet  bool
 }
 
 // NewEnt ...
@@ -41,6 +50,25 @@ func NewEnt(pos mgl64.Vec3, meta protocol.EntityMetadata, rid uint64, uid int64,
 	state := new(metadata.State)
 	state.Decode(meta)
 	return &Ent{pos: pos, state: state, rid: rid, uid: uid, entityType: entityType, attributes: new(attributes.Values), armour: inventory.NewArmour(nil)}
+}
+
+// SetProperties merges entity property values. AddActor sends all of them;
+// SetActorData sends only the changed ones.
+func (e *Ent) SetProperties(p protocol.EntityProperties) {
+	if e.intProps == nil {
+		e.intProps, e.floatProps = make(map[uint32]int32), make(map[uint32]float32)
+	}
+	for _, v := range p.IntegerProperties {
+		e.intProps[v.Index] = v.Value
+	}
+	for _, v := range p.FloatProperties {
+		e.floatProps[v.Index] = v.Value
+	}
+}
+
+// Properties returns entity property values by wire index.
+func (e *Ent) Properties() (ints map[uint32]int32, floats map[uint32]float32) {
+	return e.intProps, e.floatProps
 }
 
 // Position is a position of the entity.
@@ -108,4 +136,20 @@ func (e *Ent) HeldItems() (main item.Stack, offHand item.Stack) {
 func (e *Ent) SetHeldItems(main, offHand item.Stack) error {
 	e.mainHand, e.offHand = main, offHand
 	return nil
+}
+
+// SetEmote records the latest emote on this entity. A later emote replaces it.
+// The entity keeps it until removal; the renderer decides how long to play it.
+func (e *Ent) SetEmote(id string, startTick uint64) {
+	e.emoteID = id
+	e.emoteTick = startTick
+	e.emoteSet = id != ""
+}
+
+// Emote returns the latest emote, if one has been set.
+func (e *Ent) Emote() (id string, startTick uint64, ok bool) {
+	if e == nil || !e.emoteSet {
+		return "", 0, false
+	}
+	return e.emoteID, e.emoteTick, true
 }

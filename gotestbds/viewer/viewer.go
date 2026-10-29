@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 
@@ -47,6 +48,12 @@ type Options struct {
 	// drive Tick faster than wall time. Production keeps the throttle: a
 	// full-rate projection starved the bot loop below the client tick rate.
 	EncodeEveryTick bool
+	// RecordDir, when set, writes each bot's SSE stream and take metadata.
+	// Empty disables recording. Ignored unless the viewer itself is running.
+	RecordDir string
+	// CacheDir and BaselineTag are copied into take.json for an offline renderer.
+	CacheDir    string
+	BaselineTag string
 }
 
 // Hub is the process-wide viewer server. All bots share one Hub; streams are
@@ -65,6 +72,13 @@ type Hub struct {
 
 	arts   *artifactStore
 	assets *assets.Manager
+
+	skinMu  sync.Mutex
+	skinPNG map[string][]byte
+	rec     *recorder
+
+	closeOnce sync.Once
+	closeErr  error
 
 	langMu    sync.Mutex
 	langStack *assets.Stack // stack the lang table was last built from
@@ -105,6 +119,13 @@ func New(opts Options) (*Hub, error) {
 	if err != nil {
 		return nil, err
 	}
+	var rec *recorder
+	if opts.RecordDir != "" {
+		if err := os.MkdirAll(opts.RecordDir, 0o755); err != nil {
+			return nil, err
+		}
+		rec = newRecorder(opts)
+	}
 
 	ln, err := net.Listen("tcp", opts.Address)
 	if err != nil {
@@ -120,6 +141,7 @@ func New(opts Options) (*Hub, error) {
 		meta:    make(map[string]botMeta),
 		arts:    arts,
 		assets:  opts.Assets,
+		rec:     rec,
 	}
 	h.srv = &http.Server{Handler: h.routes()}
 	go func() {
@@ -130,11 +152,17 @@ func New(opts Options) (*Hub, error) {
 	return h, nil
 }
 
-// Close shuts down the HTTP server.
+// Close shuts down the HTTP server and flushes a recording, if one is open.
 func (h *Hub) Close() error {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	return h.srv.Shutdown(ctx)
+	h.closeOnce.Do(func() {
+		if h.rec != nil {
+			h.rec.stop(h)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		h.closeErr = h.srv.Shutdown(ctx)
+	})
+	return h.closeErr
 }
 
 // Addr returns the resolved listen address (useful when the port was 0).
@@ -145,8 +173,8 @@ func (h *Hub) Addr() string {
 // Register creates (or returns) the stream for botName.
 func (h *Hub) Register(botName string) *Stream {
 	h.mu.Lock()
-	defer h.mu.Unlock()
 	if s, ok := h.streams[botName]; ok {
+		h.mu.Unlock()
 		return s
 	}
 	s := newStream(h, botName, h.opts.Radius, h.opts.SectionRadius, h.opts.ColumnBudget)
@@ -158,6 +186,12 @@ func (h *Hub) Register(botName string) *Stream {
 	}
 	h.streams[botName] = s
 	h.meta[botName] = botMeta{}
+	rec := h.rec
+	h.mu.Unlock()
+	// follow attaches a subscriber, which locks the hub. Do that outside mu.
+	if rec != nil {
+		rec.follow(s)
+	}
 	return s
 }
 
@@ -313,6 +347,48 @@ func (h *Hub) setAttached(name string, n int) {
 	m := h.meta[name]
 	m.attached = n
 	h.meta[name] = m
+}
+
+// PutSkin stores a content-addressed skin PNG for GET /skin/<hash>.png.
+// A recording also writes <record>/skins/<hash>.png off the caller goroutine.
+func (h *Hub) PutSkin(hash string, png []byte) {
+	if h == nil || hash == "" || len(png) == 0 {
+		return
+	}
+	h.skinMu.Lock()
+	if h.skinPNG == nil {
+		h.skinPNG = make(map[string][]byte)
+	}
+	if _, ok := h.skinPNG[hash]; ok {
+		h.skinMu.Unlock()
+		return
+	}
+	cp := append([]byte(nil), png...)
+	h.skinPNG[hash] = cp
+	rec := h.rec
+	h.skinMu.Unlock()
+	if rec != nil {
+		rec.writeSkin(hash, cp)
+	}
+}
+
+// SkinPNG returns a previously stored skin, if any.
+func (h *Hub) SkinPNG(hash string) ([]byte, bool) {
+	if h == nil {
+		return nil, false
+	}
+	h.skinMu.Lock()
+	defer h.skinMu.Unlock()
+	png, ok := h.skinPNG[hash]
+	return png, ok && len(png) > 0
+}
+
+// WriteRecordingMeta rewrites packs.json and take.json. A no-op when not recording.
+func (h *Hub) WriteRecordingMeta() {
+	if h == nil || h.rec == nil {
+		return
+	}
+	h.rec.writeMeta(h)
 }
 
 func (h *Hub) botInfos() []BotInfo {

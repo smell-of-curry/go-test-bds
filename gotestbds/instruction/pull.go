@@ -85,7 +85,8 @@ func (pull *Pull) DecodeAction(action string, params json.RawMessage) (Instructi
 	if err := json.Unmarshal(params, instruction); err != nil {
 		return nil, err
 	}
-	pull.instruction = instruction
+	// Do not store the instance on Pull. Concurrent chat and control
+	// dispatches each need their own value; the field is only for Decode.
 	return instruction, nil
 }
 
@@ -128,6 +129,8 @@ func DefaultPull(callbacker Callbacker) *Pull {
 	pull.Register(create[MenuFormRespond]())
 	pull.Register(create[ModalFormRespond]())
 	pull.Register(create[RunCommand]())
+	pull.Register(create[Command]())
+	pull.Register(create[Emote]())
 	pull.Register(create[Rejoin]())
 	pull.Register(create[EditSign]())
 	pull.Register(create[ToggleCrafterSlot]())

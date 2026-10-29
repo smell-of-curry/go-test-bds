@@ -199,6 +199,11 @@ func (b *Bot) handlePackets() {
 	for {
 		pk, err := b.conn.ReadPacket()
 		if err != nil {
+			select {
+			case <-b.Closed():
+			default:
+				b.logger.Info("connection closed", "reason", err)
+			}
 			_ = b.Close()
 			return
 		}
@@ -282,6 +287,7 @@ func (b *Bot) registerHandlers() {
 		packet.IDSetActorLink:                &SetActorLinkHandler{},
 		packet.IDSetActorMotion:              &SetActorMotionHandler{},
 		packet.IDMoveActorAbsolute:           &MoveActorAbsoluteHandler{},
+		packet.IDMoveActorDelta:              MoveActorDeltaHandler{},
 		packet.IDMovePlayer:                  &MovePlayerHandler{},
 		packet.IDInventoryContent:            &InventoryContentHandler{},
 		packet.IDInventorySlot:               &InventorySlotHandler{},
@@ -309,6 +315,9 @@ func (b *Bot) registerHandlers() {
 		packet.IDNPCDialogue:                 &NpcDialogueHandler{},
 		packet.IDContainerOpen:               &ContainerOpenHandler{},
 		packet.IDCommandOutput:               &CommandOutputHandler{},
+		packet.IDPlayerList:                  &PlayerListHandler{},
+		packet.IDPlayerSkin:                  &PlayerSkinHandler{},
+		packet.IDEmote:                       &EmoteHandler{},
 		packet.IDItemRegistry:                &ItemRegistryHandler{},
 		packet.IDSyncActorProperty:           &SyncActorPropertyHandler{},
 	}

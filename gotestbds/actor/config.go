@@ -73,6 +73,7 @@ func (c Config) New() (actor *Actor) {
 		h:         NopHandler{},
 	}
 	actor.prepare()
+	actor.noteLoginSkin()
 
 	return actor
 }

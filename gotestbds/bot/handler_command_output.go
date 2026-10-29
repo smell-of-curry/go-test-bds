@@ -11,6 +11,6 @@ type CommandOutputHandler struct{}
 // Handle ...
 func (*CommandOutputHandler) Handle(p packet.Packet, b *Bot, a *actor.Actor) error {
 	output := p.(*packet.CommandOutput)
-	a.ReceiveCommandOutput(output.OutputMessages)
+	a.DeliverCommandOutput(output)
 	return nil
 }

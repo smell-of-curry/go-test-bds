@@ -4,6 +4,7 @@ import (
 	"github.com/df-mc/dragonfly/server/block/cube"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/actor"
+	"github.com/smell-of-curry/go-test-bds/gotestbds/entity"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/mcmath"
 )
 
@@ -26,7 +27,7 @@ func (m MoveActorAbsoluteHandler) Handle(p packet.Packet, b *Bot, a *actor.Actor
 	}
 
 	if ok {
-		ent.Move(mcmath.Vec32To64(moveActorAbsolute.Position), rot)
+		ent.Move(entity.FeetOf(ent, mcmath.Vec32To64(moveActorAbsolute.Position)), rot)
 	}
 	return nil
 }

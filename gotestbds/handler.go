@@ -3,8 +3,6 @@ package gotestbds
 import (
 	"context"
 	"encoding/json"
-	"errors"
-	"fmt"
 	"log/slog"
 	"strings"
 	"time"
@@ -111,48 +109,27 @@ func (h *TestingHandler) runAction(data string) {
 		return
 	}
 
-	i, err := h.pull.DecodeAction(env.Action, env.Parameters)
-	if err != nil {
-		broadcastStatus(env.Id, StatusError, err.Error(), nil, h.b)
-		h.logger.Error("error decoding instruction", "error", err)
-		return
-	}
-
-	h.logger.Debug("decoded instruction successfully", "instruction", fmt.Sprintf("%#v", i))
-
 	timeout := h.instructionTimeout(env.TimeoutMs)
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	err = i.Run(ctx, h.b)
-
-	if err != nil {
-		h.logger.Error("error running instruction", "instruction", fmt.Sprintf("%#v", i), "error", err)
-		if errors.Is(err, context.DeadlineExceeded) {
-			broadcastStatus(env.Id, StatusTimeOut, err.Error(), nil, h.b)
-			return
-		}
-		broadcastStatus(env.Id, StatusError, err.Error(), nil, h.b)
-		return
+	status, message, payload := Dispatch(ctx, h.pull, h.b, env.Action, env.Parameters)
+	if status != StatusSuccess {
+		h.logger.Error("instruction failed", "action", env.Action, "status", status, "message", message)
+	} else {
+		h.logger.Debug("instruction completed successfully, broadcasting success")
 	}
-
-	var payload any
-	if di, ok := i.(instruction.DataInstruction); ok {
-		payload = di.Data()
-	}
-	h.logger.Debug("instruction completed successfully, broadcasting success")
-	broadcastStatus(env.Id, StatusSuccess, "", payload, h.b)
+	broadcastStatus(env.Id, status, message, payload, h.b)
 }
 
 // instructionTimeout resolves the effective timeout for an action.
 func (h *TestingHandler) instructionTimeout(timeoutMs int) time.Duration {
-	timeout := DefaultInstructionTimeout
-	if h.cfg != nil && h.cfg.DefaultInstructionTimeout > 0 {
-		timeout = h.cfg.DefaultInstructionTimeout
+	if h.cfg == nil {
+		if timeoutMs > 0 {
+			return time.Duration(timeoutMs) * time.Millisecond
+		}
+		return DefaultInstructionTimeout
 	}
-	if timeoutMs > 0 {
-		timeout = time.Duration(timeoutMs) * time.Millisecond
-	}
-	return timeout
+	return h.cfg.InstructionTimeout(timeoutMs)
 }
 
 // HandleReceiveForm keeps the form open for later observation/response instructions.

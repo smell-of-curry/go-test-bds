@@ -18,5 +18,6 @@ func (*SetActorDataHandler) Handle(p packet.Packet, b *Bot, a *actor.Actor) erro
 		return fmt.Errorf("unable to find entity with Rid: %d", setActorData.EntityRuntimeID)
 	}
 	ent.State().Decode(setActorData.EntityMetadata)
+	setProperties(ent, setActorData.EntityProperties)
 	return nil
 }

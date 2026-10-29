@@ -15,9 +15,9 @@ type StackEntry struct {
 }
 
 // Stack is the merged resource pack stack: vanilla at priority 0, then server
-// packs in ResourcePackStack order (first applied first). Later packs win on
-// path collisions — that is the client's precedence rule, taken from
-// packet.ResourcePackStack's documented apply order.
+// packs in apply order. Later packs win on path collisions. Apply order is
+// ResourcePackStack wire order reversed (see applyOrder): the client puts wire
+// index 0 at the top of the stack.
 type Stack struct {
 	mu    sync.RWMutex
 	packs []*Pack
@@ -26,12 +26,11 @@ type Stack struct {
 
 // BuildStack opens each entry and builds the merged file index.
 //
-// Precedence evidence: gophertunnel packet.ResourcePackStack says "The first
-// in the list will be applied first." Combined with vanilla as the permanent
-// lowest layer, a path defined by a later pack overrides an earlier one. The
-// fixture test TestStackServerPackWins locks that in.
+// A path defined by a later entry overrides an earlier one; vanilla is the
+// permanent lowest layer. TestStackServerPackWins locks that in, and
+// TestApplyOrderWireIndexZeroWins locks in the wire-order reversal.
 //
-// @param entries Ordered lowest-priority first (vanilla, then stack order).
+// @param entries Ordered lowest-priority first (vanilla, then apply order).
 // @param deviceTier Memory performance tier for subpack selection.
 // @returns the built Stack.
 // @throws when a pack cannot be opened.

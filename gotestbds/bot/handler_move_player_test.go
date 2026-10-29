@@ -8,6 +8,7 @@ import (
 	"github.com/df-mc/dragonfly/server/world/chunk"
 	"github.com/go-gl/mathgl/mgl32"
 	"github.com/sandertv/gophertunnel/minecraft"
+	"github.com/sandertv/gophertunnel/minecraft/protocol"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/login"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/actor"
@@ -168,5 +169,69 @@ func TestNetworkChunkPublisherUpdateRadiusIsInChunks(t *testing.T) {
 	}
 	if got := a.ChunkRadius(); got != 8 {
 		t.Fatalf("ChunkRadius=%d, want 8 (block radius>>4)", got)
+	}
+}
+
+// Other players arrive at eye height on every position packet; the viewer
+// draws them from Position(), so storing the wire value floats them 1.62 up.
+func TestOtherPlayerPositionIsFeet(t *testing.T) {
+	world.DefaultBlockRegistry.Finalize()
+	conn := &recordingConn{stubConn: stubConn{game: minecraft.GameData{
+		EntityRuntimeID: 1,
+		EntityUniqueID:  1,
+		PlayerPosition:  mgl32.Vec3{0.5, 70 + eyeOffset, 0.5},
+	}}}
+	a := actor.Config{
+		Conn:      conn,
+		Inventory: inventory.NewHandle(36, 0, nil),
+		Offhand:   inventory.NewHandle(1, 0, nil),
+		Armour:    inventory.NewArmour(nil),
+		Ui:        inventory.NewHandle(54, 0, nil),
+	}.New()
+	_ = (&AddEntityHandler{}).Handle(&packet.AddPlayer{EntityRuntimeID: 2, Position: mgl32.Vec3{3, 70 + eyeOffset, 3}}, nil, a)
+	other, ok := a.World().Entity(2)
+	if !ok {
+		t.Fatal("AddPlayer did not add the entity")
+	}
+	want := func(step string, y float64) {
+		t.Helper()
+		if got := other.Position().Y(); got < y-0.01 || got > y+0.01 {
+			t.Fatalf("%s: Y=%v want %v", step, got, y)
+		}
+	}
+	want("AddPlayer", 70)
+	_ = (&MovePlayerHandler{}).Handle(&packet.MovePlayer{EntityRuntimeID: 2, Position: mgl32.Vec3{3, 80 + eyeOffset, 3}}, nil, a)
+	want("MovePlayer", 80)
+	_ = MoveActorAbsoluteHandler{}.Handle(&packet.MoveActorAbsolute{EntityRuntimeID: 2, Position: mgl32.Vec3{3, 90 + eyeOffset, 3}}, nil, a)
+	want("MoveActorAbsolute", 90)
+}
+
+// Mobs spawn facing their AddActor yaw and then move by MoveActorDelta; losing
+// either leaves every mob facing yaw 0 and frozen at its spawn.
+func TestActorRotationAndDeltaMove(t *testing.T) {
+	world.DefaultBlockRegistry.Finalize()
+	a := actor.Config{
+		Conn:      &recordingConn{stubConn: stubConn{game: minecraft.GameData{EntityRuntimeID: 1, EntityUniqueID: 1}}},
+		Inventory: inventory.NewHandle(36, 0, nil),
+		Offhand:   inventory.NewHandle(1, 0, nil),
+		Armour:    inventory.NewArmour(nil),
+		Ui:        inventory.NewHandle(54, 0, nil),
+	}.New()
+
+	_ = (&AddEntityHandler{}).Handle(&packet.AddActor{EntityRuntimeID: 3, EntityType: "minecraft:pig", Position: mgl32.Vec3{1, 70, 1}, Yaw: 180, Pitch: 10}, nil, a)
+	pig, ok := a.World().Entity(3)
+	if !ok {
+		t.Fatal("AddActor did not add the entity")
+	}
+	if r := pig.Rotation(); r[0] != 180 || r[1] != 10 {
+		t.Fatalf("AddActor rot=%v want [180 10]", r)
+	}
+
+	_ = MoveActorDeltaHandler{}.Handle(&packet.MoveActorDelta{EntityRuntimeID: 3, PositionZ: protocol.Option[float32](5), RotationY: protocol.Option[float32](90)}, nil, a)
+	if p := pig.Position(); p[0] != 1 || p[1] != 70 || p[2] != 5 {
+		t.Fatalf("delta pos=%v want [1 70 5]", p)
+	}
+	if r := pig.Rotation(); r[0] != 90 || r[1] != 10 {
+		t.Fatalf("delta rot=%v want [90 10]", r)
 	}
 }

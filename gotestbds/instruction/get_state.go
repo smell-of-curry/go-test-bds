@@ -36,6 +36,7 @@ func (g *GetState) Run(ctx context.Context, b *bot.Bot) error {
 			"heldSlot":        a.HeldSlot(),
 			"sneaking":        a.Sneaking(),
 			"vehicleUniqueId": a.VehicleUniqueID(),
+			"tick":            a.CurrentTick(),
 		}
 		return nil
 	})

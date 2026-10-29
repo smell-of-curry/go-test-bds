@@ -40,6 +40,8 @@ export interface BotState {
    * Set from the server's `SetActorLink`.
    */
   vehicleUniqueId?: number;
+  /** Client tick the state was read at; the same clock viewer frames carry. */
+  tick?: number;
 }
 
 /** One inventory slot, as the bot sees it. */

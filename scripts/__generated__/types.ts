@@ -39,6 +39,24 @@ export interface ClickFormButton {
   index: number;
 }
 
+/** CommandMessage is one line of command output. */
+export interface CommandMessage {
+  success: boolean;
+  message: string;
+  parameters: string[];
+}
+
+/** CommandOutputData is the correlated CommandOutput, when one arrived. */
+export interface CommandOutputData {
+  successCount: number;
+  messages: CommandMessage[];
+}
+
+/** Command asks the server to run a slash command as the player. A leading slash is optional. When a CommandOutput comes back with the same origin UUID it is returned as Data; if none arrives before the instruction context ends, the instruction still succeeds with no data. */
+export interface Command {
+  command: string;
+}
+
 /** CustomFormRespond is an instruction to respond to a custom form. */
 export interface CustomFormRespond {
   options: Option[];
@@ -63,6 +81,11 @@ export interface DropSelectedItem {}
 /** EditSign edits the last Sign sent to the Actor. */
 export interface EditSign {
   text: string;
+}
+
+/** Emote plays an emote on this bot. An empty emoteId uses DefaultEmoteID. Flags leave EmoteFlagServerSide unset — this packet is from the client. */
+export interface Emote {
+  emoteId: string;
 }
 
 /** GetBlock returns a block at a position from the bot's tracked world. */
@@ -266,12 +289,14 @@ export type InstructionAction =
   | "breakBlock"
   | "chat"
   | "clickFormButton"
+  | "command"
   | "customFormRespond"
   | "dialogueResponse"
   | "disconnect"
   | "dismissForm"
   | "dropSelectedItem"
   | "editSign"
+  | "emote"
   | "getBlock"
   | "getForm"
   | "getInventory"
@@ -315,12 +340,14 @@ export interface InstructionParametersByAction {
   breakBlock: BreakBlock;
   chat: Chat;
   clickFormButton: ClickFormButton;
+  command: Command;
   customFormRespond: CustomFormRespond;
   dialogueResponse: DialogueResponse;
   disconnect: Disconnect;
   dismissForm: DismissForm;
   dropSelectedItem: DropSelectedItem;
   editSign: EditSign;
+  emote: Emote;
   getBlock: GetBlock;
   getForm: GetForm;
   getInventory: GetInventory;
@@ -365,12 +392,14 @@ export type InstructionPayload =
   | { action: "breakBlock"; parameters: BreakBlock }
   | { action: "chat"; parameters: Chat }
   | { action: "clickFormButton"; parameters: ClickFormButton }
+  | { action: "command"; parameters: Command }
   | { action: "customFormRespond"; parameters: CustomFormRespond }
   | { action: "dialogueResponse"; parameters: DialogueResponse }
   | { action: "disconnect"; parameters: Disconnect }
   | { action: "dismissForm"; parameters: DismissForm }
   | { action: "dropSelectedItem"; parameters: DropSelectedItem }
   | { action: "editSign"; parameters: EditSign }
+  | { action: "emote"; parameters: Emote }
   | { action: "getBlock"; parameters: GetBlock }
   | { action: "getForm"; parameters: GetForm }
   | { action: "getInventory"; parameters: GetInventory }

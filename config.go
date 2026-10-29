@@ -64,6 +64,19 @@ type Config struct {
 		// lane. Empty defers to the extensions manifest, then stays off.
 		TitleTokenPrefix string
 	}
+	// Control is the external instruction HTTP API. An empty address leaves it off.
+	Control struct {
+		Address string
+	}
+	// Skin is an optional PNG applied to the bot at login. An empty path keeps
+	// the default client skin.
+	Skin struct {
+		Path string
+		Slim bool
+	}
+	// Record is a directory for an offline SSE take. Empty disables it. The
+	// viewer must also be enabled.
+	Record string
 }
 
 // DefaultConfig returns the configuration used when no config file or flag is
@@ -241,6 +254,23 @@ func applyEnv(c *Config) {
 	if v := os.Getenv("GOTESTBDS_TITLE_TOKEN_PREFIX"); v != "" {
 		c.Viewer.TitleTokenPrefix = v
 	}
+	if v, ok := os.LookupEnv("GOTESTBDS_CONTROL"); ok {
+		c.Control.Address = normalizeControl(v)
+	}
+	if v := os.Getenv("GOTESTBDS_SKIN"); v != "" {
+		c.Skin.Path = v
+	}
+	if v := os.Getenv("GOTESTBDS_SKIN_SLIM"); v != "" {
+		switch strings.ToLower(v) {
+		case "1", "true", "yes", "on":
+			c.Skin.Slim = true
+		case "0", "false", "no", "off":
+			c.Skin.Slim = false
+		}
+	}
+	if v := os.Getenv("GOTESTBDS_RECORD"); v != "" {
+		c.Record = v
+	}
 }
 
 // applyFlags overlays command line flags onto a configuration.
@@ -268,6 +298,10 @@ func applyFlags(c *Config) error {
 	viewerMemoryTier := set.Int("viewer-memory-tier", c.Viewer.MemoryPerformanceTier, "memory_performance_tier for subpack selection (1-5)")
 	viewerExtensions := set.String("viewer-extensions", c.Viewer.ExtensionsDir, "directory of viewer UI extension modules (manifest.json + ES modules)")
 	titleTokenPrefix := set.String("title-token-prefix", c.Viewer.TitleTokenPrefix, "SetTitle control-token prefix (empty: read extensions manifest, else off)")
+	controlAddr := set.String("control", c.Control.Address, "host:port for the external instruction HTTP API (empty disables; loopback by default)")
+	skinPath := set.String("skin", c.Skin.Path, "PNG skin applied at login (64x32, 64x64, or 128x128)")
+	skinSlim := set.Bool("skin-slim", c.Skin.Slim, "use the slim arm model for --skin")
+	recordDir := set.String("record", c.Record, "directory for an offline SSE recording (requires --viewer)")
 
 	if err := set.Parse(os.Args[1:]); err != nil {
 		return err
@@ -297,7 +331,27 @@ func applyFlags(c *Config) error {
 	c.Viewer.MemoryPerformanceTier = *viewerMemoryTier
 	c.Viewer.ExtensionsDir = *viewerExtensions
 	c.Viewer.TitleTokenPrefix = *titleTokenPrefix
+	c.Control.Address = normalizeControl(*controlAddr)
+	c.Skin.Path = *skinPath
+	c.Skin.Slim = *skinSlim
+	c.Record = *recordDir
 	return nil
+}
+
+// defaultControlAddr is the loopback bind used when control is enabled without a host.
+const defaultControlAddr = "127.0.0.1:24781"
+
+// normalizeControl maps the on/off words onto a loopback address and leaves a
+// real host:port untouched. Empty and the off words disable the API.
+func normalizeControl(v string) string {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "", "0", "false", "no", "off":
+		return ""
+	case "1", "true", "yes", "on":
+		return defaultControlAddr
+	default:
+		return v
+	}
 }
 
 // BotName returns the display name for the bot at a zero-based index.

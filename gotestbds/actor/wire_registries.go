@@ -23,6 +23,10 @@ func (a *Actor) EnsureWireRegistries() *wire.Registries {
 	}
 	r := wire.NewRegistries()
 	r.LoadGameData(a.conn.GameData())
+	for _, pk := range a.pendingActorProps {
+		r.ApplySyncActorProperty(pk)
+	}
+	a.pendingActorProps = nil
 	a.wireReg = r
 	return r
 }
@@ -35,9 +39,14 @@ func (a *Actor) ApplyItemRegistry(pk *packet.ItemRegistry) {
 	a.wireReg.ApplyItemRegistry(pk)
 }
 
-// ApplySyncActorProperty merges a SyncActorProperty packet when registries are live.
+// ApplySyncActorProperty merges a SyncActorProperty packet, or holds it until
+// registries are enabled: BDS sends them only during join.
 func (a *Actor) ApplySyncActorProperty(pk *packet.SyncActorProperty) {
-	if a.wireReg == nil || pk == nil {
+	if pk == nil {
+		return
+	}
+	if a.wireReg == nil {
+		a.pendingActorProps = append(a.pendingActorProps, pk)
 		return
 	}
 	a.wireReg.ApplySyncActorProperty(pk)

@@ -25,10 +25,22 @@ type Test struct {
 	// Viewer is the optional process-wide state-export hub. Nil means the
 	// viewer is disabled — a run must behave identically either way.
 	Viewer *viewer.Hub
+	// Fleet is the optional external-control registry. Nil when control is off.
+	Fleet  *Fleet
 	rejoin bool
 }
 
-// Run runs test.
+// InstructionTimeout resolves the effective timeout for an action.
+func (t *Test) InstructionTimeout(timeoutMs int) time.Duration {
+	timeout := DefaultInstructionTimeout
+	if t != nil && t.DefaultInstructionTimeout > 0 {
+		timeout = t.DefaultInstructionTimeout
+	}
+	if timeoutMs > 0 {
+		timeout = time.Duration(timeoutMs) * time.Millisecond
+	}
+	return timeout
+}
 func (t *Test) Run() error {
 	return t.RunCtx(context.Background())
 }
@@ -84,9 +96,14 @@ func (t *Test) RunCtx(ctx context.Context) error {
 				t.Logger.Error("ingest resource packs", "error", err)
 			}
 		}
+		t.Viewer.WriteRecordingMeta()
 	}
 
 	b := bot.NewBot(conn, t.Logger.With("src", "bot"))
+	if t.Fleet != nil {
+		t.Fleet.Add(botName, b, t.Instructions, t.InstructionTimeout)
+		defer t.Fleet.Remove(botName, b)
+	}
 	h := NewTestingHandler(b, t)
 	b.Execute(func(a *actor.Actor) {
 		a.Handle(h)

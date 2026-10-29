@@ -6,8 +6,6 @@ import (
 )
 
 // SyncActorPropertyHandler merges entity property definitions from the wire.
-//
-// No-op when wire registries have not been enabled (viewer off).
 type SyncActorPropertyHandler struct{}
 
 // Handle ...

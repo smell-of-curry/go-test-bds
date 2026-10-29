@@ -334,6 +334,29 @@ type Entity struct {
 	// Swing counts arm swings (packet.Animate). The client diffs it to play a
 	// one-shot swing animation. Omitted until the first swing.
 	Swing uint32 `json:"swing,omitempty"`
+	// Skin is set on player entities when a PlayerList or PlayerSkin packet
+	// has been seen for that player's UUID. Omitted otherwise.
+	Skin *EntitySkin `json:"skin,omitempty"`
+	// Emote is the latest emote on this entity. Replaced by a newer one;
+	// cleared when the entity is removed. The renderer chooses the duration.
+	Emote *EntityEmote `json:"emote,omitempty"`
+}
+
+// EntitySkin points at a PNG of the player's skin texture.
+// Hash is sha1 of little-endian width, little-endian height, then RGBA.
+type EntitySkin struct {
+	Hash     string `json:"hash"`
+	URL      string `json:"url"`
+	Width    int    `json:"width"`
+	Height   int    `json:"height"`
+	Slim     bool   `json:"slim"`
+	Geometry string `json:"geometry"`
+}
+
+// EntityEmote is the emote currently showing on an entity.
+type EntityEmote struct {
+	ID        string `json:"id"`
+	StartTick uint64 `json:"startTick"`
 }
 
 // HeldItems is main- and off-hand.

@@ -359,6 +359,7 @@ func newStream(h *Hub, name string, radius, sectionRadius, columnBudget int) *St
 	}
 	enc := newEncoder(name, radius, sectionRadius)
 	enc.titleTokenPrefix = h.opts.TitleTokenPrefix
+	enc.noteSkin = h.PutSkin
 	return &Stream{
 		hub:            h,
 		name:           name,

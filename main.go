@@ -22,6 +22,8 @@ import (
 	"github.com/sandertv/gophertunnel/minecraft/protocol/login"
 	"github.com/smell-of-curry/go-test-bds/gotestbds"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/assets"
+	"github.com/smell-of-curry/go-test-bds/gotestbds/control"
+	"github.com/smell-of-curry/go-test-bds/gotestbds/skinfile"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/viewer"
 )
 
@@ -31,10 +33,18 @@ import (
 var botIdentityNamespace = uuid.MustParse("6f1c2a94-3d8f-4f2b-9f2c-1a5b7d9e0c31")
 
 func main() {
+	exitCode := 0
+	defer func() {
+		if exitCode != 0 {
+			os.Exit(exitCode)
+		}
+	}()
+
 	config, err := ReadConfig()
 	if err != nil {
 		slog.Error("reading config", "error", err)
-		os.Exit(1)
+		exitCode = 1
+		return
 	}
 
 	// Gives the bots block and item knowledge for identifiers the server has
@@ -44,13 +54,22 @@ func main() {
 	var level slog.Level
 	if err := level.UnmarshalText([]byte(config.LogLevel)); err != nil {
 		slog.Error("invalid log level", "value", config.LogLevel, "error", err)
-		os.Exit(1)
+		exitCode = 1
+		return
 	}
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: level}))
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	go watchStackDump(logger)
+
+	if config.Skin.Path != "" {
+		if _, _, _, err := skinfile.Decode(config.Skin.Path); err != nil {
+			slog.Error("skin", "path", config.Skin.Path, "error", err)
+			exitCode = 1
+			return
+		}
+	}
 
 	var hub *viewer.Hub
 	if config.Viewer.Enabled {
@@ -94,13 +113,34 @@ func main() {
 			TitleTokenPrefix: config.Viewer.TitleTokenPrefix,
 			Assets:           assetM,
 			Logger:           logger.With("src", "viewer"),
+			RecordDir:        config.Record,
+			CacheDir:         cacheDir,
+			BaselineTag:      baselineTag,
 		})
 		if err != nil {
 			slog.Error("starting viewer", "error", err)
-			os.Exit(1)
+			exitCode = 1
+			return
 		}
 		defer hub.Close()
 		logger.Info("viewer listening", "address", hub.Addr(), "cache", cacheDir, "baseline", baselineTag, "extensions", config.Viewer.ExtensionsDir)
+		if config.Record != "" {
+			logger.Info("recording", "dir", config.Record)
+		}
+	} else if config.Record != "" {
+		logger.Warn("record ignored; viewer is off", "dir", config.Record)
+	}
+
+	var fleet *gotestbds.Fleet
+	if config.Control.Address != "" {
+		fleet = gotestbds.NewFleet()
+		ctl := control.New(os.Getenv("GOTESTBDS_CONTROL_TOKEN"), fleet, logger.With("src", "control"))
+		if err := ctl.Start(config.Control.Address); err != nil {
+			slog.Error("starting control", "error", err)
+			exitCode = 1
+			return
+		}
+		defer ctl.Close()
 	}
 
 	logger.Info("starting bots",
@@ -117,7 +157,7 @@ func main() {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if err := runBot(ctx, config, name, logger, hub); err != nil {
+			if err := runBot(ctx, config, name, logger, hub, fleet); err != nil {
 				logger.Error("bot stopped", "bot", name, "error", err)
 				failures <- err
 			}
@@ -132,7 +172,8 @@ func main() {
 		return
 	}
 	if len(failures) > 0 {
-		os.Exit(1)
+		exitCode = 1
+		return
 	}
 }
 
@@ -143,7 +184,7 @@ func main() {
 // @param name The bot's display name.
 // @param logger Logger, tagged with the bot's name for this bot's records.
 // @returns nil once the bot disconnects cleanly, or the error that stopped it.
-func runBot(ctx context.Context, config Config, name string, logger *slog.Logger, hub *viewer.Hub) error {
+func runBot(ctx context.Context, config Config, name string, logger *slog.Logger, hub *viewer.Hub, fleet *gotestbds.Fleet) error {
 	dialer := minecraft.Dialer{
 		// No TokenSource: these are offline identities. The server must
 		// accept unauthenticated clients (BDS `online-mode=false`).
@@ -151,6 +192,16 @@ func runBot(ctx context.Context, config Config, name string, logger *slog.Logger
 			DisplayName: name,
 			Identity:    uuid.NewSHA1(botIdentityNamespace, []byte(name)).String(),
 		},
+		// Packet decode failures close the connection; without this they vanish.
+		ErrorLog: logger.With("bot", name),
+		// A wide viewer radius asks for hundreds of subchunks at once and BDS
+		// answers in one batch that overruns the 16 MiB default.
+		MaxDecompressedLen: 256 << 20,
+	}
+	if config.Skin.Path != "" {
+		if err := skinfile.Apply(&dialer.ClientData, config.Skin.Path, config.Skin.Slim, name); err != nil {
+			return err
+		}
 	}
 	// Pack download is gated on the asset manager: nil manager (viewer off)
 	// refuses every pack so a normal test run never pulls hundreds of MB.
@@ -165,6 +216,7 @@ func runBot(ctx context.Context, config Config, name string, logger *slog.Logger
 		RemoteAddress: config.Network.ServerAddress,
 		Logger:        logger.With("bot", name),
 		Viewer:        hub,
+		Fleet:         fleet,
 	}
 
 	err := test.RunCtx(ctx)

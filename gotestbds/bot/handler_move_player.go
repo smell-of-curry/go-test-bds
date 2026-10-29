@@ -5,6 +5,7 @@ import (
 	"github.com/go-gl/mathgl/mgl64"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/actor"
+	"github.com/smell-of-curry/go-test-bds/gotestbds/entity"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/mcmath"
 )
 
@@ -41,7 +42,7 @@ func (*MovePlayerHandler) Handle(p packet.Packet, _ *Bot, a *actor.Actor) error 
 
 	if move.EntityRuntimeID != a.RuntimeID() {
 		if ent, ok := a.World().Entity(move.EntityRuntimeID); ok {
-			ent.Move(pos, rot)
+			ent.Move(entity.FeetOf(ent, pos), rot)
 		}
 		return nil
 	}
