@@ -202,6 +202,48 @@ test.describe("animation controllers + scripts (node)", () => {
     expect(animator.molangHost.getVariable("mode")).toBe(7);
   });
 
+  test("a late film tick still samples the idle, not the zero-weight blend", () => {
+    // Pokémon controllers sit in an empty "default" state and blend 0.3s into
+    // ground_idle. A film seek paints once at dt 0, so the transition frame
+    // used to return no pose (incoming weight 0) and the model stayed in bind.
+    const controllers = parseAnimControllers({
+      format_version: "1.10.0",
+      animation_controllers: {
+        "controller.animation.test.spawn_idle": {
+          initial_state: "default",
+          states: {
+            default: {
+              transitions: [{ idle: "1" }],
+              blend_transition: 0.3,
+            },
+            idle: { animations: ["nod"] },
+          },
+        },
+      },
+    });
+    const bindings = buildAnimationBindings(
+      {
+        idle: "controller.animation.test.spawn_idle",
+        nod: "animation.test.blocky.nod",
+      },
+      { initialize: [], pre_animation: [], animate: [{ name: "idle" }] },
+      anims,
+      controllers,
+    );
+    const born = performance.now() / 1000 - 0.5;
+    const animator = new EntityAnimator(
+      bindings,
+      { type: "test:spawn_idle", player: false, props: {}, flags: {} },
+      born,
+    );
+    const poses = animator.tickPoses(0, ent());
+    expect(
+      animator.controllerStates()["controller.animation.test.spawn_idle"],
+    ).toBe("idle");
+    // nod is 0 at t=0 and 40 at t=0.5. Half a second of age must show the pose.
+    expect(poses.get("head")?.rotation[0]).toBeCloseTo(40, 0);
+  });
+
   test("modified_distance_moved accumulates horizontal travel", () => {
     const bindings = buildAnimationBindings(
       def.animations,

@@ -87,16 +87,30 @@ export class EntityAnimator {
   private lastPos: [number, number, number] | null = null;
   private readonly rootPlay = new Map<string, PlayingAnim>();
   private readonly controllers = new Map<string, ControllerInst>();
+  /**
+   * Virtual time the entity was added (seconds). The first tick catches the
+   * controller up to `performance.now()` so a film jump does not sample the
+   * spawn-frame blend at weight 0.
+   */
+  private readonly bornSec: number;
+  private caughtUp = false;
   /** Last controller-state names (for tests). */
   readonly stateLog: string[] = [];
 
   /**
    * @param bindings - Pack animations + scripts for this entity type.
    * @param seedInputs - Initial props/flags for the Molang host.
+   * @param bornSec - `performance.now()/1000` when the entity was added.
+   *   Defaults to "now" (live spawn). Film passes the add-frame clock.
    */
-  constructor(bindings: AnimationBindings, seedInputs: EntityRenderInputs) {
+  constructor(
+    bindings: AnimationBindings,
+    seedInputs: EntityRenderInputs,
+    bornSec?: number,
+  ) {
     this.bindings = bindings;
     this.host = createEntityMolangHost(seedInputs);
+    this.bornSec = bornSec ?? performance.now() / 1000;
   }
 
   /**
@@ -132,7 +146,63 @@ export class EntityAnimator {
     ent: AnimEntityState,
     model: BuiltEntityModel | null,
   ): Map<string, BoneAnimPose> {
-    const delta = Number.isFinite(dt) && dt > 0 ? dt : 0;
+    let total = Number.isFinite(dt) && dt > 0 ? dt : 0;
+    if (!this.caughtUp) {
+      this.caughtUp = true;
+      // Model load resolves after the film clock has already jumped. Age is
+      // the virtual time since SetActorData added the entity, not since this
+      // object was constructed (that can be before setNow).
+      total += Math.max(0, performance.now() / 1000 - this.bornSec);
+    }
+    const poses = this.integrate(total, ent);
+    if (model) {
+      resetBonesToRest(model.bones);
+      applyBonePoses(model.bones, poses, ent.rot[1] ?? 0);
+    }
+    return poses;
+  }
+
+  /**
+   * Run `total` seconds. A controller transition starts its blend at weight 0
+   * on the transition step, so one large step never shows the incoming idle.
+   * 50 ms matches a server tick.
+   *
+   * ponytail: O(seconds/0.05) once per entity on a film seek. Cap 120 s, then
+   * one remainder step. Upgrade: after the state and blend settle, add the
+   * rest straight onto playheads.
+   *
+   * @param total - Seconds to simulate.
+   * @param ent - Entity snapshot (held constant across substeps).
+   * @returns pose after the last substep.
+   */
+  private integrate(
+    total: number,
+    ent: AnimEntityState,
+  ): Map<string, BoneAnimPose> {
+    const STEP = 0.05;
+    if (total <= STEP) return this.step(total, ent);
+    let left = total;
+    let poses = new Map<string, BoneAnimPose>();
+    let n = 0;
+    const CAP = 2400;
+    while (left > 1e-8 && n < CAP) {
+      const d = Math.min(STEP, left);
+      poses = this.step(d, ent);
+      left -= d;
+      n++;
+    }
+    if (left > 1e-4) poses = this.step(left, ent);
+    return poses;
+  }
+
+  /**
+   * One animation step.
+   *
+   * @param delta - Seconds, already finite and ≥ 0.
+   * @param ent - Entity snapshot.
+   * @returns sampled poses.
+   */
+  private step(delta: number, ent: AnimEntityState): Map<string, BoneAnimPose> {
     this.lifeTime += delta;
     this.trackDistance(ent.pos);
 
@@ -170,11 +240,6 @@ export class EntityAnimator {
 
     const poses = new Map<string, BoneAnimPose>();
     this.sampleAll(poses);
-
-    if (model) {
-      resetBonesToRest(model.bones);
-      applyBonePoses(model.bones, poses, ent.rot[1] ?? 0);
-    }
     return poses;
   }
 

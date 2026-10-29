@@ -134,22 +134,22 @@ test.describe("bone hierarchy and nested rotations", () => {
   test("hand-computed world position of a known vertex through two rotations", () => {
     // Fixture: root Ry(90°) about origin, arm Rx(90°) about (16,0,0),
     // cube origin (16,0,0) size 16³. Known vertex = cube max corner (32,16,16).
-    // Bone rotations use file angles (not the cube-rotation sign flip).
+    // Bone rotations apply as (-rx, ry, -rz), like cubes (see rotationMatrixXYZ).
     //
     // Arm: (32,16,16) - (16,0,0) = (16,16,16)
-    //      Rx(90): (16, -16, 16) + pivot = (32, -16, 16)
-    // Root: Ry(90): (16, -16, -32)
-    // three.js: (-1, -1, -2)
+    //      Rx(-90): (16, 16, -16) + pivot = (32, 16, -16)
+    // Root: Ry(90): (-16, 16, -32)
+    // three.js: (1, 1, -2)
     const doc = parseGeometryDocument(loadFixture("nested_bones.geo.json"));
     const geo = doc.geometries[0]!;
     const bedrockMats = computeBoneWorldMatricesBedrock(geo);
     const worldBedrock = transformModelPoint(bedrockMats, "arm", [32, 16, 16]);
-    expect(worldBedrock[0]).toBeCloseTo(16, 5);
-    expect(worldBedrock[1]).toBeCloseTo(-16, 5);
+    expect(worldBedrock[0]).toBeCloseTo(-16, 5);
+    expect(worldBedrock[1]).toBeCloseTo(16, 5);
     expect(worldBedrock[2]).toBeCloseTo(-32, 5);
 
-    const expectedThree = bedrockToThree([16, -16, -32]);
-    expect(expectedThree).toEqual([-1, -1, -2]);
+    const expectedThree = bedrockToThree([-16, 16, -32]);
+    expect(expectedThree).toEqual([1, 1, -2]);
 
     const threeMats = computeBoneWorldMatrices(geo);
     const meshes = buildGeometryMeshes(geo);

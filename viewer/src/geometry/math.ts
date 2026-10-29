@@ -10,13 +10,9 @@ const DEG2RAD = Math.PI / 180;
  * Build an extrinsic-XYZ Euler rotation matrix (degrees).
  * Equivalent to `R = Rz * Ry * Rx` (X applied to the point first).
  *
- * Used for **bone** rest pose and animation. Those matrices are conjugated
- * by the X mirror in {@link bedrockMatrixToThree}, which already matches
- * Blockbench's mirrored bone space. Do not negate the angles here — the
- * player walk cycle and Bulbasaur's vine idle are authored against this.
- *
- * Cube rotations are different: they are baked into vertices in file space
- * and only then X-mirrored. See {@link rotateAboutPivot}.
+ * Bedrock angles are applied as `(-rx, ry, -rz)` before the X mirror. That
+ * matches Blockbench, which mirrors X first and negates `rx`/`ry`, for bones,
+ * cubes, and animation channels alike. Positive head pitch looks down.
  *
  * @param rotation - `[rx, ry, rz]` in degrees, as stored in the file.
  * @returns Rotation matrix in Bedrock file space.
@@ -24,18 +20,15 @@ const DEG2RAD = Math.PI / 180;
 export function rotationMatrixXYZ(rotation: Vec3): Matrix4 {
   const [rx, ry, rz] = rotation;
   return new Matrix4().makeRotationFromEuler(
-    new Euler(rx * DEG2RAD, ry * DEG2RAD, rz * DEG2RAD, "ZYX"),
+    new Euler(-rx * DEG2RAD, ry * DEG2RAD, -rz * DEG2RAD, "ZYX"),
   );
 }
 
 /**
  * Affine transform that rotates a **cube** about `pivot`: `T(p) * R * T(-p)`.
  *
- * Cube rotations are applied in file space and each vertex is then X-mirrored
- * (`bedrockToThree`). Blockbench mirrors X first and negates `rx`/`ry` before
- * rotating (`parseCube` in `js/formats/bedrock/bedrock.js`). The equivalent
- * pre-mirror angles are `(-rx, ry, -rz)`. Without that, a wing cube
- * `[90, 0, 0]` swings `+Z` down through the floor (Zapdos).
+ * Uses the same angle convention as {@link rotationMatrixXYZ}. Without it, a
+ * wing cube `[90, 0, 0]` swings `+Z` down through the floor (Zapdos).
  *
  * @param pivot - Point to rotate about, Bedrock model units.
  * @param rotation - Cube `rotation` degrees from the `.geo.json`.
@@ -43,10 +36,9 @@ export function rotationMatrixXYZ(rotation: Vec3): Matrix4 {
  */
 export function rotateAboutPivot(pivot: Vec3, rotation: Vec3): Matrix4 {
   const [px, py, pz] = pivot;
-  const [rx, ry, rz] = rotation;
   const t = new Matrix4().makeTranslation(px, py, pz);
   const tInv = new Matrix4().makeTranslation(-px, -py, -pz);
-  return t.multiply(rotationMatrixXYZ([-rx, ry, -rz])).multiply(tInv);
+  return t.multiply(rotationMatrixXYZ(rotation)).multiply(tInv);
 }
 
 /**

@@ -389,6 +389,11 @@ interface EntityNode {
   model: BuiltEntityModel | null;
   /** Stage 9 per-instance animation / Molang state. */
   animator: EntityAnimator | null;
+  /**
+   * `performance.now()/1000` when this rid was added. Film spoofs that clock
+   * to the add-frame tick, so the first animation tick can catch up.
+   */
+  bornSec: number;
   /** Procedural walk-cycle / arm-swing state (viewer-side). */
   loco: LocomotionState;
   /** In-flight model load token — bumped to ignore stale async results. */
@@ -1098,6 +1103,7 @@ export class ViewerScene {
         armourMeshes: [],
         itemSprite: null,
         lifeSec: 0,
+        bornSec: performance.now() / 1000,
         gearKey: "",
         skinKey: skinKeyOf(ent),
         shadow: new EntityBlobShadow(),
@@ -1199,7 +1205,7 @@ export class ViewerScene {
         // Model owns yaw; clear group yaw so we don't double-apply.
         node.group.rotation.set(0, 0, 0);
         registry.applyPose(model, ent.rot);
-        node.animator = this.createAnimator(ent);
+        node.animator = this.createAnimator(ent, node.bornSec);
         node.gearKey = "";
         this.syncEntityGear(node, ent);
       })
@@ -1210,7 +1216,7 @@ export class ViewerScene {
    * @param ent - Entity snapshot for type / props seed.
    * @returns animator or null.
    */
-  private createAnimator(ent: Entity): EntityAnimator | null {
+  private createAnimator(ent: Entity, bornSec: number): EntityAnimator | null {
     const registry = this.entityRegistry;
     if (!registry) return null;
     const bindings = registry.getAnimationBindings(ent.type);
@@ -1221,12 +1227,16 @@ export class ViewerScene {
     ) {
       return null;
     }
-    return new EntityAnimator(bindings, {
-      type: ent.type,
-      player: ent.player,
-      props: ent.props ?? {},
-      flags: ent.flags ?? {},
-    });
+    return new EntityAnimator(
+      bindings,
+      {
+        type: ent.type,
+        player: ent.player,
+        props: ent.props ?? {},
+        flags: ent.flags ?? {},
+      },
+      bornSec,
+    );
   }
 
   /**
