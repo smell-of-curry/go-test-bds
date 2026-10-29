@@ -113,7 +113,9 @@ func (b *Bot) StartTickLoop() {
 	for {
 		now := time.Now()
 		health.report(b.logger, now)
-		b.chunks.report(b.logger, b.a, now)
+		if b.chunks.report(b.logger, b.a, now) {
+			b.retryStuckColumns()
+		}
 
 		if priorityTicks < maxPriorityTicks {
 			select {
@@ -189,7 +191,10 @@ func (b *Bot) Conn() Conn {
 // (AuthInput / SubChunkRequest / status chat) and freezes StartTickLoop.
 // Live: post-arena silence after "ticking below the client rate" with
 // slowestPacket=*packet.Text or *packet.NetworkChunkPublisherUpdate.
-const packetBuf = 1024
+// A teleport into a built-up area queues thousands of chunk, actor-data and
+// sound packets at once; at 1024 that burst dropped LevelChunk / SubChunk /
+// RemoveActor and left recorded takes with void columns and ghost entities.
+const packetBuf = 16384
 
 // handlePackets reads the connection forever and hands packets to the tick loop.
 //

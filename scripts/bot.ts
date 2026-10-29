@@ -391,7 +391,7 @@ export class Bot {
     return runActionForData<"getState", BotState>(
       this.player,
       "getState",
-      {},
+      { chunkRadius: 0 },
       this.opts(options),
     );
   }

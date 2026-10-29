@@ -43,6 +43,7 @@ func (*MovePlayerHandler) Handle(p packet.Packet, _ *Bot, a *actor.Actor) error 
 	if move.EntityRuntimeID != a.RuntimeID() {
 		if ent, ok := a.World().Entity(move.EntityRuntimeID); ok {
 			ent.Move(entity.FeetOf(ent, pos), rot)
+			setHeadYaw(ent, float64(move.HeadYaw))
 		}
 		return nil
 	}

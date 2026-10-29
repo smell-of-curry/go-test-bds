@@ -6,6 +6,7 @@ import (
 	"sort"
 	"time"
 
+	w "github.com/df-mc/dragonfly/server/world"
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/actor"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/world"
@@ -25,6 +26,31 @@ const chunkHealthWindow = 2 * time.Second
 type chunkHealth struct {
 	windowStart time.Time
 	results     map[byte]int
+	// waiting holds columns that had no sub-chunk at the last window close.
+	waiting map[w.ChunkPos]struct{}
+}
+
+// stuck returns columns that have had no sub-chunk for a whole window. BDS
+// can drop a SubChunkRequest (seen after teleports) and never answer it, so
+// these get asked for again. Partial columns are left alone: a repeat answer
+// would count against the sub-chunks still pending.
+//
+// @param a The actor whose world is inspected.
+// @returns columns to request again.
+func (h *chunkHealth) stuck(a *actor.Actor) []w.ChunkPos {
+	prev := h.waiting
+	h.waiting = make(map[w.ChunkPos]struct{})
+	var out []w.ChunkPos
+	for pos, col := range a.World().Columns() {
+		if col.State != world.ColumnRequested {
+			continue
+		}
+		h.waiting[pos] = struct{}{}
+		if _, ok := prev[pos]; ok {
+			out = append(out, pos)
+		}
+	}
+	return out
 }
 
 // subChunkResult records the result code of one SubChunk entry.

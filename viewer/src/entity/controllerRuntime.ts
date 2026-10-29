@@ -27,6 +27,12 @@ import {
 import type { BuiltEntityModel } from "./buildModel";
 import type { ParsedAnimController } from "./parseAnimController";
 import type { ParsedAnimation } from "./parseAnimation";
+import {
+  createMoveTrack,
+  headLookFromRot,
+  stepHorizontalMove,
+  type MoveTrack,
+} from "./moveSpeed";
 import { createEntityMolangHost } from "./queries";
 import type { ClientEntityScripts, EntityRenderInputs } from "./types";
 
@@ -80,6 +86,8 @@ interface ServerPlay {
   controllerId: string;
   /** Elapsed seconds when a dynamic stop fired; -1 if not yet. */
   stoppedAt: number;
+  /** Runtime-controller `nextState` animation queued for the stop; "" once started. */
+  then: string;
 }
 
 /** One playing animation instance (root or inside a controller). */
@@ -115,7 +123,9 @@ export class EntityAnimator {
   private initialized = false;
   private lifeTime = 0;
   private distanceMoved = 0;
-  private lastPos: [number, number, number] | null = null;
+  private readonly move: MoveTrack = createMoveTrack();
+  /** Latest horizontal speed in blocks/s (limb swing). */
+  private blocksPerSec = 0;
   private readonly rootPlay = new Map<string, PlayingAnim>();
   private readonly controllers = new Map<string, ControllerInst>();
   /** Server AnimateEntity plays, newest last. Sampled on top of controllers. */
@@ -186,7 +196,10 @@ export class EntityAnimator {
    * Start a server-triggered animation. Unknown names are ignored.
    * A non-empty controller replaces that controller's pose until the play
    * ends, then blends back. `nextState` is applied only when that controller
-   * has the state.
+   * has the state. On the runtime controller (no pack controller) Bedrock
+   * moves to a state named `nextState`, which plays the client-entity
+   * animation of that short name; the ball's `capture` → `success3` shakes
+   * depend on it.
    *
    * @param req - AnimateEntity / playAnimation fields.
    */
@@ -206,6 +219,10 @@ export class EntityAnimator {
       stopExpression: req.stopExpression ?? "",
       controllerId,
       stoppedAt: -1,
+      then:
+        !controllerId && req.nextState && this.resolveServerAnim(req.nextState)
+          ? req.nextState
+          : "",
     });
   }
 
@@ -233,7 +250,10 @@ export class EntityAnimator {
     const poses = this.integrate(total, ent);
     if (model) {
       resetBonesToRest(model.bones);
-      applyBonePoses(model.bones, poses, ent.rot[1] ?? 0);
+      // Animated client entities look through molang. Pitch on the head bone
+      // stacks on that and sinks the skull into the body.
+      const pitch = this.drivesHead() ? 0 : (ent.rot[1] ?? 0);
+      applyBonePoses(model.bones, poses, pitch);
     }
     return poses;
   }
@@ -280,8 +300,6 @@ export class EntityAnimator {
    */
   private step(delta: number, ent: AnimEntityState): Map<string, BoneAnimPose> {
     this.lifeTime += delta;
-    this.trackDistance(ent.pos);
-
     this.syncQueries(ent, delta);
     this.refreshFlagQueries(ent);
 
@@ -327,15 +345,22 @@ export class EntityAnimator {
   }
 
   /**
-   * @param pos - Current feet position.
+   * Horizontal speed in blocks/s for the procedural limb swing.
+   * Includes wire velocity scaled up from blocks/tick.
    */
-  private trackDistance(pos: [number, number, number]): void {
-    if (this.lastPos) {
-      const dx = pos[0] - this.lastPos[0];
-      const dz = pos[2] - this.lastPos[2];
-      this.distanceMoved += Math.hypot(dx, dz);
-    }
-    this.lastPos = [pos[0], pos[1], pos[2]];
+  get horizontalBlocksPerSec(): number {
+    return this.blocksPerSec;
+  }
+
+  /**
+   * True when the client entity defines animations. Head pitch then comes
+   * only from those animations (`query.head_*` / `query.target_*`).
+   */
+  drivesHead(): boolean {
+    return (
+      Object.keys(this.bindings.shortNames).length > 0 ||
+      this.bindings.scripts.animate.length > 0
+    );
   }
 
   /**
@@ -343,19 +368,27 @@ export class EntityAnimator {
    * @param delta - dt seconds.
    */
   private syncQueries(ent: AnimEntityState, delta: number): void {
-    const speed = Math.hypot(ent.vel[0], ent.vel[2]);
+    const move = stepHorizontalMove(this.move, ent.pos, delta, ent.vel);
+    this.distanceMoved += move.distance;
+    this.blocksPerSec = move.blocksPerSec;
+    const look = headLookFromRot(ent.rot);
     this.host.setQuery("life_time", this.lifeTime);
     this.host.setQuery("delta_time", delta);
     this.host.setQuery("anim_time", 0);
     this.host.setQuery("modified_distance_moved", this.distanceMoved);
-    this.host.setQuery("modified_move_speed", speed);
-    this.host.setQuery("ground_speed", speed);
+    this.host.setQuery("modified_move_speed", move.moveSpeed);
+    this.host.setQuery("ground_speed", move.moveSpeed);
     this.host.setQuery("vertical_speed", ent.vel[1]);
-    this.host.setQuery("position_delta", [
-      ent.vel[0] * delta,
-      ent.vel[1] * delta,
-      ent.vel[2] * delta,
-    ]);
+    const deltaVec = move.delta;
+    this.host.setQuery("position_delta", (args) => {
+      const i = typeof args[0] === "number" ? args[0] : 0;
+      return deltaVec[i] ?? 0;
+    });
+    this.host.setQuery("head_x_rotation", look.pitch);
+    this.host.setQuery("target_x_rotation", look.pitch);
+    this.host.setQuery("head_y_rotation", look.yawDelta);
+    this.host.setQuery("target_y_rotation", look.targetYaw);
+    this.host.setQuery("body_y_rotation", look.bodyYaw);
     const hp = ent.attributes["minecraft:health"] ?? ent.attributes.health;
     if (typeof hp === "number") this.host.setQuery("health", hp);
   }
@@ -476,9 +509,13 @@ export class EntityAnimator {
    */
   private pruneServerPlays(now: number): void {
     if (this.serverPlays.length === 0) return;
-    this.serverPlays = this.serverPlays.filter(
+    // serverPlayView can queue a nextState play; it lands in the fresh array.
+    const plays = this.serverPlays;
+    this.serverPlays = [];
+    const kept = plays.filter(
       (play) => this.serverPlayView(play, now) !== null,
     );
+    this.serverPlays = [...kept, ...this.serverPlays];
   }
 
   /**
@@ -502,6 +539,14 @@ export class EntityAnimator {
     if (stopAt === null) return { animTime: elapsed, weight: 1 };
     const into = elapsed - stopAt;
     if (into < 0) return { animTime: elapsed, weight: 1 };
+    if (play.then) {
+      const next = play.then;
+      play.then = "";
+      this.playServerAnimation({
+        animation: next,
+        startSec: play.startSec + stopAt,
+      });
+    }
     if (!(play.blendOutTime > 0) || into >= play.blendOutTime) return null;
     return {
       animTime: stopAt,

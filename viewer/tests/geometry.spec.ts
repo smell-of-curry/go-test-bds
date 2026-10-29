@@ -14,7 +14,8 @@ import {
   transformModelPoint,
   transformPoint,
 } from "../src/geometry/index";
-import { Euler, Matrix4, Vector3 } from "three";
+import { Euler, Matrix4, Mesh, Texture, Vector3 } from "three";
+import { buildEntityModel } from "../src/entity/buildModel";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fixtures = join(here, "fixtures", "geometry");
@@ -333,6 +334,59 @@ test.describe("mesh builder", () => {
     expect(Math.min(...vs)).toBeCloseTo(1 - 32 / 64, 5);
     expect(Math.max(...vs)).toBeCloseTo(1, 5);
     expect(mesh.materialInstances[northIdx]).toBe("mat_north");
+  });
+
+  test("zero uv_size faces are omitted and flat cubes are depth-offset decals", () => {
+    const geo = parseGeometryDocument({
+      format_version: "1.16.0",
+      "minecraft:geometry": [
+        {
+          description: {
+            identifier: "geometry.test.eye",
+            texture_width: 16,
+            texture_height: 16,
+          },
+          bones: [
+            {
+              name: "eye",
+              pivot: [0, 0, 0],
+              cubes: [
+                {
+                  origin: [0, 0, 0],
+                  size: [1, 1, 1],
+                  uv: {
+                    north: { uv: [0, 0], uv_size: [0, 4] },
+                    south: { uv: [0, 0], uv_size: [4, 4] },
+                  },
+                },
+                {
+                  origin: [1, 0, 0],
+                  size: [0, 2, 2],
+                  uv: {
+                    west: { uv: [0, 0], uv_size: [2, 2] },
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    }).geometries[0]!;
+    const mesh = buildGeometryMeshes(geo)[0]!;
+    // Solid cube: only the south face (north uv_size is 0).
+    const solidFaces = mesh.faces.filter((f) => f === "south" || f === "north");
+    expect(solidFaces).toEqual(["south"]);
+    expect(mesh.decal).toBe(true);
+    const model = buildEntityModel({ geometry: geo, texture: new Texture() });
+    let offset = false;
+    model.root.traverse((obj) => {
+      if (obj instanceof Mesh && obj.material instanceof Object) {
+        const mat = obj.material as { polygonOffset?: boolean };
+        if (mat.polygonOffset) offset = true;
+      }
+    });
+    expect(offset).toBe(true);
+    model.dispose();
   });
 
   test("poly_mesh emits one quad (two tris)", () => {

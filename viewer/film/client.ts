@@ -1,4 +1,5 @@
 import type { FilmCameraKeyframe } from "../src/camera";
+import { rewriteTimelineForLookahead, type LookaheadPoint } from "./lookahead";
 import type { Frame } from "../src/protocol";
 
 /** Page-side film control. The CLI drives the Playwright clock and calls these. */
@@ -21,6 +22,17 @@ export interface FilmPage {
   /** Draw the frame at the current virtual clock and return PNG base64. */
   present(): string;
   setCamera(track: FilmCameraKeyframe[] | null): void;
+  /**
+   * Film-only. Pull in-bubble columns forward and keep them through `toMs`.
+   * No-op when `enabled` is false or frames have already been applied.
+   */
+  prepareLookahead(opts: {
+    fromMs: number;
+    toMs: number;
+    cameraPoints?: LookaheadPoint[];
+    radiusChunks?: number;
+    enabled?: boolean;
+  }): void;
   renderer(): string;
 }
 
@@ -64,17 +76,31 @@ export function createFilmRandom(seed: number): { next(): number } {
   };
 }
 
+export interface SseEvent {
+  event: string;
+  data: unknown;
+}
+
 /**
- * Parse an SSE document into events. Comment lines are dropped.
- *
- * @param text - Raw `text/event-stream` body.
- * @returns events in order.
+ * Incremental SSE reader. Feed decoded text chunks; a line split across
+ * chunks stays in the carry buffer so the whole take is never one string.
  */
-export function parseSse(text: string): { event: string; data: unknown }[] {
-  const out: { event: string; data: unknown }[] = [];
+export interface SseParser {
+  /** @param chunk - Newly decoded text. @returns events finished by this chunk. */
+  push(chunk: string): SseEvent[];
+  /** Flush a trailing line that had no final newline. */
+  finish(): SseEvent[];
+}
+
+/**
+ * @returns a parser. Comment lines are dropped. Non-JSON data is skipped.
+ */
+export function createSseParser(): SseParser {
   let event = "message";
   const data: string[] = [];
-  const flush = (): void => {
+  let carry = "";
+
+  const flush = (bucket: SseEvent[]): void => {
     if (data.length === 0) {
       event = "message";
       return;
@@ -84,29 +110,59 @@ export function parseSse(text: string): { event: string; data: unknown }[] {
     const name = event;
     event = "message";
     try {
-      out.push({ event: name, data: JSON.parse(raw) as unknown });
+      bucket.push({ event: name, data: JSON.parse(raw) as unknown });
     } catch {
       /* skip a non-JSON keepalive leftover */
     }
   };
-  for (const rawLine of text.split("\n")) {
+
+  const pushLine = (rawLine: string, bucket: SseEvent[]): void => {
     const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
     if (line === "") {
-      flush();
-      continue;
+      flush(bucket);
+      return;
     }
-    if (line.startsWith(":")) continue;
+    if (line.startsWith(":")) return;
     if (line.startsWith("event:")) {
       event = line.slice(6).trim();
-      continue;
+      return;
     }
     if (line.startsWith("data:")) {
       const rest = line.slice(5);
       data.push(rest.startsWith(" ") ? rest.slice(1) : rest);
     }
-  }
-  flush();
-  return out;
+  };
+
+  return {
+    push(chunk: string): SseEvent[] {
+      const bucket: SseEvent[] = [];
+      const text = carry + chunk;
+      const lines = text.split("\n");
+      carry = lines.pop() ?? "";
+      for (const line of lines) pushLine(line, bucket);
+      return bucket;
+    },
+    finish(): SseEvent[] {
+      const bucket: SseEvent[] = [];
+      if (carry.length > 0) {
+        pushLine(carry, bucket);
+        carry = "";
+      }
+      flush(bucket);
+      return bucket;
+    },
+  };
+}
+
+/**
+ * Parse an SSE document into events. Comment lines are dropped.
+ *
+ * @param text - Raw `text/event-stream` body.
+ * @returns events in order.
+ */
+export function parseSse(text: string): SseEvent[] {
+  const parser = createSseParser();
+  return [...parser.push(text), ...parser.finish()];
 }
 
 /**
@@ -123,7 +179,38 @@ export function timelineFromSse(text: string): {
   firstTick: number;
   lastTick: number;
 } {
-  const events = parseSse(text);
+  return timelineFromEvents(parseSse(text));
+}
+
+/**
+ * Same timeline as {@link timelineFromSse}, reading the body in chunks so a
+ * take larger than V8's max string (~512MB) can still parse.
+ *
+ * @param stream - `fetch` response body.
+ * @returns ordered frames plus the keyframe tick span.
+ */
+export async function timelineFromSseStream(
+  stream: ReadableStream<Uint8Array>,
+): Promise<{ frames: TimedFrame[]; firstTick: number; lastTick: number }> {
+  const reader = stream.getReader();
+  const dec = new TextDecoder();
+  const parser = createSseParser();
+  const events: SseEvent[] = [];
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    events.push(...parser.push(dec.decode(value, { stream: true })));
+  }
+  events.push(...parser.push(dec.decode()));
+  events.push(...parser.finish());
+  return timelineFromEvents(events);
+}
+
+function timelineFromEvents(events: readonly SseEvent[]): {
+  frames: TimedFrame[];
+  firstTick: number;
+  lastTick: number;
+} {
   let firstTick: number | null = null;
   for (const ev of events) {
     const data = ev.data;
@@ -201,8 +288,10 @@ export function installFilmMode(hooks: FilmHooks): void {
       applyThrough(virtualNow);
       hooks.hideChrome();
       const viewer = window.__viewer;
+      // Drain the remesh queue completely. A capped flush leaves the floor
+      // half-meshed on the frame that lookahead just made visible.
       if (viewer) {
-        for (let i = 0; i < 8 && !viewer.settled; i++) viewer.flush();
+        for (let i = 0; i < 10000 && !viewer.settled; i++) viewer.flush();
       }
       hooks.paint();
       hooks.glFinish();
@@ -212,6 +301,15 @@ export function installFilmMode(hooks: FilmHooks): void {
     },
     setCamera(track) {
       hooks.setCameraTrack(track);
+    },
+    prepareLookahead(opts) {
+      if (opts.enabled === false || cursor !== 0) return;
+      frames = rewriteTimelineForLookahead(frames, {
+        fromMs: opts.fromMs,
+        toMs: opts.toMs,
+        points: opts.cameraPoints ?? [],
+        radiusChunks: opts.radiusChunks,
+      });
     },
     renderer(): string {
       const gl =
@@ -228,10 +326,10 @@ export function installFilmMode(hooks: FilmHooks): void {
   void fetch(`/film/sse?bot=${encodeURIComponent(bot)}`)
     .then(async (res) => {
       if (!res.ok) throw new Error(`GET /film/sse → ${res.status}`);
-      return res.text();
+      if (!res.body) throw new Error("GET /film/sse has no body");
+      return timelineFromSseStream(res.body);
     })
-    .then((text) => {
-      const timeline = timelineFromSse(text);
+    .then((timeline) => {
       frames = timeline.frames;
       cursor = 0;
       page.meta = {

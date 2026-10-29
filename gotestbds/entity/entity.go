@@ -23,6 +23,7 @@ type Ent struct {
 	rid        uint64
 	uid        int64
 	entityType string
+	headYaw    float64
 
 	// intProps and floatProps are entity property values by wire index; the
 	// names live in the SyncActorProperty definitions for entityType.
@@ -115,6 +116,17 @@ func (e *Ent) UniqueID() int64 {
 func (e *Ent) Move(pos mgl64.Vec3, rot cube.Rotation) {
 	e.pos = pos
 	e.rot = rot
+}
+
+// HeadYaw is the head's yaw in degrees; it differs from Rotation().Yaw() when
+// the entity has its head turned.
+func (e *Ent) HeadYaw() float64 {
+	return e.headYaw
+}
+
+// SetHeadYaw ...
+func (e *Ent) SetHeadYaw(yaw float64) {
+	e.headYaw = yaw
 }
 
 // Type is a type of the entity it defines how player will see the entity (pig, sheep etc...).

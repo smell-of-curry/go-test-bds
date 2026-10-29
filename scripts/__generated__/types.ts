@@ -110,7 +110,10 @@ export interface GetNearbyEntities {
 }
 
 /** GetState returns the bot's current actor state. */
-export interface GetState {}
+export interface GetState {
+  /** ChunkRadius bounds the chunk coverage report (default: the server's chunk radius). */
+  chunkRadius: number;
+}
 
 /** HoldInput holds stick and buttons for Ticks actor ticks (20 Hz). While riding, the ticks steer the vehicle instead of walking the player. */
 export interface HoldInput {
@@ -252,6 +255,9 @@ export interface StopNavigating {}
 /** StopUsingItem releases the currently used item. */
 export interface StopUsingItem {}
 
+/** SwingArm swings this bot's arm. The server relays the swing to nearby players, so other bots and the viewer see it; nothing is hit or used. */
+export interface SwingArm {}
+
 /** ToggleCrafterSlot toggles crafter slot. */
 export interface ToggleCrafterSlot {
   slot: number;
@@ -329,6 +335,7 @@ export type InstructionAction =
   | "stopBreakingBlock"
   | "stopNavigating"
   | "stopUsingItem"
+  | "swingArm"
   | "toggleCrafterSlot"
   | "viewerMark"
   | "waitForForm"
@@ -380,6 +387,7 @@ export interface InstructionParametersByAction {
   stopBreakingBlock: StopBreakingBlock;
   stopNavigating: StopNavigating;
   stopUsingItem: StopUsingItem;
+  swingArm: SwingArm;
   toggleCrafterSlot: ToggleCrafterSlot;
   viewerMark: ViewerMark;
   waitForForm: WaitForForm;
@@ -432,6 +440,7 @@ export type InstructionPayload =
   | { action: "stopBreakingBlock"; parameters: StopBreakingBlock }
   | { action: "stopNavigating"; parameters: StopNavigating }
   | { action: "stopUsingItem"; parameters: StopUsingItem }
+  | { action: "swingArm"; parameters: SwingArm }
   | { action: "toggleCrafterSlot"; parameters: ToggleCrafterSlot }
   | { action: "viewerMark"; parameters: ViewerMark }
   | { action: "waitForForm"; parameters: WaitForForm }

@@ -41,6 +41,9 @@ export function createEntityMolangHost(
   return createDefaultHost({
     arrays,
     variables: {
+      // Vanilla walk (`variable.tcos0`) divides by this. Unset → 0 → no swing.
+      // 1 is the on-ground default; elytra scripts overwrite it.
+      gliding_speed_value: 1,
       // Viewer always draws third-person body meshes (not FP HUD).
       is_first_person: 0,
       map_face_icon: 0,

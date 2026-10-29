@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/df-mc/dragonfly/server/block"
+	"github.com/df-mc/dragonfly/server/block/cube"
 	"github.com/df-mc/dragonfly/server/item"
 	dfworld "github.com/df-mc/dragonfly/server/world"
 	"github.com/df-mc/dragonfly/server/world/chunk"
@@ -861,6 +862,15 @@ func withActorProps(props map[string]any, reg *wire.Registries, ent gw.Entity) m
 	return props
 }
 
+// entityRot is [yaw, pitch, headYaw] degrees; headYaw is omitted for entities
+// that do not track one.
+func entityRot(ent gw.Entity, rot cube.Rotation) []float64 {
+	if h, ok := ent.(interface{ HeadYaw() float64 }); ok {
+		return []float64{rot.Yaw(), rot.Pitch(), h.HeadYaw()}
+	}
+	return []float64{rot.Yaw(), rot.Pitch()}
+}
+
 func (e *encoder) encodeEntity(a *actor.Actor, ent gw.Entity) Entity {
 	pos := ent.Position()
 	rot := ent.Rotation()
@@ -878,7 +888,7 @@ func (e *encoder) encodeEntity(a *actor.Actor, ent gw.Entity) Entity {
 		UID:    ent.UniqueID(),
 		Type:   ent.Type(),
 		Pos:    [3]float64{pos.X(), pos.Y(), pos.Z()},
-		Rot:    []float64{rot.Yaw(), rot.Pitch()},
+		Rot:    entityRot(ent, rot),
 		Vel:    [3]float64{vel.X(), vel.Y(), vel.Z()},
 		BBox:   [2]float64{box.Width(), box.Height()},
 		Name:   st.NameTag(),

@@ -430,30 +430,49 @@ async function shootBlockbench(page, spec, animName, time) {
         if (cube.mesh?.parent) inScene++;
       }
 
-      const dirs = {
-        front: new THREE.Vector3(0, 0, -1),
-        side: new THREE.Vector3(1, 0, 0),
-        threequarter: new THREE.Vector3(-1, 0.35, -1).normalize(),
-      };
+      // `head` frames the upper body so zero-thickness eye planes are large
+      // enough to judge. Same ortho depth range as the full-body shots.
+      const headCenter = new THREE.Vector3(
+        center.x,
+        box.max.y - dims.y * 0.2,
+        center.z,
+      );
+      const headHalf = Math.max(dims.x, dims.z, dims.y * 0.32, 4) * 0.85;
+      const cams = [
+        { name: "front", dir: new THREE.Vector3(0, 0, -1), at: center, span: half },
+        { name: "side", dir: new THREE.Vector3(1, 0, 0), at: center, span: half },
+        {
+          name: "threequarter",
+          dir: new THREE.Vector3(-1, 0.35, -1).normalize(),
+          at: center,
+          span: half,
+        },
+        {
+          name: "head",
+          dir: new THREE.Vector3(0.15, 0.25, -1).normalize(),
+          at: headCenter,
+          span: headHalf,
+        },
+      ];
       /** @type {Record<string, any>} */
       const cameras = {};
       /** @type {Record<string, string>} */
       const shots = {};
       const gl = preview.renderer.getContext();
-      for (const [name, dir] of Object.entries(dirs)) {
-        const pos = center.clone().addScaledVector(dir, half * 4);
+      for (const { name, dir, at, span } of cams) {
+        const pos = at.clone().addScaledVector(dir, span * 4);
         const cam = preview.camOrtho;
         cam.layers.enableAll();
-        cam.left = -half;
-        cam.right = half;
-        cam.top = half;
-        cam.bottom = -half;
+        cam.left = -span;
+        cam.right = span;
+        cam.top = span;
+        cam.bottom = -span;
         cam.near = -4000;
         cam.far = 4000;
         cam.zoom = 1;
         cam.position.copy(pos);
         cam.up.set(0, 1, 0);
-        cam.lookAt(center);
+        cam.lookAt(at);
         cam.updateProjectionMatrix();
         cam.updateMatrixWorld(true);
         preview.renderer.render(Canvas.scene, cam);
@@ -475,11 +494,11 @@ async function shootBlockbench(page, spec, animName, time) {
         shots[name] = canvas.toDataURL("image/png");
         cameras[name] = {
           position: [pos.x, pos.y, pos.z],
-          target: [center.x, center.y, center.z],
-          left: -half,
-          right: half,
-          top: half,
-          bottom: -half,
+          target: [at.x, at.y, at.z],
+          left: -span,
+          right: span,
+          top: span,
+          bottom: -span,
           near: -4000,
           far: 4000,
         };

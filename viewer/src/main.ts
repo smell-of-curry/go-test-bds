@@ -4,6 +4,7 @@ import {
   cameraModeFromSearch,
 } from "./camera";
 import { createFilmRandom, installFilmMode } from "../film/client";
+import { hiddenEntityIds, hideNameSet } from "../film/hide";
 import { installViewerHandle } from "./debug";
 import { EntityModelRegistry } from "./entity";
 import { MotionLerp } from "./motion";
@@ -34,10 +35,20 @@ const filmHud =
   pageParams.get("hud") === "1" || pageParams.get("hud") === "true";
 const filmNametags =
   pageParams.get("nametags") === "1" || pageParams.get("nametags") === "true";
+/** Film draws the recording bot unless the page opts back in. */
+const filmShowSelf =
+  pageParams.get("showSelf") === "1" || pageParams.get("showSelf") === "true";
+/** Extra player names to omit (`--hide`). */
+const filmHideNames = hideNameSet(pageParams.get("hide"));
+/** Live mode does not apply `--hide`. */
+const HIDE_NO_NAMES: ReadonlySet<string> = new Set();
+/** Actor rids since the last keyframe, so a rejoin stays hidden. */
+const selfRids = new Set<number>();
 
 const store = new Store();
 const scene = new ViewerScene(canvas, labelsEl);
 scene.nameTagsEnabled = !filmMode || filmNametags;
+scene.filmFog = filmMode;
 if (filmMode) scene.renderer.setPixelRatio(1);
 
 /**
@@ -226,7 +237,9 @@ installViewerHandle(
   scene,
   // Live remesh queue — flush() drains it without sync/tickRemesh, so a
   // cached boolean would stay false forever after a forced drain.
-  () => !store.getState().schemaOk || scene.pendingRemeshCount === 0,
+  () =>
+    !store.getState().schemaOk ||
+    (scene.pendingRemeshCount === 0 && !scene.hasPendingWorldClear),
   camera,
   () => streamError,
   overlay,
@@ -255,7 +268,24 @@ window.addEventListener("resize", resize);
 resize();
 
 function showActorBody(): boolean {
+  // Film's free camera is not third-person. Follow and orbit still want the body.
+  if (filmMode && !filmShowSelf) return false;
   return camera.mode === "orbit" || camera.mode === "follow";
+}
+
+function applyEntityHides(): void {
+  const state = store.getState();
+  const hideSelf = filmMode ? !filmShowSelf : camera.mode === "firstPerson";
+  scene.setHiddenEntityRids(
+    hiddenEntityIds({
+      entities: state.entities.values(),
+      selfRids,
+      currentActorRid: state.actor?.rid ?? null,
+      hideSelf,
+      hideAllSelfRids: filmMode,
+      names: filmMode ? filmHideNames : HIDE_NO_NAMES,
+    }),
+  );
 }
 
 function paintOverlay(): void {
@@ -285,6 +315,8 @@ store.subscribe((state) => {
     return;
   }
 
+  if (state.fullReset) selfRids.clear();
+  if (state.actor) selfRids.add(state.actor.rid);
   scene.sync(state, showActorBody());
   scene.setWorldTime(state.time);
   camera.setServerOverride(state.camera, performance.now());
@@ -414,9 +446,14 @@ function paintFrame(force = false): void {
   if (state.schemaOk) {
     // Keyframe/dimension wipes dispose old meshes across frames so a dense
     // subway clear cannot freeze the rAF loop (recordVideo dies if paint stops).
-    if (scene.hasPendingWorldClear) scene.drainPendingWorldClear();
-    if (scene.pendingRemeshCount > 0) {
-      scene.tickRemesh(state);
+    if (filmMode) {
+      // Offline frames wait for every section. Live keeps the per-frame budget.
+      if (scene.hasPendingWorldClear || scene.pendingRemeshCount > 0) {
+        scene.flush(state);
+      }
+    } else {
+      if (scene.hasPendingWorldClear) scene.drainPendingWorldClear();
+      if (scene.pendingRemeshCount > 0) scene.tickRemesh(state);
     }
     const nowMs = performance.now();
     scene.tickHighlights(nowMs);
@@ -424,6 +461,7 @@ function paintFrame(force = false): void {
 
     const actor = motion.sampleActor() ?? state.actor;
     const entities = motion.sampleEntities();
+    applyEntityHides();
     // MotionLerp (~inter-arrival / ~3 ticks) + Stage 9 bone animation.
     const step = force
       ? Math.max(0, dtSec)

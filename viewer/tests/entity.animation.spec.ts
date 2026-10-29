@@ -2,8 +2,10 @@ import { expect, test } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import * as THREE from "three";
 import {
   buildAnimationBindings,
+  buildEntityModel,
   catmullRom,
   EntityAnimator,
   isAnimationFinished,
@@ -14,6 +16,7 @@ import {
   sampleAnimationPoses,
   sampleChannel,
 } from "../src/entity";
+import { parseGeometryDocument } from "../src/geometry";
 import { createDefaultHost } from "../src/molang";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -284,10 +287,10 @@ test.describe("animation controllers + scripts (node)", () => {
       flags: {},
     });
     animator.tickPoses(0.05, ent({ pos: [0, 0, 0] }));
-    animator.tickPoses(0.05, ent({ pos: [3, 0, 4] })); // dist 5
+    animator.tickPoses(0.05, ent({ pos: [0.6, 0, 0.8] })); // dist 1, under teleport
     expect(
       animator.molangHost.query("modified_distance_moved", []),
-    ).toBeCloseTo(5, 5);
+    ).toBeCloseTo(1, 5);
   });
 
   test("server animate plays the named anim, then drops it after its length", () => {
@@ -400,6 +403,294 @@ test.describe("animation controllers + scripts (node)", () => {
       // oneshot's 40°, not the "done" state's hold animation.
       const poses = animator.tickPoses(0.05, ent());
       expect(poses.get("head")?.rotation[0]).toBeCloseTo(40, 5);
+    } finally {
+      performance.now = orig;
+    }
+  });
+
+  test("head look comes from molang, not an automatic pitch, when the entity animates", () => {
+    const anims = parseAnimations({
+      format_version: "1.8.0",
+      animations: {
+        "animation.test.idle": {
+          loop: true,
+          bones: { body: { rotation: [0, 0, 0] } },
+        },
+      },
+    });
+    const bindings = buildAnimationBindings(
+      { idle: "animation.test.idle" },
+      { initialize: [], pre_animation: [], animate: [{ name: "idle" }] },
+      anims,
+      new Map(),
+    );
+    const geometry = parseGeometryDocument(
+      JSON.parse(readFileSync(join(fixtures, "blocky.geo.json"), "utf8")),
+    ).geometries[0]!;
+    const model = buildEntityModel({
+      geometry,
+      texture: new THREE.Texture(),
+    });
+    const animator = new EntityAnimator(bindings, {
+      type: "test:look",
+      player: false,
+      props: {},
+      flags: {},
+    });
+    expect(animator.drivesHead()).toBe(true);
+    animator.tick(
+      0.05,
+      {
+        ...ent(),
+        rot: [10, 40, 120],
+      },
+      model,
+    );
+    model.root.updateMatrixWorld(true);
+    const face = new THREE.Vector3(0, 1, -0.5).applyMatrix4(
+      model.bones.get("head")!.matrixWorld,
+    );
+    // Pitch 40 would drop this point below the pivot (y = 1).
+    expect(face.y).toBeCloseTo(1, 4);
+    expect(animator.molangHost.query("head_x_rotation", [])).toBe(40);
+    expect(animator.molangHost.query("target_x_rotation", [])).toBe(40);
+    expect(animator.molangHost.query("body_y_rotation", [])).toBe(10);
+    // headYaw 120 − body 10 = 110, target_y clamped to 75.
+    expect(animator.molangHost.query("head_y_rotation", [])).toBeCloseTo(
+      110,
+      5,
+    );
+    expect(animator.molangHost.query("target_y_rotation", [])).toBe(75);
+    model.dispose();
+  });
+
+  test("entities with no client animations still pitch the head bone", () => {
+    const bindings = buildAnimationBindings(
+      {},
+      { initialize: [], pre_animation: [], animate: [] },
+      new Map(),
+      new Map(),
+    );
+    const geometry = parseGeometryDocument(
+      JSON.parse(readFileSync(join(fixtures, "blocky.geo.json"), "utf8")),
+    ).geometries[0]!;
+    const model = buildEntityModel({
+      geometry,
+      texture: new THREE.Texture(),
+    });
+    const animator = new EntityAnimator(bindings, {
+      type: "test:plain",
+      player: false,
+      props: {},
+      flags: {},
+    });
+    expect(animator.drivesHead()).toBe(false);
+    animator.tick(0.05, { ...ent(), rot: [0, 45] }, model);
+    model.root.updateMatrixWorld(true);
+    const face = new THREE.Vector3(0, 1, -0.5).applyMatrix4(
+      model.bones.get("head")!.matrixWorld,
+    );
+    expect(face.y).toBeLessThan(1);
+    model.dispose();
+  });
+
+  test("walk speed comes from position when velocity is zero", () => {
+    const anims = parseAnimations({
+      format_version: "1.8.0",
+      animations: {
+        "animation.test.legs": {
+          loop: true,
+          bones: {
+            leftleg: {
+              rotation: [
+                "(math.cos(query.modified_distance_moved * 38.17) * query.modified_move_speed / variable.gliding_speed_value) * 57.3",
+                0,
+                0,
+              ],
+            },
+          },
+        },
+      },
+    });
+    const bindings = buildAnimationBindings(
+      { legs: "animation.test.legs" },
+      { initialize: [], pre_animation: [], animate: [{ name: "legs" }] },
+      anims,
+      new Map(),
+    );
+    const animator = new EntityAnimator(bindings, {
+      type: "test:walker",
+      player: false,
+      props: {},
+      flags: {},
+    });
+    const step = 0.05;
+    const bps = 4.3;
+    let x = 0;
+    let peak = 0;
+    // Seed, then one second of walking. vel stays 0 (player / teleport move).
+    animator.tickPoses(step, ent({ pos: [0, 0, 0] }));
+    for (let i = 0; i < 20; i++) {
+      x += bps * step;
+      const poses = animator.tickPoses(
+        step,
+        ent({ pos: [x, 0, 0], vel: [0, 0, 0] }),
+      );
+      peak = Math.max(peak, Math.abs(poses.get("leftleg")?.rotation[0] ?? 0));
+    }
+    expect(animator.horizontalBlocksPerSec).toBeGreaterThan(4);
+    expect(animator.horizontalBlocksPerSec).toBeLessThan(4.5);
+    // Vanilla scale is blocks/tick, so the leg formula stays a walk not a spin.
+    expect(animator.molangHost.query("modified_move_speed", [])).toBeCloseTo(
+      4.3 / 20,
+      1,
+    );
+    expect(
+      animator.molangHost.query("modified_distance_moved", []),
+    ).toBeCloseTo(4.3, 1);
+    expect(peak).toBeGreaterThan(8);
+    expect(peak).toBeLessThan(20);
+    expect(animator.molangHost.query("position_delta", [0])).toBeCloseTo(
+      bps * step,
+      5,
+    );
+
+    for (let i = 0; i < 20; i++) {
+      animator.tickPoses(step, ent({ pos: [x, 0, 0] }));
+    }
+    expect(animator.horizontalBlocksPerSec).toBeLessThan(0.2);
+    const stood = animator.tickPoses(step, ent({ pos: [x, 0, 0] }));
+    expect(Math.abs(stood.get("leftleg")?.rotation[0] ?? 0)).toBeLessThan(2);
+
+    const before = animator.molangHost.query(
+      "modified_distance_moved",
+      [],
+    ) as number;
+    animator.tickPoses(step, ent({ pos: [x + 10, 0, 0] }));
+    expect(
+      animator.molangHost.query("modified_distance_moved", []),
+    ).toBeCloseTo(before, 5);
+    expect(animator.horizontalBlocksPerSec).toBeLessThan(0.2);
+    // The jump itself is still the per-frame delta.
+    expect(animator.molangHost.query("position_delta", [0])).toBeCloseTo(10, 5);
+  });
+
+  test("runtime controller still plays a pack animation that is not a short name", () => {
+    const anims = parseAnimations({
+      format_version: "1.8.0",
+      animations: {
+        "animation.ball.capture": {
+          animation_length: 3,
+          bones: {
+            pokeball: {
+              rotation: {
+                "0.0": { post: [37.5, 0, 0], lerp_mode: "catmullrom" },
+                "0.4583": { post: [25, 0, 0], lerp_mode: "catmullrom" },
+              },
+              position: {
+                "0.0": { post: [0, 0, 0], lerp_mode: "catmullrom" },
+                "0.4583": { post: [0, 21.5, 5], lerp_mode: "catmullrom" },
+              },
+            },
+          },
+        },
+      },
+    });
+    // Full id is in the pack map. The client-entity short-name map does not
+    // have to list it for AnimateEntity to find it. `__runtime_controller`
+    // is not a resource-pack controller.
+    const bindings = buildAnimationBindings(
+      {},
+      { initialize: [], pre_animation: [], animate: [] },
+      anims,
+      new Map(),
+    );
+    const orig = performance.now.bind(performance);
+    let now = 18_800;
+    performance.now = () => now;
+    try {
+      const animator = new EntityAnimator(bindings, {
+        type: "pokeb:ball_catch",
+        player: false,
+        props: {},
+        flags: {},
+      });
+      animator.tickPoses(0.05, ent());
+      animator.playServerAnimation({
+        animation: "animation.ball.capture",
+        nextState: "success3",
+        stopExpression: "query.any_animation_finished",
+        controller: "__runtime_controller",
+        startSec: now / 1000,
+      });
+      expect(animator.serverAnimations()).toContain("animation.ball.capture");
+      expect(animator.controllerStates()).toEqual({});
+      const start = animator.tickPoses(0.05, ent());
+      expect(start.get("pokeball")?.rotation[0]).toBeCloseTo(37.5, 4);
+      now += 450;
+      const mid = animator.tickPoses(0.05, ent());
+      expect(mid.get("pokeball")?.position[1]).toBeGreaterThan(10);
+    } finally {
+      performance.now = orig;
+    }
+  });
+
+  test("runtime controller nextState plays that short-name animation after the stop", () => {
+    const anims = parseAnimations({
+      format_version: "1.8.0",
+      animations: {
+        "animation.ball.capture": {
+          animation_length: 1,
+          bones: {
+            pokeball: { position: { "0.0": [0, 4, 0], "1.0": [0, 4, 0] } },
+          },
+        },
+        "animation.ball.success3": {
+          animation_length: 2,
+          bones: {
+            pokeball: { rotation: { "0.0": [0, 0, 30], "2.0": [0, 0, 30] } },
+          },
+        },
+      },
+    });
+    const bindings = buildAnimationBindings(
+      {
+        capture: "animation.ball.capture",
+        success3: "animation.ball.success3",
+      },
+      { initialize: [], pre_animation: [], animate: [] },
+      anims,
+      new Map(),
+    );
+    const orig = performance.now.bind(performance);
+    let now = 10_000;
+    performance.now = () => now;
+    try {
+      const animator = new EntityAnimator(bindings, {
+        type: "pokeb:ball_catch",
+        player: false,
+        props: {},
+        flags: {},
+      });
+      animator.tickPoses(0.05, ent());
+      animator.playServerAnimation({
+        animation: "animation.ball.capture",
+        nextState: "success3",
+        stopExpression: "query.any_animation_finished",
+        controller: "__runtime_controller",
+        startSec: now / 1000,
+      });
+      expect(
+        animator.tickPoses(0.05, ent()).get("pokeball")?.rotation[2] ?? 0,
+      ).toBeCloseTo(0, 4);
+      now += 1500;
+      const shake = animator.tickPoses(0.05, ent()).get("pokeball");
+      expect(shake?.rotation[2]).toBeCloseTo(30, 4);
+      expect(shake?.position[1] ?? 0).toBeCloseTo(0, 4);
+      now += 2000;
+      expect(
+        animator.tickPoses(0.05, ent()).get("pokeball")?.rotation[2] ?? 0,
+      ).toBeCloseTo(0, 4);
     } finally {
       performance.now = orig;
     }

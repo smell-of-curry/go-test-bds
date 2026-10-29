@@ -321,7 +321,7 @@ type Entity struct {
 	UID        int64              `json:"uid"`
 	Type       string             `json:"type"`
 	Pos        [3]float64         `json:"pos"`
-	Rot        []float64          `json:"rot"`
+	Rot        []float64          `json:"rot"` // [yaw, pitch, headYaw] degrees; headYaw optional
 	Vel        [3]float64         `json:"vel"`
 	BBox       [2]float64         `json:"bbox"`
 	Name       string             `json:"name,omitempty"`

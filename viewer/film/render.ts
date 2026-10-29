@@ -3,6 +3,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { pathToFileURL, fileURLToPath } from "node:url";
 import { chromium, type Browser, type Page } from "playwright";
+import { sampleTrackPoints } from "./lookahead";
 import { boundToMs, outputTimes, parseBound } from "./time";
 
 export interface RenderFilmOptions {
@@ -21,6 +22,12 @@ export interface RenderFilmOptions {
   gpu?: boolean;
   hud?: boolean;
   nametags?: boolean;
+  /** Also hide these player names. Default none. */
+  hide?: string;
+  /** Draw the recording bot. Default hides it. */
+  showSelf?: boolean;
+  /** Pull later columns forward. Default on. */
+  lookahead?: boolean;
   /** Serve the Vite dev app instead of `appDir`. */
   dev?: boolean;
   /** Live hub origin. Misses are saved under `<take>/packs-mirror/`. */
@@ -92,6 +99,9 @@ export async function renderFilm(
     const q = new URLSearchParams({ film: "1", bot: opts.bot });
     if (opts.hud) q.set("hud", "1");
     if (opts.nametags) q.set("nametags", "1");
+    if (opts.showSelf) q.set("showSelf", "1");
+    if (opts.hide) q.set("hide", opts.hide);
+    if (opts.lookahead === false) q.set("lookahead", "0");
     await page.goto(`${server.url}/?${q.toString()}`, { waitUntil: "load" });
     await page.waitForFunction(
       () => window.__film?.loaded === true,
@@ -125,13 +135,37 @@ export async function renderFilm(
     if (fromMs < 0) fromMs = 0;
     if (toMs < 0) toMs = 0;
     const times = outputTimes(fromMs, toMs, opts.fps);
+    let track:
+      { t: number; pos: [number, number, number]; ease?: string }[] | null =
+      null;
     if (opts.cameraPath) {
-      const track = JSON.parse(await readText(opts.cameraPath)) as unknown;
-      if (!Array.isArray(track))
+      const parsed = JSON.parse(await readText(opts.cameraPath)) as unknown;
+      if (!Array.isArray(parsed))
         throw new Error("camera.json must be an array of keyframes");
+      track = parsed as {
+        t: number;
+        pos: [number, number, number];
+        ease?: string;
+      }[];
       await page.evaluate((keys) => {
         window.__film?.setCamera(keys as never);
       }, track);
+    }
+    if (opts.lookahead !== false) {
+      const cameraPoints = track
+        ? sampleTrackPoints(track, fromMs / 1000, toMs / 1000)
+        : [];
+      await page.evaluate(
+        (args) => {
+          window.__film?.prepareLookahead?.(args);
+        },
+        {
+          fromMs,
+          toMs,
+          cameraPoints,
+          enabled: true,
+        },
+      );
     }
 
     await page.evaluate((ms) => window.__film?.applyThrough(ms), fromMs);

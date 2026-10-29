@@ -109,6 +109,7 @@ interface MutableMesh {
   indices: number[];
   materialInstances: string[];
   faces: Array<CubeFaceName | "poly">;
+  decal: boolean;
 }
 
 /**
@@ -140,6 +141,7 @@ export function buildGeometryMeshes(
         indices: [],
         materialInstances: [],
         faces: [],
+        decal: false,
       };
       meshes.set(name, m);
     }
@@ -186,6 +188,7 @@ export function buildGeometryMeshes(
       indices: new Uint32Array(m.indices),
       materialInstances: m.materialInstances,
       faces: m.faces,
+      decal: m.decal,
     });
   }
   return out;
@@ -252,6 +255,14 @@ function appendCube(
     // Bedrock → three.js negates X (odd reflection) → flip winding once more.
     flipWinding = !flipWinding;
 
+    // Zero thickness: a perspective depth test loses these to the solid
+    // face they sit on. Flag the bone so the material polygon-offsets it.
+    const flat =
+      Math.abs(x1 - x0) < 1e-4 ||
+      Math.abs(y1 - y0) < 1e-4 ||
+      Math.abs(z1 - z0) < 1e-4;
+    if (flat) mesh.decal = true;
+
     const base = mesh.positions.length / 3;
     const order = flipWinding ? [0, 2, 1, 0, 3, 2] : [0, 1, 2, 0, 2, 3];
 
@@ -270,10 +281,6 @@ function appendCube(
     mesh.faces.push(face);
     // Paper sprites (size 0 on one axis) are a single plane. Cull would hide
     // whichever side faces the camera. Emit the opposite winding too.
-    const flat =
-      Math.abs(x1 - x0) < 1e-4 ||
-      Math.abs(y1 - y0) < 1e-4 ||
-      Math.abs(z1 - z0) < 1e-4;
     if (flat) {
       const back = flipWinding ? [0, 1, 2, 0, 2, 3] : [0, 2, 1, 0, 3, 2];
       for (const idx of back) mesh.indices.push(base + idx);

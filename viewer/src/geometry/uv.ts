@@ -86,6 +86,9 @@ export function resolveFaceUv(
       : face;
   const faceUv = perFace[mappedFace];
   if (faceUv === undefined) return null;
+  // uv_size 0 on either axis is an empty face (Charizard eye cubes author
+  // the unused sides this way). A 0-area UV still emits a quad.
+  if (faceUv.uvSize[0] === 0 || faceUv.uvSize[1] === 0) return null;
   return resolvePerFace(faceUv, textureWidth, textureHeight, mirror);
 }
 

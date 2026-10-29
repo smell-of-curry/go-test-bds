@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { filmFogRange, loadedDiscRadiusChunks } from "../film/fog";
 import type { CameraController } from "./camera";
 import { CloudField } from "./clouds";
 import {
@@ -8,6 +9,7 @@ import {
   buildItemSprite,
   builtinEmote,
   createLocomotion,
+  createMoveTrack,
   createNameTag,
   EMOTE_DURATION_SEC,
   EntityAnimator,
@@ -20,6 +22,7 @@ import {
   selectArmourLayers,
   selectHeldItem,
   setEntityLight,
+  stepHorizontalMove,
   tickDroppedItem,
   tickLocomotion,
   type BoneAnimPose,
@@ -27,6 +30,7 @@ import {
   type EntityModelRegistry,
   type ItemSprite,
   type LocomotionState,
+  type MoveTrack,
   type NameTagSprite,
 } from "./entity";
 import { isShadowEmpty, sampleCell } from "./entity/worldSample";
@@ -399,6 +403,8 @@ interface EntityNode {
   bornSec: number;
   /** Procedural walk-cycle / arm-swing state (viewer-side). */
   loco: LocomotionState;
+  /** Position-derived speed when this entity has no animator. */
+  move: MoveTrack;
   /** In-flight model load token — bumped to ignore stale async results. */
   loadToken: number;
   type: string;
@@ -444,10 +450,13 @@ export class ViewerScene {
   private readonly actorGroup: THREE.Group;
   private readonly actorWire: THREE.LineSegments;
   private actorModel: BuiltEntityModel | null = null;
+  /** Vanilla player animations, when the pack has `minecraft:player`. */
+  private actorAnimator: EntityAnimator | null = null;
+  /** Position-derived walk speed when the actor has no animator. */
+  private readonly actorMove = createMoveTrack();
   private actorLoadToken = 0;
   /** Walk-cycle state for the observed bot body. */
   private readonly actorLoco = createLocomotion();
-  private lastActorPos: [number, number, number] | null = null;
   private lastActorTickMs = 0;
   private entityRegistry: EntityModelRegistry | null = null;
   private readonly pendingSections: string[] = [];
@@ -466,6 +475,15 @@ export class ViewerScene {
   nameTagsEnabled = true;
 
   /**
+   * Film sets this so fog ends at the loaded radius from the camera
+   * (start at 65%) instead of the live 50%–92% stream-radius fog.
+   */
+  filmFog = false;
+
+  /** Rids skipped by tick/name-tag/shadow (recording bot, `--hide`). */
+  private hiddenEntityRids = new Set<number>();
+
+  /**
    * Alias of {@link nameTagsEnabled} for film mode (`showNameTags = false`).
    */
   get showNameTags(): boolean {
@@ -474,6 +492,20 @@ export class ViewerScene {
 
   set showNameTags(value: boolean) {
     this.nameTagsEnabled = value;
+  }
+
+  /**
+   * Replace the set of entities that must not draw. The set is read every
+   * frame; pass a new set rather than mutating the previous one.
+   *
+   * @param rids - Runtime ids to hide (body, name tag, shadow).
+   */
+  setHiddenEntityRids(rids: ReadonlySet<number>): void {
+    this.hiddenEntityRids = new Set(rids);
+  }
+
+  private entityDrawHidden(rid: number): boolean {
+    return this.hiddenEntityRids.has(rid);
   }
   private actorWantedVisible = false;
   private skyMesh: THREE.Mesh | null = null;
@@ -665,7 +697,13 @@ export class ViewerScene {
    */
   flush(state: WorldState, budgetMs: number = Number.POSITIVE_INFINITY): void {
     this.storeRef = state;
-    if (this.worldClearPending) this.drainWorldClear();
+    // Infinite budget finishes a keyframe wipe. A short budget stays at one
+    // batch so a live capture cannot wedge the rAF loop.
+    if (!Number.isFinite(budgetMs)) {
+      while (this.worldClearPending) this.drainWorldClear();
+    } else if (this.worldClearPending) {
+      this.drainWorldClear();
+    }
     const start = performance.now();
     while (this.pendingSections.length > 0) {
       if (Number.isFinite(budgetMs) && performance.now() - start >= budgetMs) {
@@ -702,19 +740,39 @@ export class ViewerScene {
         ? Math.min(0.25, (now - this.lastActorTickMs) / 1000)
         : 0;
       this.lastActorTickMs = now;
-      let speed = 0;
-      if (this.lastActorPos && dtSec > 0) {
-        speed =
-          Math.hypot(
-            actorPos[0] - this.lastActorPos[0],
-            actorPos[2] - this.lastActorPos[2],
-          ) / dtSec;
-      }
-      this.lastActorPos = [actorPos[0], actorPos[1], actorPos[2]];
-      tickLocomotion(this.actorLoco, dtSec, speed, 0);
       const poses = new Map<string, BoneAnimPose>();
+      let speed = 0;
+      let headPitch = rot[1] ?? 0;
+      if (this.actorAnimator) {
+        poses.clear();
+        const walked = this.actorAnimator.tick(
+          dtSec,
+          {
+            type: "minecraft:player",
+            player: true,
+            pos: actorPos,
+            rot,
+            vel: [0, 0, 0],
+            flags: {},
+            props: {},
+            attributes: {},
+          },
+          null,
+        );
+        for (const [name, pose] of walked) poses.set(name, pose);
+        speed = this.actorAnimator.horizontalBlocksPerSec;
+        if (this.actorAnimator.drivesHead()) headPitch = 0;
+      } else {
+        speed = stepHorizontalMove(
+          this.actorMove,
+          actorPos,
+          dtSec,
+          [0, 0, 0],
+        ).blocksPerSec;
+      }
+      tickLocomotion(this.actorLoco, dtSec, speed, 0);
       addLocomotionPoses(this.actorLoco, this.actorModel.bones.keys(), poses);
-      applyBonePoses(this.actorModel.bones, poses, rot[1] ?? 0);
+      applyBonePoses(this.actorModel.bones, poses, headPitch);
       applyEntityYaw(this.actorModel.root, rot[0]);
     } else if (rot) {
       // Wireframe-only: yaw the whole actor group.
@@ -862,6 +920,13 @@ export class ViewerScene {
     for (const [rid, ent] of entities) {
       const node = this.entities.get(rid);
       if (!node) continue;
+      if (this.entityDrawHidden(rid)) {
+        node.group.visible = false;
+        node.nameTag.setVisible(false);
+        node.shadow.hide();
+        continue;
+      }
+      node.group.visible = this.worldVisible;
       node.lifeSec += dtSec;
       node.group.position.set(ent.pos[0], ent.pos[1], ent.pos[2]);
       if (ent.type === "minecraft:item" && node.itemSprite) {
@@ -871,15 +936,14 @@ export class ViewerScene {
         const poses: Map<string, BoneAnimPose> = node.animator
           ? node.animator.tick(dtSec, ent, null)
           : new Map();
-        tickLocomotion(
-          node.loco,
-          dtSec,
-          Math.hypot(ent.vel[0], ent.vel[2]),
-          ent.swing ?? 0,
-        );
+        const speed = node.animator
+          ? node.animator.horizontalBlocksPerSec
+          : stepHorizontalMove(node.move, ent.pos, dtSec, ent.vel).blocksPerSec;
+        tickLocomotion(node.loco, dtSec, speed, ent.swing ?? 0);
         addLocomotionPoses(node.loco, node.model.bones.keys(), poses);
         this.applyEmote(ent, poses);
-        applyBonePoses(node.model.bones, poses, ent.rot[1] ?? 0);
+        const headPitch = node.animator?.drivesHead() ? 0 : (ent.rot[1] ?? 0);
+        applyBonePoses(node.model.bones, poses, headPitch);
         applyEntityYaw(node.model.root, ent.rot[0]);
         setEntityLight(node.model.root, this.entityBrightness(ent.pos));
       } else {
@@ -921,6 +985,7 @@ export class ViewerScene {
 
   render(camera: CameraController): void {
     const camPos = camera.perspective.position;
+    if (this.filmFog) this.applyFilmFog(camPos);
     if (this.skyMesh) this.skyMesh.position.copy(camPos);
     if (this.celestialRoot) this.celestialRoot.position.copy(camPos);
     // Drift only once world time exists, so goldens (absent time) stay put.
@@ -1114,6 +1179,7 @@ export class ViewerScene {
         animator: null,
         pendingAnims: [],
         loco: createLocomotion(),
+        move: createMoveTrack(),
         loadToken: 0,
         type: ent.type,
         nameTag,
@@ -1161,6 +1227,11 @@ export class ViewerScene {
     }
     node.nameTag.setText(ent.name || "");
     this.syncEntityGear(node, ent);
+    if (this.entityDrawHidden(ent.rid)) {
+      node.group.visible = false;
+      node.nameTag.setVisible(false);
+      node.shadow.hide();
+    }
   }
 
   private removeEntity(rid: number): void {
@@ -1227,7 +1298,12 @@ export class ViewerScene {
         node.group.add(model.root);
         // Model owns yaw; clear group yaw so we don't double-apply.
         node.group.rotation.set(0, 0, 0);
-        registry.applyPose(model, ent.rot);
+        const bindings = registry.getAnimationBindings(ent.type);
+        const drivesHead =
+          !!bindings &&
+          (Object.keys(bindings.shortNames).length > 0 ||
+            bindings.scripts.animate.length > 0);
+        registry.applyPose(model, ent.rot, { headPitch: !drivesHead });
         node.animator = this.createAnimator(
           ent,
           node.bornSec,
@@ -1443,6 +1519,19 @@ export class ViewerScene {
           this.actorModel.dispose();
         }
         this.actorModel = model;
+        const bindings = registry.getAnimationBindings("minecraft:player");
+        this.actorAnimator = bindings
+          ? new EntityAnimator(
+              bindings,
+              {
+                type: "minecraft:player",
+                player: true,
+                props: {},
+                flags: {},
+              },
+              performance.now() / 1000,
+            )
+          : null;
         this.actorWire.visible = false;
         this.actorGroup.rotation.set(0, 0, 0);
         this.actorGroup.add(model.root);
@@ -1505,7 +1594,13 @@ export class ViewerScene {
       const ent = this.storeRef?.entities.get(node.rid);
       const text = ent?.name ?? "";
       const sneaking = !!ent?.flags?.sneaking;
-      if (!this.nameTagsEnabled || !this.worldVisible || !text || sneaking) {
+      if (
+        this.entityDrawHidden(node.rid) ||
+        !this.nameTagsEnabled ||
+        !this.worldVisible ||
+        !text ||
+        sneaking
+      ) {
         node.nameTag.setVisible(false);
         continue;
       }
@@ -1889,13 +1984,46 @@ export class ViewerScene {
   }
 
   /**
-   * Project the blob shadow. Items and a hidden world get none.
+   * Film fog ends at the loaded disc around the camera (at most the stream
+   * radius) and starts at 65% of it. The disc is an area measure, so one
+   * missing neighbour does not pull it in and fog out the subject.
+   *
+   * @param camPos - Camera position in blocks.
+   */
+  private applyFilmFog(camPos: THREE.Vector3): void {
+    const fog = this.scene.fog;
+    if (!(fog instanceof THREE.Fog)) return;
+    const maxChunks = this.envRadiusBlocks / 16;
+    const cols = this.storeRef?.columns;
+    const disc =
+      cols && cols.size > 0
+        ? loadedDiscRadiusChunks(
+            cols.keys(),
+            Math.floor(camPos.x / 16),
+            Math.floor(camPos.z / 16),
+            maxChunks,
+          )
+        : maxChunks;
+    // Quarter-chunk steps so a column arriving mid-shot does not re-fog every frame.
+    const range = filmFogRange(Math.round(disc * 4) * 4);
+    if (fog.near === range.near && fog.far === range.far) return;
+    fog.near = range.near;
+    fog.far = range.far;
+    this.applyFogToMesher(fog);
+  }
+
+  /**
+   * Project the blob shadow. Items, a hidden world, and a hidden entity get none.
    *
    * @param node - Entity node.
    * @param ent - Latest pose.
    */
   private updateEntityShadow(node: EntityNode, ent: Entity): void {
-    if (!this.worldVisible || ent.type === "minecraft:item") {
+    if (
+      this.entityDrawHidden(node.rid) ||
+      !this.worldVisible ||
+      ent.type === "minecraft:item"
+    ) {
       node.shadow.hide();
       return;
     }

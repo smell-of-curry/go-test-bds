@@ -16,6 +16,10 @@ Render a recorded take offline, frame-exact, with no live bot.
   --gpu                 ANGLE Metal. Default is SwiftShader
   --hud                 Keep the game HUD (hidden by default)
   --nametags            Keep name tags (hidden by default)
+  --hide <name,...>     Also hide these player names (default none)
+  --show-self           Draw the recording bot (hidden by default)
+  --lookahead           Show later chunks from the start of the window (default)
+  --no-lookahead        Stream chunks as the bot received them
   --dev                 Serve the Vite app instead of viewer/dist
   --app <dir>           Built app directory (default viewer/dist)
   --packs-from <url>    Mirror hub pack responses into <take>/packs-mirror/
@@ -42,6 +46,9 @@ interface Flags {
   gpu: boolean;
   hud: boolean;
   nametags: boolean;
+  hide?: string;
+  showSelf: boolean;
+  lookahead: boolean;
   dev: boolean;
   app?: string;
   packsFrom?: string;
@@ -61,6 +68,8 @@ function parseArgs(argv: string[]): Flags {
     gpu: false,
     hud: false,
     nametags: false,
+    showSelf: false,
+    lookahead: true,
     dev: false,
     help: false,
   };
@@ -85,6 +94,22 @@ function parseArgs(argv: string[]): Flags {
     }
     if (a === "--nametags") {
       flags.nametags = true;
+      continue;
+    }
+    if (a === "--show-self") {
+      flags.showSelf = true;
+      continue;
+    }
+    if (a === "--lookahead") {
+      flags.lookahead = true;
+      continue;
+    }
+    if (a === "--no-lookahead") {
+      flags.lookahead = false;
+      continue;
+    }
+    if (a === "--hide") {
+      flags.hide = next(++i, a);
       continue;
     }
     if (a === "--dev") {
@@ -163,6 +188,9 @@ async function main(): Promise<void> {
     gpu: flags.gpu,
     hud: flags.hud,
     nametags: flags.nametags,
+    hide: flags.hide,
+    showSelf: flags.showSelf,
+    lookahead: flags.lookahead,
     dev: flags.dev,
     appDir: flags.app,
     packsFrom: flags.packsFrom,

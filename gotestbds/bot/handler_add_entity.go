@@ -19,9 +19,11 @@ func (*AddEntityHandler) Handle(p packet.Packet, b *Bot, a *actor.Actor) error {
 	switch pk := p.(type) {
 	case *packet.AddActor:
 		rot = cube.Rotation{float64(pk.Yaw), float64(pk.Pitch)}
+		setHeadYaw(ent, float64(pk.HeadYaw))
 		setProperties(ent, pk.EntityProperties)
 	case *packet.AddPlayer:
 		rot = cube.Rotation{float64(pk.Yaw), float64(pk.Pitch)}
+		setHeadYaw(ent, float64(pk.HeadYaw))
 		setProperties(ent, pk.EntityProperties)
 	}
 	ent.Move(entity.FeetOf(ent, ent.Position()), rot)

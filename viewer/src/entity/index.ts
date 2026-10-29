@@ -54,6 +54,17 @@ export {
   type AnimationBindings,
   type ServerAnimRequest,
 } from "./controllerRuntime";
+export {
+  createMoveTrack,
+  headLookFromRot,
+  stepHorizontalMove,
+  SPEED_TAU_SEC,
+  TELEPORT_BLOCKS,
+  TICKS_PER_SEC,
+  type HeadLook,
+  type MoveSample,
+  type MoveTrack,
+} from "./moveSpeed";
 export { createEntityMolangHost } from "./queries";
 export {
   expandMaterialRef,

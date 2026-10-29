@@ -16,8 +16,12 @@
  * `GET /film/sse?bot=` returns `<take>/<bot>.sse` (or `.jsonl`) as a finite
  * body. Film mode fetches that; it does not use EventSource.
  */
+import { once } from "node:events";
 import { createServer } from "node:http";
-import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { pipeline } from "node:stream/promises";
+import { createReadStream, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { open } from "node:fs/promises";
+import { createInterface } from "node:readline";
 import { dirname, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -93,13 +97,9 @@ export async function startFilmServer(opts) {
 
     if (path === "/film/sse") {
       const bot = url.searchParams.get("bot") ?? "";
-      const body = readTakeSse(takeDir, bot);
-      if (body == null) return end(res, 404, `no SSE for bot ${bot}`);
-      res.writeHead(200, {
-        "Content-Type": "text/plain; charset=utf-8",
-        "Cache-Control": "no-store",
-      });
-      res.end(body);
+      const file = takeSseFile(takeDir, bot);
+      if (!file) return end(res, 404, `no SSE for bot ${bot}`);
+      await pipeTakeSse(res, file);
       return;
     }
     if (path === "/packs") {
@@ -192,30 +192,68 @@ export async function startFilmServer(opts) {
 /**
  * @param {string} takeDir
  * @param {string} bot
- * @returns {string | null}
+ * @returns {string} path, or "" when the take has neither file
  */
-function readTakeSse(takeDir, bot) {
+function takeSseFile(takeDir, bot) {
   const sse = join(takeDir, `${bot}.sse`);
   const jsonl = join(takeDir, `${bot}.jsonl`);
-  const file = existsSync(sse) ? sse : existsSync(jsonl) ? jsonl : "";
-  if (!file) return null;
-  const text = readFileSync(file, "utf8");
-  const trimmed = text.trimStart();
-  if (
-    trimmed.startsWith("event:") ||
-    trimmed.startsWith("data:") ||
-    trimmed.startsWith(":")
-  ) {
-    return text;
+  if (existsSync(sse)) return sse;
+  if (existsSync(jsonl)) return jsonl;
+  return "";
+}
+
+/**
+ * SSE files are piped. JSONL is rewritten line by line. Neither path builds
+ * one string, so a take past V8's ~512MB string cap still serves.
+ *
+ * @param {import('node:http').ServerResponse} res
+ * @param {string} file
+ */
+async function pipeTakeSse(res, file) {
+  const kind = await peekTakeKind(file);
+  res.writeHead(200, {
+    "Content-Type": "text/plain; charset=utf-8",
+    "Cache-Control": "no-store",
+  });
+  if (kind === "sse") {
+    await pipeline(createReadStream(file), res);
+    return;
   }
-  const frames = text
-    .split(/\n/)
-    .map((l) => l.trim())
-    .filter((l) => l.length > 0)
-    .map((l) => JSON.parse(l));
-  return frames
-    .map((f) => `event: ${f.type ?? "message"}\ndata: ${JSON.stringify(f)}\n\n`)
-    .join("");
+  const rl = createInterface({
+    input: createReadStream(file),
+    crlfDelay: Infinity,
+  });
+  for await (const line of rl) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    const frame = JSON.parse(trimmed);
+    const chunk = `event: ${frame.type ?? "message"}\ndata: ${JSON.stringify(frame)}\n\n`;
+    if (!res.write(chunk)) await once(res, "drain");
+  }
+  res.end();
+}
+
+/**
+ * @param {string} file
+ * @returns {Promise<"sse" | "jsonl">}
+ */
+async function peekTakeKind(file) {
+  const fh = await open(file, "r");
+  try {
+    const buf = Buffer.alloc(128);
+    const { bytesRead } = await fh.read(buf, 0, 128, 0);
+    const head = buf.subarray(0, bytesRead).toString("utf8").trimStart();
+    if (
+      head.startsWith("event:") ||
+      head.startsWith("data:") ||
+      head.startsWith(":")
+    ) {
+      return "sse";
+    }
+    return "jsonl";
+  } finally {
+    await fh.close();
+  }
 }
 
 /**

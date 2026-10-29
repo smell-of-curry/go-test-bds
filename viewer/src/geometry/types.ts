@@ -130,4 +130,10 @@ export interface BoneMeshBuffers {
   materialInstances: string[];
   /** Face name per quad when the source was a cube face; `poly` otherwise. */
   faces: Array<CubeFaceName | "poly">;
+  /**
+   * True when a cube had a zero-size axis (eye planes, paper sprites).
+   * Those faces sit on a solid neighbour and lose a perspective depth test
+   * unless the material pulls them forward.
+   */
+  decal: boolean;
 }

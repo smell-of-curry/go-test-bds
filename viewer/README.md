@@ -110,6 +110,9 @@ npm run film -- render \
 | Flag | Default | Notes |
 | --- | --- | --- |
 | `--from` / `--to` | required | Seconds (`1.5`, `1.5s`) or absolute server ticks (`30t`, `30tick`). The range is half-open. Tick `0` of the take is the first keyframe, so `--from 0` and `--from <that tick>t` are the same instant |
+| `--hide <name,...>` | none | Also omit these player entities (body, name tag, shadow) |
+| `--show-self` | off | Draw the recording bot. Default hides `actor.rid` for the whole take, including rejoins |
+| `--lookahead` / `--no-lookahead` | on | In-camera columns that arrive later in the take are shown from the start of the window at their first version. Later block edits still apply on time. Columns the bot walks away from stay up through `--to` |
 | `--width` / `--height` / `--fps` | `1080` / `1920` / `60` | `devicePixelRatio` is 1. Odd sizes are padded by one pixel only when encoding yuv420p |
 | `--out` | required | A directory of `frame_%05d.png` (from 0), or a `.mp4` (H.264 yuv420p CRF 16, no audio; PNGs in `frames/` beside it) |
 | `--gpu` | SwiftShader | ANGLE Metal / the default GPU |

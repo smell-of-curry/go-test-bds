@@ -577,18 +577,17 @@ func (s *Stream) frameFor(sub *subscriber, cur *viewState, shared Delta, a *acto
 			d.ColumnsState = append(d.ColumnsState, st)
 		}
 	}
+	// A teleport changes tens of thousands of blocks in one tick; scanning the
+	// batch per block stalled the tick loop for seconds and dropped packets.
+	inBatch := make(map[[2]int32]struct{}, len(batch))
+	for _, b := range batch {
+		inBatch[b] = struct{}{}
+	}
 	for _, bc := range shared.Blocks {
 		key := [2]int32{int32(bc.Pos[0] >> 4), int32(bc.Pos[2] >> 4)}
 		// Skip block patches for columns this frame re-sends whole — the
 		// column payload already has the new blocks + light.
-		inBatch := false
-		for _, b := range batch {
-			if b == key {
-				inBatch = true
-				break
-			}
-		}
-		if inBatch {
+		if _, ok := inBatch[key]; ok {
 			continue
 		}
 		if _, ok := claimed[key]; ok {

@@ -20,6 +20,21 @@ import type { ResolvedControllerPass } from "./types";
 /** Alpha cutout threshold for entity skins (transparent texels discarded). */
 export const ENTITY_ALPHA_TEST = DEFAULT_ENTITY_MATERIAL.alphaTest;
 
+/**
+ * Copy a material and pull it toward the camera in the depth buffer.
+ * Used for zero-thickness faces (eyes) that sit on a solid cube.
+ *
+ * @param base - Shared bone material.
+ * @returns cloned material with polygon offset.
+ */
+function decalMaterial(base: THREE.Material): THREE.Material {
+  const mat = base.clone();
+  mat.polygonOffset = true;
+  mat.polygonOffsetFactor = -4;
+  mat.polygonOffsetUnits = -4;
+  return mat;
+}
+
 /** Disposable handle for a built entity model root. */
 export interface BuiltEntityModel {
   /** Root group (bones parented underneath). Position at entity feet. */
@@ -162,9 +177,14 @@ export function buildEntityModel(
     geo.setIndex(new THREE.BufferAttribute(boneMesh.indices, 1));
     disposables.push(geo);
 
-    const mesh = new THREE.Mesh(geo, material);
+    // Flat eye/paper planes share the body material, so a shared polygon
+    // offset would not separate them. Clone and pull only the decal forward.
+    const meshMat = boneMesh.decal ? decalMaterial(material) : material;
+    if (meshMat !== material) disposables.push(meshMat);
+    const mesh = new THREE.Mesh(geo, meshMat);
     mesh.name = `mesh:${boneMesh.boneName}`;
     mesh.frustumCulled = false;
+    if (boneMesh.decal) mesh.renderOrder = 2;
     boneGroup.add(mesh);
   }
 

@@ -87,6 +87,23 @@ func subChunkCount(levelChunk *packet.LevelChunk, r cube.Range) (int, bool) {
 	return min(int(levelChunk.SubChunkCount), max), false
 }
 
+// retryStuckColumns asks again for columns that got no sub-chunk in a whole
+// chunk-health window.
+func (b *Bot) retryStuckColumns() {
+	dimID := b.a.Dimension()
+	dim, ok := w.DimensionByID(int(dimID))
+	if !ok {
+		dim = w.Overworld
+	}
+	for _, pos := range b.chunks.stuck(b.a) {
+		col, ok := b.a.World().Chunk(pos)
+		if !ok || col.PendingSubChunks() <= 0 {
+			continue
+		}
+		_ = b.requestSubchunks(dim.Range(), dimID, protocol.ChunkPos(pos), col.PendingSubChunks())
+	}
+}
+
 // requestSubchunks requests subchunks from the server.
 //
 // @param r The vertical range of the chunk's dimension.

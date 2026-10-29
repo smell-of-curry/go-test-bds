@@ -246,17 +246,19 @@ export class EntityModelRegistry {
   }
 
   /**
-   * Apply yaw (and head pitch when a head bone exists) to a built model.
+   * Apply yaw, and head pitch when the client entity does not animate.
    *
    * @param model - Built model.
    * @param rot - `[yaw, pitch]` or `[yaw, pitch, headYaw]` degrees.
+   * @param opts.headPitch - When false, leave the head to animations.
    */
   applyPose(
     model: BuiltEntityModel,
     rot: [number, number] | [number, number, number],
+    opts?: { headPitch?: boolean },
   ): void {
     applyEntityYaw(model.root, rot[0]);
-    applyHeadPitch(model.bones, rot[1]);
+    if (opts?.headPitch !== false) applyHeadPitch(model.bones, rot[1]);
   }
 
   /** Drop caches (tests). */

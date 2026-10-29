@@ -35,5 +35,8 @@ func (MoveActorDeltaHandler) Handle(p packet.Packet, _ *Bot, a *actor.Actor) err
 		rot[0] = float64(yaw)
 	}
 	ent.Move(pos, rot)
+	if yaw, ok := pk.RotationYHead.Value(); ok {
+		setHeadYaw(ent, float64(yaw))
+	}
 	return nil
 }
