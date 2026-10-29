@@ -49,14 +49,30 @@ export interface AtlasUv {
   px: AtlasRect;
 }
 
+/** Biome tint channel. Birch/spruce/mangrove/dry are block-fixed, not per-face. */
+export type TintChannel =
+  | "none"
+  | "grass"
+  | "foliage"
+  | "water"
+  | "birch"
+  | "spruce"
+  | "mangrove"
+  | "dry";
+
 /** Per-face appearance after state resolution. */
 export interface FaceAppearance {
   /** Terrain texture short-name (atlas key), or fallback sentinel. */
   texture: string;
   /** Optional biome tint channel. */
-  tint: "none" | "grass" | "foliage" | "water";
+  tint: TintChannel;
   /** UV rotation in 90° steps (0..3), applied in mesher. */
   rotation: 0 | 1 | 2 | 3;
+  /**
+   * Grass-side style: alpha is a biome-tint mask, not a hole.
+   * The atlas splits these into a dirt tile plus a `#overlay` tile.
+   */
+  overlay?: boolean;
 }
 
 /** Cube model: one appearance per cardinal face. */
@@ -66,6 +82,11 @@ export interface CubeModel {
     FaceAppearance
   >;
   renderClass: RenderClass;
+  /**
+   * `cross` is vanilla's flower X (two 45° quads). Omitted = unit cube.
+   * Crosses do not occlude neighbours.
+   */
+  shape?: "cube" | "cross";
   /**
    * Vertical extent inside the cell, in blocks. Omitted = full cube (0..1),
    * which occludes neighbours. A partial box (carpet) does not.
@@ -134,6 +155,11 @@ export interface CustomGeometryHook {
 export interface TerrainVariation {
   path: string;
   weight: number;
+  /**
+   * `terrain_texture.json` `overlay_color`: alpha is a tint mask (grass side),
+   * not transparency. The atlas splits the tile.
+   */
+  overlay?: boolean;
 }
 
 /** One terrain_texture.json texture_data entry (resolved). */

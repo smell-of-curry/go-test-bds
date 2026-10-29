@@ -29,8 +29,8 @@ const loggedMiss = new Set<string>();
 
 /**
  * Engine-built-in block geometry that never ships as a pack `.geo.json`.
- * `full_block` is the plain cube; `cross` is the flower X (drawn as a cube
- * here — ponytail: proper cross shape rides the custom-geometry path later).
+ * `full_block` is the plain cube. `cross` is the flower X, meshed by
+ * {@link crossQuadsAt} (not a `.geo.json` and not a cube).
  *
  * @param id - `geometry.*` identifier, optionally namespaced.
  * @returns true when the id names an engine built-in.
@@ -38,6 +38,67 @@ const loggedMiss = new Set<string>();
 export function isBuiltinBlockGeometry(id: string): boolean {
   const bare = id.replace(/^[^:]+:/, "").toLowerCase();
   return bare === "geometry.full_block" || bare === "geometry.cross";
+}
+
+/**
+ * @param id - `geometry.*` identifier, optionally namespaced.
+ * @returns true for vanilla's crossed-quad plant geometry.
+ */
+export function isCrossGeometryId(id: string): boolean {
+  const bare = id.replace(/^[^:]+:/, "").toLowerCase();
+  return bare === "geometry.cross";
+}
+
+/** One diagonal of a cross plant. The terrain material is double-sided. */
+export interface CrossQuad {
+  /** Four corners, CCW, y spanning the full cell. */
+  corners: Array<[number, number, number]>;
+  /** Tile UVs. v = 0 at the bottom of the texture, v = 1 at the top. */
+  uvs: Array<[number, number]>;
+  /** Back face comes from the double-sided terrain material, not a second quad. */
+  doubleSided: true;
+}
+
+const CROSS_UV: Array<[number, number]> = [
+  [0, 0],
+  [1, 0],
+  [1, 1],
+  [0, 1],
+];
+
+/**
+ * Vanilla `geometry.cross`: two full-height quads on the cell diagonals (45°).
+ * Tall-grass top and bottom each occupy their own cell, so both halves use this.
+ *
+ * @param x - World block X (cell origin).
+ * @param y - World block Y.
+ * @param z - World block Z.
+ * @returns two quads. Not a cube (no axis-aligned faces).
+ */
+export function crossQuadsAt(x: number, y: number, z: number): CrossQuad[] {
+  const y1 = y + 1;
+  return [
+    {
+      doubleSided: true,
+      uvs: CROSS_UV,
+      corners: [
+        [x, y, z],
+        [x + 1, y, z + 1],
+        [x + 1, y1, z + 1],
+        [x, y1, z],
+      ],
+    },
+    {
+      doubleSided: true,
+      uvs: CROSS_UV,
+      corners: [
+        [x, y, z + 1],
+        [x + 1, y, z],
+        [x + 1, y1, z],
+        [x, y1, z + 1],
+      ],
+    },
+  ];
 }
 
 /**

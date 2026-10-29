@@ -15,6 +15,7 @@ import {
 } from "./merge";
 import { BlockModelResolver } from "./resolve";
 import { TexturedMesher } from "./mesher";
+import { loadBiomeColormaps } from "./biome";
 import {
   diagnosePaletteCoverage,
   textureNamesFromRegistries,
@@ -72,6 +73,11 @@ export {
   normalizeBiomeId,
   biomeIdAt,
   biomeAtFromState,
+  loadBiomeColormaps,
+  setBiomeColormaps,
+  colormapCoords,
+  sampleColormap,
+  climateFor,
 } from "./biome";
 export {
   lightBrightness,
@@ -108,6 +114,8 @@ export {
   emitCustomBlockTris,
   blockGeometryPathCandidates,
   renderClassFromComponents,
+  crossQuadsAt,
+  isCrossGeometryId,
 } from "./customGeometry";
 export {
   blockEntityKind,
@@ -196,6 +204,7 @@ export async function createTexturedMesher(
   }
   const client = new AssetClient(baseUrl);
   await client.getIndex();
+  const colormaps = loadBiomeColormaps(client);
 
   const blockLayers = await client.fetchJsonLayers("blocks.json");
   if (blockLayers.length === 0) {
@@ -229,6 +238,7 @@ export async function createTexturedMesher(
   const geometryCache = new BlockGeometryCache(client);
   await geometryCache.preloadFromRegistries(opts.registries ?? null);
   resolver.setGeometryCache(geometryCache);
+  await colormaps;
   const mesher = new TexturedMesher(atlas, resolver, {
     biomeAt: opts.biomeAt ?? null,
     customGeometry: opts.customGeometry ?? null,

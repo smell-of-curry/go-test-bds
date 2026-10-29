@@ -1,4 +1,5 @@
 import type { AssetClient } from "./assetClient";
+import { decodeTga } from "./tga";
 import {
   flipbookFrameAt,
   parseFlipbookJson,
@@ -308,6 +309,26 @@ export async function buildTerrainAtlas(
 
   for (const name of needed) {
     if (loaded.has(name)) continue;
+    if (!name.includes("#") && textureUsesOverlay(terrain, name)) {
+      const split = await loadSplitOverlay(client, name, terrain);
+      if (split) {
+        images.push({
+          id: name,
+          w: split.base.width,
+          h: split.base.height,
+          bitmap: split.base,
+        });
+        images.push({
+          id: `${name}#overlay`,
+          w: split.over.width,
+          h: split.over.height,
+          bitmap: split.over,
+        });
+        loaded.add(name);
+        loaded.add(`${name}#overlay`);
+        continue;
+      }
+    }
     const bitmap = await loadTileBitmap(client, name, terrain, flipbooks);
     if (!bitmap) continue;
     images.push({ id: name, w: bitmap.width, h: bitmap.height, bitmap });
@@ -374,6 +395,113 @@ async function loadTileBitmap(
   }
   if (hashIdx < 0) return client.fetchImage(`textures/blocks/${base}`);
   return null;
+}
+
+function textureUsesOverlay(
+  terrain: Record<string, TerrainTextureEntry>,
+  name: string,
+): boolean {
+  const entry = terrain[name];
+  return !!entry?.paths.some((p) => p.overlay);
+}
+
+/**
+ * Grass-side textures store the dirt in RGB with alpha 0 and the tint mask
+ * in the opaque pixels. Split them so the canvas blit (which drops RGB of
+ * transparent pixels) keeps both: dirt tile + grayscale overlay tile.
+ *
+ * @param client - Asset client.
+ * @param name - Terrain short-name.
+ * @param terrain - Parsed terrain_texture data.
+ * @returns two bitmaps, or null when the source has no mask.
+ */
+async function loadSplitOverlay(
+  client: AssetClient,
+  name: string,
+  terrain: Record<string, TerrainTextureEntry>,
+): Promise<{ base: ImageBitmap; over: ImageBitmap } | null> {
+  const path = terrain[name]?.paths[0]?.path;
+  if (!path) return null;
+  const raw = await loadRawRgba(client, path);
+  if (!raw) return null;
+  const split = splitOverlayRgba(raw.rgba);
+  if (!split) return null;
+  const [base, over] = await Promise.all([
+    bitmapFromRgba(raw.width, raw.height, split.base),
+    bitmapFromRgba(raw.width, raw.height, split.over),
+  ]);
+  return { base, over };
+}
+
+function splitOverlayRgba(
+  rgba: Uint8ClampedArray,
+): { base: Uint8ClampedArray; over: Uint8ClampedArray } | null {
+  let low = false;
+  let high = false;
+  for (let i = 3; i < rgba.length; i += 4) {
+    if (rgba[i]! < 16) low = true;
+    else if (rgba[i]! > 240) high = true;
+    if (low && high) break;
+  }
+  if (!low || !high) return null;
+  const base = new Uint8ClampedArray(rgba.length);
+  const over = new Uint8ClampedArray(rgba.length);
+  for (let i = 0; i < rgba.length; i += 4) {
+    const a = rgba[i + 3]!;
+    if (a > 240) {
+      over[i] = rgba[i]!;
+      over[i + 1] = rgba[i + 1]!;
+      over[i + 2] = rgba[i + 2]!;
+      over[i + 3] = 255;
+    } else {
+      base[i] = rgba[i]!;
+      base[i + 1] = rgba[i + 1]!;
+      base[i + 2] = rgba[i + 2]!;
+      base[i + 3] = 255;
+    }
+  }
+  return { base, over };
+}
+
+async function bitmapFromRgba(
+  width: number,
+  height: number,
+  rgba: Uint8ClampedArray,
+): Promise<ImageBitmap> {
+  const canvas = new OffscreenCanvas(width, height);
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("2d unavailable");
+  const pixels = new Uint8ClampedArray(rgba) as Uint8ClampedArray<ArrayBuffer>;
+  ctx.putImageData(new ImageData(pixels, width, height), 0, 0);
+  return createImageBitmap(canvas);
+}
+
+async function loadRawRgba(
+  client: AssetClient,
+  path: string,
+): Promise<{ width: number; height: number; rgba: Uint8ClampedArray } | null> {
+  const bare = path.replace(/\.(png|tga)$/i, "");
+  const tga = await client.fetchBytes(`${bare}.tga`);
+  if (tga) {
+    const decoded = decodeTga(tga);
+    if (decoded) return decoded;
+  }
+  const png = await client.fetchBytes(`${bare}.png`);
+  if (!png) return null;
+  const bmp = await createImageBitmap(new Blob([png], { type: "image/png" }), {
+    premultiplyAlpha: "none",
+  });
+  const canvas = new OffscreenCanvas(bmp.width, bmp.height);
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+  ctx.globalCompositeOperation = "copy";
+  ctx.drawImage(bmp, 0, 0);
+  const img = ctx.getImageData(0, 0, bmp.width, bmp.height);
+  return {
+    width: bmp.width,
+    height: bmp.height,
+    rgba: new Uint8ClampedArray(img.data),
+  };
 }
 
 function subRect(px: AtlasRect): AtlasRect {

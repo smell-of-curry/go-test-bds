@@ -1,6 +1,6 @@
 import { FALLBACK_TEXTURE, NEUTRAL_TEXTURE } from "./atlas";
 import type { BlockGeometryCache } from "./customGeometry";
-import { renderClassFromComponents } from "./customGeometry";
+import { isCrossGeometryId, renderClassFromComponents } from "./customGeometry";
 import {
   canonicalizeBlockId,
   expandTexturesField,
@@ -42,6 +42,7 @@ const CUTOUT_NAMES = new Set([
   "minecraft:glass",
   "minecraft:glass_pane",
   "minecraft:iron_bars",
+  "minecraft:vine",
 ]);
 
 const TRANSLUCENT_NAMES = new Set([
@@ -60,15 +61,90 @@ const LIQUID_NAMES = new Set([
   "minecraft:flowing_lava",
 ]);
 
-const GRASS_TINT_FACES = new Set(["minecraft:grass_block"]);
-const FOLIAGE_NAMES = new Set([
-  "minecraft:oak_leaves",
-  "minecraft:spruce_leaves",
-  "minecraft:birch_leaves",
-  "minecraft:jungle_leaves",
-  "minecraft:acacia_leaves",
-  "minecraft:dark_oak_leaves",
-  "minecraft:vine",
+/**
+ * Vanilla blocks the client draws as `geometry.cross` (two diagonal quads).
+ * Data-driven blocks also match when the registry geometry id is
+ * `geometry.cross`, so this list is the built-ins that never send that id.
+ */
+const CROSS_BLOCKS = new Set([
+  "short_grass",
+  "tallgrass",
+  "fern",
+  "deadbush",
+  "dead_bush",
+  "sapling",
+  "oak_sapling",
+  "spruce_sapling",
+  "birch_sapling",
+  "jungle_sapling",
+  "acacia_sapling",
+  "dark_oak_sapling",
+  "cherry_sapling",
+  "pale_oak_sapling",
+  "yellow_flower",
+  "red_flower",
+  "dandelion",
+  "poppy",
+  "blue_orchid",
+  "allium",
+  "azure_bluet",
+  "red_tulip",
+  "orange_tulip",
+  "white_tulip",
+  "pink_tulip",
+  "oxeye_daisy",
+  "cornflower",
+  "lily_of_the_valley",
+  "wither_rose",
+  "torchflower",
+  "open_eyeblossom",
+  "closed_eyeblossom",
+  "wildflowers",
+  "crimson_roots",
+  "warped_roots",
+  "nether_sprouts",
+  "short_dry_grass",
+  "tall_dry_grass",
+  "web",
+  "cobweb",
+  "seagrass",
+  "firefly_bush",
+  "bush",
+  "red_shrub",
+  "azalea",
+  "flowering_azalea",
+  "hanging_roots",
+  "tall_grass",
+  "large_fern",
+  "sunflower",
+  "lilac",
+  "rose_bush",
+  "peony",
+  "pitcher_plant",
+  "tall_seagrass",
+  "double_plant",
+]);
+
+/** Cross plants whose texture is the top or bottom half of the cell. */
+const DOUBLE_CROSS = new Set([
+  "tall_grass",
+  "large_fern",
+  "sunflower",
+  "lilac",
+  "rose_bush",
+  "peony",
+  "pitcher_plant",
+  "tall_seagrass",
+  "double_plant",
+]);
+
+/** Grass-colormap plants (flowers, saplings, and dead bush are not tinted). */
+const GRASS_PLANTS = new Set([
+  "short_grass",
+  "tallgrass",
+  "fern",
+  "tall_grass",
+  "large_fern",
 ]);
 
 /**
@@ -192,6 +268,8 @@ export class BlockModelResolver {
     if (LIQUID_NAMES.has(n)) return "liquid";
     if (TRANSLUCENT_NAMES.has(n) || n.includes("stained_glass"))
       return "translucent";
+    // Plants are alpha-tested and must not hide neighbour faces.
+    if (this.isCrossBlock(block)) return "cutout";
     if (CUTOUT_NAMES.has(n) || n.endsWith("_leaves")) return "cutout";
     // Dedicated block-entity geometry is never a full occluding cube.
     if (blockEntityKind(n)) return "cutout";
@@ -258,7 +336,7 @@ export class BlockModelResolver {
     if (this.renderClassOf(block) === "liquid") return null;
 
     const shaped = (model: CubeModel): CubeModel =>
-      applyPartialExtents(block, model);
+      this.asCross(block, applyPartialExtents(block, model));
 
     // Unnamed rid → magenta (bug marker).
     if (block.name === "" && block.rid !== 0) {
@@ -368,6 +446,7 @@ export class BlockModelResolver {
         texture: name || FALLBACK_TEXTURE,
         tint: tintFor(block, f),
         rotation: 0,
+        overlay: grassSideOverlay(block, f),
       };
     }
     // Unnamed rid-only blocks → fallback on every face (visible magenta).
@@ -454,6 +533,60 @@ export class BlockModelResolver {
       void s.age;
     }
   }
+
+  /**
+   * Vanilla cross geometry: registry `geometry.cross`, or a built-in plant
+   * that never sends a geometry id. `unit_cube` / `full_block` stay cubes.
+   *
+   * @param block - Block.
+   * @returns true when the mesher should emit two diagonal quads.
+   */
+  isCrossBlock(block: Block): boolean {
+    const reg = this.registryByName.get(block.name);
+    if (reg) {
+      const comps = effectiveComponents(reg, block.states);
+      if (comps.unitCube) return false;
+      if (comps.geometry) {
+        if (isCrossGeometryId(comps.geometry)) return true;
+        const bare = comps.geometry.replace(/^[^:]+:/, "").toLowerCase();
+        // full_block falls through to the built-in name list.
+        if (bare !== "geometry.full_block") return false;
+      }
+    }
+    return CROSS_BLOCKS.has(bareName(block.name));
+  }
+
+  /**
+   * Force the flower-X shape. Double plants pick the top or bottom texture.
+   *
+   * @param block - Block.
+   * @param model - Cube from textures or the palette.
+   * @returns model unchanged, or a non-occluding cross.
+   */
+  private asCross(block: Block, model: CubeModel): CubeModel {
+    if (!this.isCrossBlock(block)) return model;
+    const bare = bareName(block.name);
+    const upper = isUpperHalf(block.states);
+    const tex = DOUBLE_CROSS.has(bare)
+      ? upper
+        ? model.faces.up.texture
+        : model.faces.down.texture
+      : model.faces.up.texture;
+    const tint = tintFor(block, "up");
+    const faces = {} as Record<Cardinal, FaceAppearance>;
+    for (const f of CARDINALS) {
+      faces[f] = { texture: tex, tint, rotation: 0 };
+    }
+    return {
+      ...model,
+      faces,
+      renderClass: "cutout",
+      shape: "cross",
+      customGeometryKey: undefined,
+      ambientOcclusion: false,
+      faceDimming: false,
+    };
+  }
 }
 
 /**
@@ -534,13 +667,34 @@ function applyPartialExtents(block: Block, model: CubeModel): CubeModel {
   return { ...model, yBot: ext.yBot, yTop: ext.yTop };
 }
 
+function bareName(name: string): string {
+  return name.startsWith("minecraft:") ? name.slice(10) : name;
+}
+
+function isUpperHalf(states: Block["states"]): boolean {
+  const u = states.upper_block_bit ?? states.half;
+  return u === true || u === 1 || u === "true" || u === "upper";
+}
+
+/** Grass-block sides: alpha is the biome-tint mask, not a hole. */
+function grassSideOverlay(block: Block, face: Cardinal): boolean {
+  const b = bareName(block.name);
+  if (b !== "grass_block" && b !== "grass") return false;
+  return face !== "up" && face !== "down";
+}
+
 function tintFor(block: Block, face: Cardinal): FaceAppearance["tint"] {
-  if (GRASS_TINT_FACES.has(block.name) && face === "up") {
+  const b = bareName(block.name);
+  if (b === "birch_leaves") return "birch";
+  if (b === "spruce_leaves") return "spruce";
+  if (b === "mangrove_leaves") return "mangrove";
+  if (b === "grass_block" || b === "grass") {
+    if (face === "down") return "none";
     return "grass";
   }
-  if (FOLIAGE_NAMES.has(block.name) || block.name.endsWith("_leaves")) {
-    return "foliage";
-  }
+  if (GRASS_PLANTS.has(b)) return "grass";
+  if (b === "short_dry_grass" || b === "tall_dry_grass") return "dry";
+  if (b === "vine" || b.endsWith("_leaves")) return "foliage";
   return "none";
 }
 

@@ -11,6 +11,7 @@ import {
 } from "./blockEntities";
 import { biomeAtFromState, tintAt } from "./biome";
 import {
+  crossQuadsAt,
   emitCustomBlockTris,
   type BlockGeometryCache,
   type CustomBlockTri,
@@ -198,6 +199,7 @@ export class TexturedMesher implements Mesher {
     type FaceEmit = MergeQuad;
 
     const emits: FaceEmit[] = [];
+    const crossDraws: WorldQuad[] = [];
     const customTris: Array<{
       tri: CustomBlockTri;
       lx: number;
@@ -289,6 +291,48 @@ export class TexturedMesher implements Mesher {
           const cube = this.resolver.resolveCube(block, wx, wy, wz);
           if (!cube) continue;
 
+          // Flower X: two diagonal quads. Not a cube, so no face culling and no AO.
+          if (cube.shape === "cross") {
+            const app = cube.faces.up;
+            const tint = tintAt(biomeAt, app.tint, wx, wz);
+            const uv = this.atlas.uvFor(
+              app.texture || FALLBACK_TEXTURE,
+              tick,
+              wx,
+              wy,
+              wz,
+            );
+            const bright = lightBrightness(sampleCombined(lightCtx, x, y, z));
+            for (const q of crossQuadsAt(wx, wy, wz)) {
+              quadsBefore++;
+              crossDraws.push({
+                corners: q.corners,
+                uvs: q.uvs,
+                uv,
+                color: new THREE.Color(tint.r, tint.g, tint.b),
+                bright,
+              });
+            }
+            instanceCount++;
+            this.emitLayer1(
+              terrainSec,
+              x,
+              y,
+              z,
+              originX,
+              originY,
+              originZ,
+              tick,
+              blockAt,
+              biomeAt,
+              emits,
+              () => {
+                quadsBefore++;
+              },
+            );
+            continue;
+          }
+
           // Custom .geo.json path — not greedy-merged; neighbours not occluded.
           if (
             cube.customGeometryKey &&
@@ -352,8 +396,13 @@ export class TexturedMesher implements Mesher {
             quadsBefore++;
             const app = cube.faces[d.face];
             const texName = app.texture || FALLBACK_TEXTURE;
+            const overlayId = `${texName}#overlay`;
+            const splitOverlay =
+              app.overlay === true && this.atlas.has(overlayId);
+            // Overlay flag without a split tile: don't tint the whole side.
+            const channel = app.overlay ? "none" : app.tint;
             const uv = this.atlas.uvFor(texName, tick, wx, wy, wz);
-            const tint = tintAt(biomeAt, app.tint, wx, wz);
+            const tint = tintAt(biomeAt, channel, wx, wz);
             const color = new THREE.Color(tint.r, tint.g, tint.b);
             if (emission > 0) {
               const e = Math.min(1, emission);
@@ -378,6 +427,36 @@ export class TexturedMesher implements Mesher {
               yBot: cube.yBot ?? 0,
               skipFaceShade: !faceDim,
               skipAo,
+            });
+            if (!splitOverlay) continue;
+            quadsBefore++;
+            const grass = tintAt(biomeAt, "grass", wx, wz);
+            const grassColor = new THREE.Color(grass.r, grass.g, grass.b);
+            if (emission > 0) {
+              const e = Math.min(1, emission);
+              grassColor.r = Math.min(1, grassColor.r + e);
+              grassColor.g = Math.min(1, grassColor.g + e);
+              grassColor.b = Math.min(1, grassColor.b + e);
+            }
+            const ouv = this.atlas.uvRect(overlayId, tick);
+            const okey = `${pass}|${d.dir}|${overlayId}|grass|${app.rotation}|${ouv.u0},${ouv.v0},${ouv.u1},${ouv.v1}|bias`;
+            emits.push({
+              key: okey,
+              pass,
+              dir: d.dir,
+              x,
+              y,
+              z,
+              du: 1,
+              dv: 1,
+              uv: ouv,
+              rotation: app.rotation,
+              color: grassColor,
+              yTop: cube.yTop ?? 1,
+              yBot: cube.yBot ?? 0,
+              skipFaceShade: !faceDim,
+              skipAo,
+              bias: 0.002,
             });
           }
           if (exposed) instanceCount++;
@@ -408,8 +487,8 @@ export class TexturedMesher implements Mesher {
       : greedyMerge(emits as MergeQuad[]);
     this.lastStats = {
       quadsBeforeMerge: quadsBefore,
-      quadsAfterMerge: merged.length + customTris.length,
-      triangles: merged.length * 2 + customTris.length,
+      quadsAfterMerge: merged.length + customTris.length + crossDraws.length,
+      triangles: merged.length * 2 + customTris.length + crossDraws.length * 2,
     };
 
     const opaque = emptyBuffers();
@@ -426,6 +505,11 @@ export class TexturedMesher implements Mesher {
         d,
         lightCtx,
       );
+    }
+
+    // Cross plants are alpha-tested (depth write), not blended.
+    for (const q of crossDraws) {
+      pushWorldQuad(opaque, q);
     }
 
     for (const c of customTris) {
@@ -698,6 +782,16 @@ interface MergeQuad {
   skipFaceShade?: boolean;
   /** When true, skip AO bake (material ambient_occlusion: false). */
   skipAo?: boolean;
+  /** Outward offset in blocks (grass-side overlay sits just off the dirt). */
+  bias?: number;
+}
+
+interface WorldQuad {
+  corners: Array<[number, number, number]>;
+  uvs: Array<[number, number]>;
+  uv: AtlasUv;
+  color: THREE.Color;
+  bright: number;
 }
 
 interface MeshBuffers {
@@ -820,6 +914,13 @@ function pushMergedQuad(
   const { du, dv, uv, color, yTop, yBot, rotation } = q;
 
   const corners = faceCorners(d.dir, x0, y0, z0, du, dv, yBot, yTop);
+  if (q.bias) {
+    for (const c of corners) {
+      c[0] += d.dx * q.bias;
+      c[1] += d.dy * q.bias;
+      c[2] += d.dz * q.bias;
+    }
+  }
   // Tile-space UVs matched to faceCorners order (CCW outward).
   // +Y uses v along +Z first in the corner list — see faceCorners(dir=2).
   const tileCorners = tileCornersForDir(d.dir, du, dv);
@@ -916,6 +1017,29 @@ function vertexLightMultipliers(
  * @param atlas - Terrain atlas.
  * @param light - Light context.
  */
+function pushWorldQuad(buf: MeshBuffers, q: WorldQuad): void {
+  const rect: [number, number, number, number] = [
+    Math.min(q.uv.u0, q.uv.u1),
+    Math.min(q.uv.v0, q.uv.v1),
+    Math.abs(q.uv.u1 - q.uv.u0),
+    Math.abs(q.uv.v1 - q.uv.v0),
+  ];
+  const order = [0, 1, 2, 0, 2, 3];
+  for (const i of order) {
+    const c = q.corners[i]!;
+    const t = q.uvs[i]!;
+    buf.pos.push(c[0], c[1], c[2]);
+    buf.tileUv.push(t[0], t[1]);
+    buf.atlasRect.push(rect[0], rect[1], rect[2], rect[3]);
+    buf.tileRot.push(0);
+    buf.col.push(
+      q.color.r * q.bright,
+      q.color.g * q.bright,
+      q.color.b * q.bright,
+    );
+  }
+}
+
 function pushCustomTri(
   buf: MeshBuffers,
   tri: CustomBlockTri,

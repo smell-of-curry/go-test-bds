@@ -113,6 +113,10 @@ export function parseTerrainTextureJson(
   return out;
 }
 
+function hasOverlayColor(value: string | undefined): boolean | undefined {
+  return typeof value === "string" && value.length > 0 ? true : undefined;
+}
+
 function parseTerrainEntry(entry: unknown): TerrainTextureEntry {
   if (!entry || typeof entry !== "object") return { paths: [] };
   const textures = (entry as { textures?: unknown }).textures;
@@ -120,9 +124,14 @@ function parseTerrainEntry(entry: unknown): TerrainTextureEntry {
   if (typeof textures === "string") {
     return { paths: [{ path: normalizeTexPath(textures), weight: 1 }] };
   }
-  // Object with path (and optional overlay_color / tint_color — ignored here).
+  // Object with path (optional overlay_color = grass-side tint mask).
   if (textures && typeof textures === "object" && !Array.isArray(textures)) {
-    const o = textures as { path?: string; textures?: string; weight?: number };
+    const o = textures as {
+      path?: string;
+      textures?: string;
+      weight?: number;
+      overlay_color?: string;
+    };
     const p = o.path ?? o.textures;
     if (typeof p === "string") {
       return {
@@ -130,6 +139,7 @@ function parseTerrainEntry(entry: unknown): TerrainTextureEntry {
           {
             path: normalizeTexPath(p),
             weight: typeof o.weight === "number" ? o.weight : 1,
+            overlay: hasOverlayColor(o.overlay_color),
           },
         ],
       };
@@ -145,12 +155,18 @@ function parseTerrainEntry(entry: unknown): TerrainTextureEntry {
         continue;
       }
       if (item && typeof item === "object") {
-        const o = item as { path?: string; textures?: string; weight?: number };
+        const o = item as {
+          path?: string;
+          textures?: string;
+          weight?: number;
+          overlay_color?: string;
+        };
         const p = o.path ?? o.textures;
         if (typeof p === "string") {
           paths.push({
             path: normalizeTexPath(p),
             weight: typeof o.weight === "number" ? o.weight : 1,
+            overlay: hasOverlayColor(o.overlay_color),
           });
         }
       }
