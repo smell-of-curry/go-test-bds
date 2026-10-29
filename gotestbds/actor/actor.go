@@ -560,8 +560,8 @@ func (a *Actor) UseItem() error {
 	}
 
 	heldItem, _ := a.Inventory().ItemInstance(a.heldSlot)
-	// Same zero-field drop as UseItemOnBlock: a click-air throw (snowball,
-	// projectile items) with TriggerTypeUnknown never launches.
+	// Same fields as UseItemOnBlock. BDS 1.26.60 still drops bot click-air
+	// throws (snowball, pokeb:masterball) with these set; cause unknown.
 	action := &protocol.UseItemTransactionData{
 		ActionType:       protocol.UseItemActionClickAir,
 		TriggerType:      protocol.TriggerTypePlayerInput,
