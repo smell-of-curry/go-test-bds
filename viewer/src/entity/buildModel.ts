@@ -141,7 +141,6 @@ export function buildEntityModel(
       ? { width: img.width, height: img.height }
       : undefined,
   );
-  const scratch = new THREE.Vector3();
   for (const boneMesh of meshes) {
     const boneGroup = boneGroups.get(boneMesh.boneName);
     if (!boneGroup) continue;
@@ -151,36 +150,14 @@ export function buildEntityModel(
       : defaultVisible;
     if (!visible) continue;
 
-    const world = worldMats.get(boneMesh.boneName) ?? new THREE.Matrix4();
-    inv.copy(world).invert();
-
-    const positions = new Float32Array(boneMesh.positions.length);
-    const normals = new Float32Array(boneMesh.normals.length);
-    for (let i = 0; i < boneMesh.positions.length; i += 3) {
-      scratch.set(
-        boneMesh.positions[i]!,
-        boneMesh.positions[i + 1]!,
-        boneMesh.positions[i + 2]!,
-      );
-      scratch.applyMatrix4(inv);
-      positions[i] = scratch.x;
-      positions[i + 1] = scratch.y;
-      positions[i + 2] = scratch.z;
-
-      scratch.set(
-        boneMesh.normals[i]!,
-        boneMesh.normals[i + 1]!,
-        boneMesh.normals[i + 2]!,
-      );
-      scratch.transformDirection(inv);
-      normals[i] = scratch.x;
-      normals[i + 1] = scratch.y;
-      normals[i + 2] = scratch.z;
-    }
-
+    // Mesh vertices stay in authored model space: the bone group's world
+    // matrix is the full rest chain that poses them.
     const geo = new THREE.BufferGeometry();
-    geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
-    geo.setAttribute("normal", new THREE.BufferAttribute(normals, 3));
+    geo.setAttribute(
+      "position",
+      new THREE.BufferAttribute(boneMesh.positions, 3),
+    );
+    geo.setAttribute("normal", new THREE.BufferAttribute(boneMesh.normals, 3));
     geo.setAttribute("uv", new THREE.BufferAttribute(boneMesh.uvs, 2));
     geo.setIndex(new THREE.BufferAttribute(boneMesh.indices, 1));
     disposables.push(geo);

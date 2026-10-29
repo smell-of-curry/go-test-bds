@@ -66,6 +66,12 @@ export function resolveFaceUv(
     };
   }
 
+  // Faces are built in file space and then X is negated, which mirrors every
+  // face. Blockbench (and the game) keep each face's texture unmirrored, so an
+  // unmirrored cube needs the mirrored mapping and vice versa. `mirror` only
+  // applies to box UV; per-face UV ignores it.
+  mirror = Array.isArray(cubeUv) ? !mirror : true;
+
   if (Array.isArray(cubeUv)) {
     const box = cubeUv as Vec2;
     return resolveBoxFace(face, box, size, textureWidth, textureHeight, mirror);

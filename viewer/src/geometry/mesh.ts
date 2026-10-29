@@ -239,18 +239,6 @@ function appendCube(
     // Start with outward CCW indices; flip when an odd number of reflections apply.
     let flipWinding = false;
 
-    if (mirror) {
-      const cx = (x0 + x1) / 2;
-      verts = [
-        [2 * cx - verts[0][0], verts[0][1], verts[0][2]],
-        [2 * cx - verts[1][0], verts[1][1], verts[1][2]],
-        [2 * cx - verts[2][0], verts[2][1], verts[2][2]],
-        [2 * cx - verts[3][0], verts[3][1], verts[3][2]],
-      ];
-      normal = [-normal[0], normal[1], normal[2]];
-      flipWinding = !flipWinding;
-    }
-
     if (cubeMatrix) {
       verts = [
         transformPoint(cubeMatrix, verts[0]),

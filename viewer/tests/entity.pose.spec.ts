@@ -20,6 +20,7 @@ import {
   type BoneAnimPose,
 } from "../src/entity";
 import {
+  buildGeometryMeshes,
   computeBoneWorldMatrices,
   parseGeometryDocument,
   type ParsedGeometry,
@@ -257,5 +258,59 @@ test.describe("procedural locomotion", () => {
     poses = new Map();
     addLocomotionPoses(st, ["leftArm", "rightArm"], poses);
     expect(poses.size).toBe(0);
+  });
+});
+
+test.describe("rest pose and face UVs (Blockbench parity)", () => {
+  const doc = (uv: unknown) =>
+    parseGeometryDocument({
+      format_version: "1.21.0",
+      "minecraft:geometry": [
+        {
+          description: {
+            identifier: "geometry.parity",
+            texture_width: 64,
+            texture_height: 64,
+          },
+          bones: [
+            {
+              name: "wing",
+              pivot: [0, 0, 0],
+              rotation: [0, 90, 0],
+              cubes: [{ origin: [0, 0, 8], size: [2, 2, 2], uv }],
+            },
+          ],
+        },
+      ],
+    }).geometries[0]!;
+
+  test("bone rest rotation survives buildEntityModel", () => {
+    // Charizard's wings: a Y-rotated bone must swing its cubes, not render flat.
+    const model = buildModel(doc([0, 0]));
+    model.root.updateMatrixWorld(true);
+    const box = new THREE.Box3().expandByObject(model.bones.get("wing")!);
+    // Bedrock +Y 90 maps +Z to +X; three negates X.
+    expect(box.max.x).toBeLessThan(-0.4);
+    expect(Math.abs(box.min.z)).toBeLessThan(0.2);
+  });
+
+  test("east texture lands on three +X with U running +Z to -Z", () => {
+    // Charizard membranes: east (orange) and west (teal) differ.
+    const east = { uv: [0, 0], uv_size: [2, 2] };
+    const west = { uv: [10, 0], uv_size: [2, 2] };
+    const geo = doc({ east, west });
+    geo.bones[0]!.rotation = [0, 0, 0];
+    const mesh = buildGeometryMeshes(geo)[0]!;
+    const face = mesh.faces.indexOf("east" as never);
+    const west4 = mesh.faces.indexOf("west" as never);
+    const nx = (f: number) => mesh.normals[f * 12]!;
+    const u = (f: number, i: number) => mesh.uvs[f * 8 + i * 2]!;
+    const z = (f: number, i: number) => mesh.positions[f * 12 + i * 3 + 2]!;
+    // The face whose three.js normal is +X carries the east rect (u < 2/64).
+    const plusX = nx(face) > 0 ? face : west4;
+    expect(Math.max(u(plusX, 0), u(plusX, 1))).toBeLessThan(3 / 64);
+    // Lower U at higher Z.
+    const [a, b] = u(plusX, 0) < u(plusX, 1) ? [0, 1] : [1, 0];
+    expect(z(plusX, a)).toBeGreaterThan(z(plusX, b));
   });
 });
