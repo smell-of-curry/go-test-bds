@@ -593,7 +593,10 @@ func (e *encoder) encodeColumn(w *gw.World, pos dfworld.ChunkPos, col *gw.Column
 			out.Sections = append(out.Sections, sec)
 		}
 	}
-	if lit {
+	// Biomes ride the LevelChunk and only need the surface, so they must not
+	// wait for light: a lit-only gate shipped complete columns biome-less and
+	// the viewer drew untinted (gray) grass until neighbours lit.
+	if col.State == gw.ColumnComplete {
 		out.BiomePalette, out.Biomes = encodeColumnBiomes(col)
 	}
 	out.BlockEntities = encodeColumnBlockEntities(col)

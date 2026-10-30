@@ -1,8 +1,24 @@
+import { readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { cameraClearance } from "./clearance";
+import { timelineFromSse } from "./client";
+import { takeMap } from "./map";
 import { renderFilm } from "./render";
+import { boundToMs, parseBound } from "./time";
 
 const HELP = `Usage: npm run film -- render --take <dir> --bot <name> --from <time> --to <time> --out <dir|file.mp4>
+       npm run film -- check --take <dir> --bot <name> --from <time> --to <time> --camera <file> [--fps n]
 
 Render a recorded take offline, frame-exact, with no live bot.
+
+       npm run film -- map --take <dir> --bot <name> --area x0,z0,x1,z1 --out <file.ppm>
+
+check replays the take without a browser and lists camera samples whose lens
+sits inside a drawn block (exit 1 when any). Run it before a render.
+
+map writes a top-down scouting map of the take's world (one pixel per block,
+north up, brighter = higher) and prints the most common top blocks. Scale it
+up with ffmpeg -vf scale=iw*6:ih*6:flags=neighbor to read it.
 
   --take <dir>          Take directory (<bot>.sse, take.json, skins/, packs.json)
   --bot <name>          Bot whose <name>.sse to play
@@ -51,6 +67,7 @@ interface Flags {
   lookahead: boolean;
   dev: boolean;
   app?: string;
+  area?: string;
   packsFrom?: string;
   help: boolean;
 }
@@ -60,7 +77,10 @@ interface Flags {
  * @returns parsed flags.
  */
 function parseArgs(argv: string[]): Flags {
-  const rest = argv[0] === "render" ? argv.slice(1) : argv;
+  const rest =
+    argv[0] === "render" || argv[0] === "check" || argv[0] === "map"
+      ? argv.slice(1)
+      : argv;
   const flags: Flags = {
     width: 1080,
     height: 1920,
@@ -156,6 +176,10 @@ function parseArgs(argv: string[]): Flags {
       flags.app = next(++i, a);
       continue;
     }
+    if (a === "--area") {
+      flags.area = next(++i, a);
+      continue;
+    }
     if (a === "--packs-from") {
       flags.packsFrom = next(++i, a);
       continue;
@@ -171,6 +195,8 @@ async function main(): Promise<void> {
     process.stdout.write(HELP);
     return;
   }
+  if (process.argv[2] === "check") return check(flags);
+  if (process.argv[2] === "map") return map(flags);
   if (!flags.take || !flags.bot || !flags.from || !flags.to || !flags.out) {
     process.stderr.write(HELP);
     throw new Error("--take, --bot, --from, --to, and --out are required");
@@ -197,6 +223,66 @@ async function main(): Promise<void> {
   });
   process.stdout.write(
     `${result.frames} ${result.width}x${result.height} → ${result.mp4 ?? result.frameDir}\n`,
+  );
+}
+
+function check(flags: Flags): void {
+  if (!flags.take || !flags.bot || !flags.from || !flags.to || !flags.camera) {
+    process.stderr.write(HELP);
+    throw new Error("check needs --take, --bot, --from, --to, and --camera");
+  }
+  const { frames, firstTick } = timelineFromSse(
+    readFileSync(join(flags.take, `${flags.bot}.sse`), "utf8"),
+  );
+  const fromSec = boundToMs(parseBound(flags.from), firstTick) / 1000;
+  const toSec = boundToMs(parseBound(flags.to), firstTick) / 1000;
+  const keys = JSON.parse(readFileSync(flags.camera, "utf8"));
+  const hits = cameraClearance(
+    frames,
+    keys,
+    fromSec,
+    toSec,
+    flags.fps,
+    flags.width / flags.height,
+  );
+  for (const h of hits)
+    process.stdout.write(
+      `${h.tSec.toFixed(3)}s lens [${h.pos.map((v) => v.toFixed(2)).join(", ")}] in ${h.block} @ ${h.at.join(" ")}\n`,
+    );
+  process.stdout.write(
+    `clearance: ${hits.length} blocked sample(s) in ${fromSec.toFixed(2)}..${toSec.toFixed(2)}s\n`,
+  );
+  if (hits.length) process.exitCode = 1;
+}
+
+function map(flags: Flags): void {
+  const area = flags.area?.split(",").map(Number);
+  if (
+    !flags.take ||
+    !flags.bot ||
+    !flags.out ||
+    area?.length !== 4 ||
+    area.some((v) => !Number.isFinite(v))
+  ) {
+    process.stderr.write(HELP);
+    throw new Error("map needs --take, --bot, --area x0,z0,x1,z1, and --out");
+  }
+  const [x0, z0, x1, z1] = area as [number, number, number, number];
+  const { frames } = timelineFromSse(
+    readFileSync(join(flags.take, `${flags.bot}.sse`), "utf8"),
+  );
+  const { ppm, legend } = takeMap(frames, [
+    Math.min(x0, x1),
+    Math.min(z0, z1),
+    Math.max(x0, x1),
+    Math.max(z0, z1),
+  ]);
+  writeFileSync(flags.out, ppm);
+  process.stdout.write(
+    `${flags.out}\n${legend
+      .slice(0, 12)
+      .map(([n, c]) => `${n.replace("minecraft:", "")}:${c}`)
+      .join(" ")}\n`,
   );
 }
 

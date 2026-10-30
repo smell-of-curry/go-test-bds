@@ -152,6 +152,30 @@ func TestColumnBiomeSurfaceEncode(t *testing.T) {
 	}
 }
 
+// TestColumnBiomesShipBeforeLight checks a complete column still carries its
+// biomes while its light waits on the fill budget (else grass renders gray).
+func TestColumnBiomesShipBeforeLight(t *testing.T) {
+	dfworld.DefaultBlockRegistry.Finalize()
+	a := testActor(t, "TestBot")
+	w := a.World()
+	addColumn(w, dfworld.ChunkPos{0, 0})
+	w.SetBlock(cube.Pos{0, 70, 0}, block.Grass{})
+
+	enc := newEncoder("TestBot", 4, 4)
+	enc.lightBudget = 0
+	kf := encodeKeyframe(t, enc, a)
+	wire, ok := columnAt(kf.Columns, 0, 0)
+	if !ok {
+		t.Fatal("missing column")
+	}
+	if wire.Sections[0].SkyLight != "" {
+		t.Fatal("light filled despite zero budget; test no longer covers the unlit case")
+	}
+	if wire.Biomes == "" || len(wire.BiomePalette) == 0 {
+		t.Fatalf("unlit complete column dropped biomes: palette=%v", wire.BiomePalette)
+	}
+}
+
 // TestLightJSONRoundTrip ensures omitempty matches PROTOCOL defaults.
 func TestLightJSONRoundTrip(t *testing.T) {
 	sec := Section{Y: 4, Palette: []Block{airBlock()}, Blocks: "AA=="}

@@ -264,9 +264,9 @@ export function tintAt(
   if (channel === "mangrove") return MANGROVE;
   if (!biomeAt) return untinted(channel);
   const id = biomeAt(x, z);
-  if (id == null) return untinted(channel);
-  // Unknown name → plains climate, not white and not a per-biome hack.
-  const climate = climateFor(id) ?? PLAINS_CLIMATE;
+  // Missing or unknown biome → plains climate: the client never draws
+  // untinted (gray) grass, and older takes ship columns before their biomes.
+  const climate = (id == null ? null : climateFor(id)) ?? PLAINS_CLIMATE;
   return tintFromClimate(climate, channel, x, z);
 }
 

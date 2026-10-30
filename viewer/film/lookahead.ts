@@ -113,8 +113,10 @@ export function sampleTrackPoints(
 /**
  * Pull columns the bot receives later up to the start of their dimension,
  * but only those within the camera bubble. The object inserted is the column
- * as complete as the wire had it at the window start. Later `columnsAdded` and block edits stay on their
- * real timestamps. In-bubble `columnsRemoved` before `toMs` is dropped so a
+ * as complete as the wire had it at the window start, with any later light or
+ * biome refresh of the same blocks folded in. Later payloads that change blocks,
+ * and block edits, stay on their real timestamps; the folded refreshes and
+ * incomplete re-sends are dropped. In-bubble `columnsRemoved` before `toMs` is dropped so a
  * chunk the bot walked away from does not vanish mid-shot.
  *
  * @param frames - Take timeline, oldest first.
@@ -176,6 +178,19 @@ export function rewriteTimelineForLookahead(
       ) {
         frame = seedColumns(frame, keep);
         seeded = true;
+      } else if (frame.type === "delta" && frame.columnsAdded) {
+        // A seeded column only takes a later payload that changes its blocks;
+        // shells and light refreshes would void it or re-mesh it mid-shot.
+        const added = frame.columnsAdded.filter((c) => {
+          const seed = keep.get(columnId(c.x, c.z));
+          return !seed || (c.state === "complete" && !sameBlocks(seed, c));
+        });
+        if (added.length !== frame.columnsAdded.length) {
+          frame = {
+            ...frame,
+            columnsAdded: added.length > 0 ? added : undefined,
+          };
+        }
       }
       if (
         frame.type === "delta" &&
@@ -244,7 +259,38 @@ function betterSeed(
   fromMs: number,
 ): boolean {
   if (next.state !== "complete") return false;
-  return have.state !== "complete" || tMs < fromMs;
+  return have.state !== "complete" || tMs < fromMs || sameBlocks(have, next);
+}
+
+/**
+ * Whether two payloads of one column carry the same blocks, so the later one
+ * is only a light or biome refresh. The recorder re-sends a few columns per
+ * frame as light fills; folding those into the seed starts the shot fully lit
+ * and spares a whole-column re-mesh (seconds each) on every delta.
+ *
+ * Only sections present in both count: the recorder's vertical section window
+ * follows the bot's Y, so an edge section 100+ blocks away comes and goes.
+ *
+ * ponytail: a section emptied to all air also just drops out and reads as
+ * "same". Compare section sets too if a shot ever clears a whole sub-chunk.
+ *
+ * @param a - Earlier payload.
+ * @param b - Later payload.
+ * @returns true when shared sections and block entities match.
+ */
+export function sameBlocks(a: Column, b: Column): boolean {
+  if (a === b) return true;
+  const byY = new Map(a.sections.map((s) => [s.y, s]));
+  for (const t of b.sections) {
+    const s = byY.get(t.y);
+    if (!s) continue;
+    if (s.blocks !== t.blocks || s.blocks1 !== t.blocks1) return false;
+    if (JSON.stringify(s.palette) !== JSON.stringify(t.palette)) return false;
+  }
+  return (
+    JSON.stringify(a.blockEntities ?? []) ===
+    JSON.stringify(b.blockEntities ?? [])
+  );
 }
 
 function columnId(x: number, z: number): string {
@@ -261,21 +307,15 @@ function seedColumns(
   frame: KeyframeFrame | DeltaFrame,
   keep: Map<string, Column>,
 ): Frame {
-  if (frame.type === "keyframe") {
-    const have = new Set(frame.columns.map((c) => columnId(c.x, c.z)));
-    const extra: Column[] = [];
-    for (const [key, col] of keep) if (!have.has(key)) extra.push(col);
-    if (extra.length === 0) return frame;
-    return { ...frame, columns: [...frame.columns, ...extra] };
-  }
-  const have = new Set(
-    (frame.columnsAdded ?? []).map((c) => columnId(c.x, c.z)),
-  );
+  const own =
+    frame.type === "keyframe" ? frame.columns : (frame.columnsAdded ?? []);
+  const have = new Set(own.map((c) => columnId(c.x, c.z)));
   const extra: Column[] = [];
   for (const [key, col] of keep) if (!have.has(key)) extra.push(col);
-  if (extra.length === 0) return frame;
-  return {
-    ...frame,
-    columnsAdded: [...(frame.columnsAdded ?? []), ...extra],
-  };
+  const swapped = own.map((c) => keep.get(columnId(c.x, c.z)) ?? c);
+  if (extra.length === 0 && swapped.every((c, i) => c === own[i])) return frame;
+  const columns = [...swapped, ...extra];
+  return frame.type === "keyframe"
+    ? { ...frame, columns }
+    : { ...frame, columnsAdded: columns };
 }

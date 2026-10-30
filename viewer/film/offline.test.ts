@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { cameraClearance } from "./clearance";
+import { takeMap } from "./map";
 import { parseSse, timelineFromSse, timelineFromSseStream } from "./client";
 import { filmFogRange, loadedDiscRadiusChunks } from "./fog";
 import { hiddenEntityIds, hideNameSet } from "./hide";
@@ -74,15 +76,99 @@ function delta(
 
 const cam = [{ x: 8, z: 8 }];
 
+test("clearance flags a lens inside or facing a block, not one in open air", () => {
+  // Section 4 (y 64..79): a stone slab at y=66, air elsewhere.
+  const idx = new Uint16Array(4096);
+  for (let x = 0; x < 16; x++)
+    for (let z = 0; z < 16; z++) idx[(x << 8) | (z << 4) | 2] = 1;
+  const floor: Column = {
+    ...col(0, 0),
+    sections: [
+      {
+        y: 4,
+        palette: [
+          { name: "minecraft:air", states: {}, rid: 0 },
+          { name: "minecraft:stone", states: {}, rid: 1 },
+        ],
+        blocks: Buffer.from(idx.buffer).toString("base64"),
+      },
+    ],
+  };
+  const at = (pos: [number, number, number], pitch: number) => [
+    { t: 0, pos, yaw: 0, pitch, fov: 60 },
+  ];
+  const hits = (pos: [number, number, number], pitch: number) =>
+    cameraClearance([kf([floor])], at(pos, pitch), 0, 0.1, 10, 9 / 16).length;
+  assert.equal(hits([8, 66.5, 8], 0), 1, "lens inside stone");
+  assert.equal(hits([8, 68, 8], 90), 1, "stone 1 block below, looking down");
+  assert.equal(hits([8, 71, 8], 0), 0, "open air, looking level");
+  assert.equal(
+    hits([8, 75, 8], 90),
+    0,
+    "stone 9 blocks below is a view, not a wall",
+  );
+});
+
+/** A column with one stone section; `blocks` varies the payload, `light` adds sky light. */
+function edited(x: number, z: number, light?: string, blocks = "AAAA"): Column {
+  return {
+    ...col(x, z),
+    sections: [
+      {
+        y: 4,
+        palette: [{ name: "minecraft:stone", states: {}, rid: 1 }],
+        blocks,
+        skyLight: light,
+      },
+    ],
+  };
+}
+
+test("take map draws the top block per cell, brighter when higher", () => {
+  // Stone at y=66 everywhere in column (0,0), plus a pillar to y=70 at x=1,z=0.
+  const idx = new Uint16Array(4096);
+  for (let x = 0; x < 16; x++)
+    for (let z = 0; z < 16; z++) idx[(x << 8) | (z << 4) | 2] = 1;
+  for (let y = 2; y <= 6; y++) idx[(1 << 8) | y] = 1;
+  const ground: Column = {
+    ...col(0, 0),
+    sections: [
+      {
+        y: 4,
+        palette: [
+          { name: "minecraft:air", states: {}, rid: 0 },
+          { name: "minecraft:stone", states: {}, rid: 1 },
+        ],
+        blocks: Buffer.from(idx.buffer).toString("base64"),
+      },
+    ],
+  };
+  const { ppm, legend } = takeMap([kf([ground])], [0, 0, 1, 0]);
+  const header = "P6 2 1 255\n";
+  assert.equal(ppm.subarray(0, header.length).toString(), header);
+  const px = ppm.subarray(header.length);
+  assert.ok(
+    px[3]! > px[0]!,
+    "pillar top (y=70) brighter than the floor (y=66)",
+  );
+  assert.deepEqual(legend, [["minecraft:stone", 2]]);
+  const empty = takeMap([kf([ground])], [16, 0, 16, 0]).ppm;
+  assert.deepEqual(
+    [...empty.subarray(header.length)],
+    [0, 0, 0],
+    "unloaded cell stays black",
+  );
+});
+
 test("lookahead seeds the first column version and keeps later edits", () => {
-  const first = col(0, 0);
-  const edited = col(0, 0);
+  const first = edited(0, 0);
+  const edited0 = edited(0, 0, undefined, "AQAB");
   const far = col(80, 80);
   const out = rewriteTimelineForLookahead(
     [
       kf([]),
       delta(1000, { columnsAdded: [first, far] }),
-      delta(4000, { columnsAdded: [edited] }),
+      delta(4000, { columnsAdded: [edited0] }),
     ],
     { fromMs: 2000, toMs: 5000, points: cam },
   );
@@ -94,11 +180,15 @@ test("lookahead seeds the first column version and keeps later edits", () => {
   const late = out[2]!.frame;
   assert.equal(late.type, "delta");
   if (late.type !== "delta") return;
-  assert.equal(late.columnsAdded?.[0], edited);
+  assert.equal(late.columnsAdded?.[0], edited0);
   const arrive = out[1]!.frame;
   assert.equal(arrive.type, "delta");
   if (arrive.type !== "delta") return;
-  assert.equal(arrive.columnsAdded?.[1], far);
+  assert.deepEqual(
+    arrive.columnsAdded,
+    [far],
+    "seeded copy dropped, out-of-bubble column kept",
+  );
 });
 
 test("lookahead seeds the complete column over an earlier requested shell", () => {
@@ -117,7 +207,51 @@ test("lookahead seeds the complete column over an earlier requested shell", () =
   const key = out[0]!.frame;
   assert.equal(key.type, "keyframe");
   if (key.type !== "keyframe") return;
-  assert.equal(key.columns[0], loaded);
+  assert.equal(
+    key.columns[0],
+    relit,
+    "same blocks, later light: the relit copy seeds",
+  );
+  for (const i of [1, 2, 3]) {
+    const f = out[i]!.frame;
+    assert.equal(
+      f.type === "delta" && f.columnsAdded,
+      undefined,
+      `re-send ${i} dropped`,
+    );
+  }
+});
+
+test("lookahead folds a light refresh into the seed but keeps a block edit", () => {
+  const dark = edited(0, 0);
+  const lit = edited(0, 0, "//8=");
+  const changed = edited(0, 0, undefined, "AQAB");
+  const out = rewriteTimelineForLookahead(
+    [
+      kf([dark]),
+      delta(3000, { columnsAdded: [lit] }),
+      delta(4000, { columnsAdded: [changed] }),
+    ],
+    { fromMs: 2000, toMs: 5000, points: cam },
+  );
+  const key = out[0]!.frame;
+  assert.equal(
+    key.type === "keyframe" && key.columns[0],
+    lit,
+    "keyframe copy swapped for the lit seed",
+  );
+  const refresh = out[1]!.frame;
+  assert.equal(
+    refresh.type === "delta" && refresh.columnsAdded,
+    undefined,
+    "refresh dropped",
+  );
+  const edit = out[2]!.frame;
+  assert.equal(
+    edit.type === "delta" && edit.columnsAdded?.[0],
+    changed,
+    "block edit kept",
+  );
 });
 
 test("lookahead does not drop an in-bubble column mid-window", () => {

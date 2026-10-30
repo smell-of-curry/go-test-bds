@@ -95,12 +95,12 @@ describe("biome colormap tint", () => {
     assertNear(leaves, leafPx, 1 / 255, "acacia foliage");
   });
 
-  it("unknown biome falls back to plains climate, missing id stays untinted", () => {
+  it("unknown or missing biome falls back to plains climate, no lookup stays untinted", () => {
     const plains = tintAt(() => "minecraft:plains", "grass", 0, 0);
     const unknown = tintAt(() => "minecraft:not_a_biome", "grass", 3, 4);
     assertNear(unknown, plains, 1 / 255, "unknown→plains");
     const none = tintAt(() => null, "grass", 0, 0);
-    assert.deepEqual(none, { r: 1, g: 1, b: 1 });
+    assertNear(none, plains, 1 / 255, "missing→plains");
     const absent = tintAt(null, "foliage", 0, 0);
     assert.deepEqual(absent, { r: 1, g: 1, b: 1 });
   });
