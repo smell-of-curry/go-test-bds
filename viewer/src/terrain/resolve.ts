@@ -691,6 +691,7 @@ function tintFor(block: Block, face: Cardinal): FaceAppearance["tint"] {
   if (b === "birch_leaves") return "birch";
   if (b === "spruce_leaves") return "spruce";
   if (b === "mangrove_leaves") return "mangrove";
+  if (b === "redstone_wire") return "redstone";
   if (b === "grass_block" || b === "grass") {
     if (face === "down") return "none";
     return "grass";

@@ -29,6 +29,9 @@ const NO_MAP_FOLIAGE: TintRgb = { r: 0.45, g: 0.7, b: 0.25 };
 const BIRCH: TintRgb = bytes(0x80, 0xa7, 0x55);
 const SPRUCE: TintRgb = bytes(0x61, 0x99, 0x61);
 const MANGROVE: TintRgb = bytes(0x8d, 0xb1, 0x27);
+/** Redstone dust at signal 0; the texture is gray and the client tints it. */
+// ponytail: every wire draws unpowered; tint by `redstone_signal` if powered circuits ever matter on film.
+const REDSTONE: TintRgb = bytes(0x4c, 0x00, 0x00);
 
 /** Swamp grass pair baked into `swamp_grass.png` (left / right). */
 const SWAMP_DARK: TintRgb = bytes(0x4c, 0x76, 0x3c);
@@ -254,7 +257,8 @@ export function tintAt(
     | "birch"
     | "spruce"
     | "mangrove"
-    | "dry",
+    | "dry"
+    | "redstone",
   x: number,
   z: number,
 ): TintRgb {
@@ -262,6 +266,7 @@ export function tintAt(
   if (channel === "birch") return BIRCH;
   if (channel === "spruce") return SPRUCE;
   if (channel === "mangrove") return MANGROVE;
+  if (channel === "redstone") return REDSTONE;
   if (!biomeAt) return untinted(channel);
   const id = biomeAt(x, z);
   // Missing or unknown biome → plains climate: the client never draws

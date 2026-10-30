@@ -58,7 +58,8 @@ export type TintChannel =
   | "birch"
   | "spruce"
   | "mangrove"
-  | "dry";
+  | "dry"
+  | "redstone";
 
 /** Per-face appearance after state resolution. */
 export interface FaceAppearance {

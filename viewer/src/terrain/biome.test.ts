@@ -7,6 +7,7 @@ import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 import { PNG } from "pngjs";
+import { BlockModelResolver } from "./resolve";
 import {
   climateFor,
   colormapCoords,
@@ -129,5 +130,20 @@ describe("biome colormap tint", () => {
     assertNear(birch, hex(0x80a755), 1 / 255, "birch");
     const spruce = tintAt(null, "spruce", 0, 0);
     assertNear(spruce, hex(0x619961), 1 / 255, "spruce");
+    // Gray dust texture; untinted it drew as white crosses on GOLD's streets.
+    const wire = BlockModelResolver.fromJson({
+      redstone_wire: { textures: "redstone_dust_cross" },
+    }).resolveCube(
+      { name: "minecraft:redstone_wire", states: {}, rid: 1 },
+      0,
+      0,
+      0,
+    )!;
+    assertNear(
+      tintAt(null, wire.faces.up.tint, 0, 0),
+      hex(0x4c0000),
+      1 / 255,
+      "redstone",
+    );
   });
 });
