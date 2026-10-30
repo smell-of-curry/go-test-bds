@@ -20,6 +20,7 @@ import {
   applyBonePoses,
   emptyBonePose,
   isAnimationFinished,
+  mixBonePoses,
   resetBonesToRest,
   sampleAnimation,
   type BoneAnimPose,
@@ -805,15 +806,17 @@ export class EntityAnimator {
         inst.blendFrom && inst.blendDuration > 0
           ? Math.min(1, inst.blendT / inst.blendDuration)
           : 1;
-      this.sampleControllerState(inst, inst.state, blendAlpha * keep, poses);
-      if (inst.blendFrom) {
-        this.sampleControllerState(
-          inst,
-          inst.blendFrom,
-          (1 - blendAlpha) * keep,
-          poses,
-        );
+      if (!inst.blendFrom) {
+        this.sampleControllerState(inst, inst.state, keep, poses);
+        continue;
       }
+      // Cross-fade the two states' finished poses. Weighting each state into
+      // one accumulator multiplies scales (two scale-0 states gave a(1-a)).
+      const into = new Map<string, BoneAnimPose>();
+      const from = new Map<string, BoneAnimPose>();
+      this.sampleControllerState(inst, inst.state, 1, into);
+      this.sampleControllerState(inst, inst.blendFrom, 1, from);
+      mixBonePoses(from, into, blendAlpha, keep, poses);
     }
     this.sampleServerPlays(poses, now);
     this.pruneServerPlays(now);

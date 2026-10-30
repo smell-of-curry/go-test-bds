@@ -273,6 +273,54 @@ test.describe("animation controllers + scripts (node)", () => {
     expect(poses.get("head")?.rotation[0]).toBeCloseTo(40, 0);
   });
 
+  test("a cross-fade between two states that hide a bone keeps it hidden", () => {
+    // Gengar's bite fangs are scale 0 in every idle. Weighting both states
+    // into one accumulator multiplied the scales to a(1-a), so the fangs
+    // popped to 25% size mid-fade (ground_idle -> air_idle on lift-off).
+    const hideAnims = parseAnimations({
+      format_version: "1.8.0",
+      animations: {
+        "animation.test.hide": { loop: true, bones: { fang: { scale: 0 } } },
+      },
+    });
+    const controllers = parseAnimControllers({
+      format_version: "1.10.0",
+      animation_controllers: {
+        "controller.animation.test.hide": {
+          initial_state: "ground",
+          states: {
+            ground: {
+              animations: ["hide"],
+              transitions: [{ air: "v.up" }],
+              blend_transition: 0.3,
+            },
+            air: { animations: ["hide"] },
+          },
+        },
+      },
+    });
+    const bindings = buildAnimationBindings(
+      { ctl: "controller.animation.test.hide", hide: "animation.test.hide" },
+      { initialize: [], pre_animation: [], animate: [{ name: "ctl" }] },
+      hideAnims,
+      controllers,
+    );
+    const animator = new EntityAnimator(bindings, {
+      type: "test:hide",
+      player: false,
+      props: {},
+      flags: {},
+    });
+    animator.tickPoses(0.05, ent());
+    animator.molangHost.setVariable("up", 1);
+    animator.tickPoses(0.05, ent());
+    const poses = animator.tickPoses(0.1, ent());
+    expect(animator.controllerStates()["controller.animation.test.hide"]).toBe(
+      "air",
+    );
+    expect(poses.get("fang")?.scale[0]).toBeCloseTo(0, 5);
+  });
+
   test("modified_distance_moved accumulates horizontal travel", () => {
     const bindings = buildAnimationBindings(
       def.animations,

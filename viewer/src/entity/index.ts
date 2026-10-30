@@ -29,6 +29,7 @@ export {
   emptyBonePose,
   ensureRestMatrix,
   isAnimationFinished,
+  mixBonePoses,
   resetBonesToRest,
   resolveSampleTime,
   sampleAnimation,

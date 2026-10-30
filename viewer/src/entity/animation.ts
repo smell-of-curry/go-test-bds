@@ -113,6 +113,42 @@ export function sampleAnimation(
 }
 
 /**
+ * Cross-fade two finished poses into an accumulator.
+ *
+ * @param from - Leaving state's poses.
+ * @param into - Entering state's poses.
+ * @param alpha - Fade progress in `[0, 1]` (1 = fully `into`).
+ * @param weight - Weight of the blended result in `out`.
+ * @param out - Bone name → pose accumulator (mutated).
+ */
+export function mixBonePoses(
+  from: Map<string, BoneAnimPose>,
+  into: Map<string, BoneAnimPose>,
+  alpha: number,
+  weight: number,
+  out: Map<string, BoneAnimPose>,
+): void {
+  for (const bone of new Set([...from.keys(), ...into.keys()])) {
+    const a = from.get(bone) ?? emptyBonePose();
+    const b = into.get(bone) ?? emptyBonePose();
+    let pose = out.get(bone);
+    if (!pose) {
+      pose = emptyBonePose();
+      out.set(bone, pose);
+    }
+    if (a.override || b.override) pose.override = true;
+    for (let i = 0; i < 3; i++) {
+      pose.position[i] +=
+        (a.position[i]! + (b.position[i]! - a.position[i]!) * alpha) * weight;
+      pose.rotation[i] +=
+        (a.rotation[i]! + (b.rotation[i]! - a.rotation[i]!) * alpha) * weight;
+      const s = a.scale[i]! + (b.scale[i]! - a.scale[i]!) * alpha;
+      pose.scale[i]! *= 1 + (s - 1) * weight;
+    }
+  }
+}
+
+/**
  * Publish the sample clock onto hosts that support `setQuery`.
  *
  * @param host - Molang host.
