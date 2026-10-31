@@ -1,49 +1,93 @@
-# GO TEST BDS
+# go-test-bds
 
-![Logo](images/banner.png)
+A headless Minecraft Bedrock client. It joins your server, plays it like a
+player, and renders what that client sees. In a browser, or as a 60 fps
+video, on a machine with no Minecraft installed.
 
-End-to-end testing for Minecraft Bedrock Dedicated Server addons.
+<p align="center">
+  <img src="images/battle.gif" width="260" alt="A battle on a custom server, rendered from the packets the bot received">
+  <img src="images/town.gif" width="260" alt="A player walking out of a stone gate into a custom city">
+  <img src="images/charizard.gif" width="260" alt="A resource-pack entity, frame-stepped offline by the viewer">
+</p>
 
-GoTestBDS connects headless clients to your BDS instance and hands your Script
-API addon a way to drive them. Because the bots are real network clients, a test
-exercises the same code a player does: the same packets, the same forms, the same
-rejections. It is built on [GopherTunnel](https://github.com/Sandertv/gophertunnel).
+<p align="center">
+  <sub>No Minecraft client. The bot joined a real server. This viewer drew the frames.</sub>
+</p>
 
-Two halves ship together:
+Built on [gophertunnel](https://github.com/Sandertv/gophertunnel). The bot is a
+real network client, so a test hits the same packets, forms, and rejections a
+phone does. The viewer turns that packet stream into a three.js world: blocks,
+resource-pack models, animations, skins, and the server's JSON UI.
 
-- **A Go binary** that connects one or more bots and carries out instructions.
-- **A TypeScript SDK** (`./scripts`) your addon imports to write tests: a bot
-  wrapper, a test runner, assertions, waits, and a machine-readable report
-  format for CI.
+Two pieces ship together:
 
-## Quick start
+- **A Go binary** that connects one or more bots.
+- **A TypeScript SDK** (`go-test-bds` on npm via GitHub) that your addon imports
+  to write tests: a bot wrapper, a runner, assertions, and a JSON report for CI.
 
-### 1. Run the bots
+Models and textures in the clips above belong to the server that was recorded.
+This repo does not ship them.
 
-```bash
-go run . --address 127.0.0.1:19134 --name "Test Bot" --bots 1
+## How a test runs
+
+The addon is the test runner. The bot is a player. Chat is the wire between
+them, because chat is the only bidirectional channel the Script API has to a
+client.
+
+1. **Boot a server the bot is allowed to join.** `online-mode=false`, allowlist
+   off. Dial BDS directly. The bot has no Xbox Live identity, so a proxy that
+   demands a Microsoft login will refuse it.
+2. **Start the bots.** One process, as many clients as you ask for. They show
+   up as normal players, with a stable UUID across runs so persisted player
+   data still matches.
+3. **Start the suite from the addon.** A script event is the usual trigger, so
+   CI can fire a run from the BDS console instead of editing the pack.
+4. **The addon sends an instruction as chat**, prefixed `[RUN_ACTION]`. The bot
+   performs it and answers with `[STATUS]`. The addon catches that in
+   `beforeEvents.chatSend` and cancels it, so the traffic never reaches other
+   players. Big replies (a form with dozens of buttons) split into
+   `[STATUSPART]` chunks.
+5. **Every instruction carries an id.** The response echoes it. Two bots can
+   act at once without resolving each other's promises, and each instruction
+   can time out on its own.
+6. **Assert both sides.** The Script API is what the server believes.
+   Observation instructions (`getState`, `getInventory`, `getForm`, `getBlock`,
+   `getNearbyEntities`, `getMessages`) return what the *client* was told. A
+   desync the server cannot see is a failed test. That is the point.
+7. **Clean up even when the test fails.** `ctx.track` runs in reverse on pass,
+   fail, or timeout. Register the cleanup when you create the thing, or the
+   first failure leaves entities behind and the next test fails for the wrong
+   reason.
+8. **Print a result CI can read.** One `[GOTESTBDS]` JSON line per event on
+   stdout. A viewer, if one is attached, adds stills and a webm. Missing
+   capture never fails a test.
+
+```mermaid
+sequenceDiagram
+  participant CI
+  participant BDS
+  participant Addon
+  participant Bot
+  CI->>BDS: start, online-mode off
+  CI->>Bot: go run
+  Bot->>BDS: join as a real client
+  CI->>BDS: scriptevent ns:run
+  Addon->>Bot: [RUN_ACTION] over chat
+  Bot->>BDS: the packets a player would send
+  Bot-->>Addon: [STATUS], cancelled
+  Addon->>Addon: assert server world and client view
+  Addon-->>CI: [GOTESTBDS] JSON on stdout
 ```
 
-Every flag also reads from the environment (`GOTESTBDS_ADDRESS`,
-`GOTESTBDS_BOT_NAME`, `GOTESTBDS_BOTS`, `GOTESTBDS_LOG_LEVEL`) and from
-`config.toml`, in that order of precedence — flags win, then environment, then
-file. That makes the same binary usable from a shell, a CI job and an
-orchestrator without three ways to configure it.
+An external program can drive the same bots without the addon in the loop.
+`--control` (default `127.0.0.1:24781`) serves `GET /bots` and
+`POST /bots/{name}/instruction`. Set `GOTESTBDS_CONTROL_TOKEN` if that port is
+reachable past loopback. The header is the raw token, no `Bearer` prefix.
 
-Point `--address` at BDS directly, not at a proxy. Bots have no Xbox Live
-identity, so they need an instance with `online-mode=false` and the allowlist
-off — normally a dev or staging instance bound to loopback.
-
-### 2. Install the SDK in your addon
-
-```bash
-npm i github:smell-of-curry/go-test-bds
-```
-
-### 3. Write a suite
+## Write a test
 
 ```typescript
-import { assert, assertEventually, defineSuite } from "go-test-bds";
+import { assertEventually, defineSuite } from "go-test-bds";
 
 export const shrineSuite = defineSuite({
   name: "Shrines",
@@ -70,7 +114,37 @@ export const shrineSuite = defineSuite({
 });
 ```
 
-### 4. Run it from your addon
+Most addons talk through chained forms. Click by position and stop when the
+server reaches a state you can observe, so a translation or a copy edit does
+not break the test:
+
+```typescript
+await ctx.bot.clickThrough({
+  until: () => getQuestStep(ctx.bot.player) === "accepted",
+  description: "the quest to be accepted",
+});
+```
+
+`bot.closeForm()` dismisses whatever is open (action, modal, or custom).
+
+## Run it
+
+Start the bot against BDS, not against a proxy:
+
+```bash
+go run . --address 127.0.0.1:19134 --name "Test Bot" --bots 1
+```
+
+Flags win, then environment (`GOTESTBDS_ADDRESS`, `GOTESTBDS_BOT_NAME`,
+`GOTESTBDS_BOTS`, `GOTESTBDS_LOG_LEVEL`), then `config.toml`.
+
+Install the SDK in the addon:
+
+```bash
+npm i github:smell-of-curry/go-test-bds
+```
+
+Wait for the join, then run the suite:
 
 ```typescript
 import { Bot, runSuites } from "go-test-bds";
@@ -79,186 +153,132 @@ const bot = await Bot.waitForJoin("Test Bot", { timeoutMs: 60_000 });
 const result = await runSuites([shrineSuite], { bots: [bot] });
 ```
 
-Trigger that from a script event so CI can start a run over the BDS console
-rather than by editing the addon:
+Fire that from a script event:
 
 ```
 scriptevent yourns:run {"runId":"ci-123"}
 ```
 
-## How the protocol works
+### What you can ask the bot to do
 
-The addon and the bot talk over chat, because that is the only bidirectional
-channel a Script API addon has to a client.
+| Act | Observe |
+| --- | --- |
+| Chat, run a command, jump, sneak, hold movement | Position, dimension, rotation (`getState`) |
+| Path to a block, look at a block, entity, or point | The block the client has (`getBlock`) |
+| Break, place, interact with a block or entity, attack | Nearby entities |
+| Open inventory transactions, change the held slot | Inventory, including a forced resync |
+| Wait for a form, click by text or index, walk a chain, dismiss | The open form, recent chat |
 
-The addon sends an instruction as a message to the bot's player, prefixed
-`[RUN_ACTION]`. The bot performs it and replies with a `[STATUS]` message that
-the addon intercepts in `beforeEvents.chatSend` and cancels, so it never reaches
-other players.
+Anything the wrapper does not cover yet is still reachable with `runAction` /
+`runActionForData`. Instruction parameter types are generated from the Go
+structs (`npm run generate:types`), so the two sides cannot drift.
 
-Each instruction carries an `id`. Responses echo it, which is what makes
-concurrent instructions and per-instruction timeouts possible — without
-correlation, two bots acting at once would resolve each other's promises. A
-response may also carry a `data` payload, which is how observation instructions
-(`getState`, `getInventory`, `getForm`, `getBlock`, `getNearbyEntities`,
-`getMessages`) return what the *client* sees rather than what the server
-believes.
+## What the client is actually told
 
-`scripts/client.ts` implements all of this. You should not need to build an
-envelope by hand; use `Bot` or, for an instruction the wrapper does not cover
-yet, `runAction` / `runActionForData`.
+An observation is only as good as what BDS pushes.
 
-### What the client is and is not told
+- **Blocks** arrive. With `block-network-ids-are-hashes` (the BDS default) a
+  chunk palette holds hashes, and chunks arrive through sub-chunk requests. The
+  bot handles both, plus `UpdateSubChunkBlocks` for edits the server makes
+  itself.
+- **Inventory does not.** A Script API write (`Container.setItem`, `addItem`,
+  `swapItems`, `EntityEquippable.setEquipment`) leaves the client's copy stale,
+  and no client action forces a refresh. Only a real inventory transaction,
+  such as `/give` or `/replaceitem`, resyncs the window, and it resyncs all of
+  it. `Bot.getInventory` forces one server-side (a marker item, added and
+  cleared) before reading. Pass `{ sync: false }` to read the stale copy on
+  purpose. That is how you assert what the client has *not* been told.
 
-An observation answers with the client's own copy, which is the point — it is
-how a test catches a desync a server-side assertion cannot see. That copy is
-only as good as what BDS pushes, and BDS does not push everything:
+## Watch a run
 
-- **Blocks** arrive normally. With `block-network-ids-are-hashes` (the BDS
-  default) a chunk's palette holds hashes rather than runtime IDs, and chunks
-  themselves arrive through sub-chunk requests; the bot handles both, plus the
-  `UpdateSubChunkBlocks` packets a server sends for its own edits.
-- **Inventory** does not. BDS never tells the client about an inventory write
-  made through the Script API — `Container.setItem`, `addItem`, `swapItems`,
-  `EntityEquippable.setEquipment` all leave the client's copy stale, and no
-  client-side action forces a refresh. Only a real inventory transaction, such
-  as `/give` or `/replaceitem`, resyncs the window, and it resyncs all of it.
-  `Bot.getInventory` therefore forces one server-side (a marker item added and
-  cleared again) before reading. Pass `{ sync: false }` to read the stale copy
-  deliberately — that is how you assert what the client has *not* been told.
+`--viewer` opens an HTTP hub (default `127.0.0.1:24680`) that streams world
+snapshots and, with `--viewer-app`, serves the three.js app:
 
-## What the SDK gives you
-
-| Module | Purpose |
-|-----|-----|
-| `bot.ts` | `Bot` — actions (chat, navigate, interact, break, forms) and observations (state, inventory, blocks, nearby entities, messages) |
-| `runner.ts` | `defineSuite`, `runSuites` — suites, per-test timeouts, tag filtering, hooks, `ctx.track` cleanups that run even when a test fails, and `ctx.screenshot` |
-| `assert.ts` | Minecraft-shaped assertions: `assertNearPosition`, `assertBlockAt`, `assertEventually`, … |
-| `wait.ts` | `waitFor`, `waitForValue`, `retry`, `sleep` — polling with timeouts that name what they were waiting for |
-| `reporter.ts` | `ConsoleReporter` for humans, `StructuredReporter` for CI (`[GOTESTBDS]`-prefixed JSON lines on stdout) |
-| `protocol.ts` | The wire format, if you are building your own client |
-
-### Walking dialogue chains
-
-Most addons talk to players through chained forms. Naming every button makes a
-test depend on wording that is translated and that designers change, so walk the
-chain positionally and stop on a condition the server can observe:
-
-```typescript
-await ctx.bot.clickThrough({
-  until: () => getQuestStep(ctx.bot.player) === "accepted",
-  description: "the quest to be accepted",
-  onForm: (form) => ctx.log(`answered "${form.title}"`),
-});
+```
+http://127.0.0.1:24680/?bot=Test%20Bot
 ```
 
-To dismiss whatever form is open without answering — action/menu, modal/message,
-or custom — use `bot.closeForm()` (alias `bot.dismissForm()`). It sends the
-`dismissForm` instruction, which works for every form type; the typed
-`*FormRespond` instructions with `ignore: true` reject the wrong type.
-
-```typescript
-await ctx.bot.waitForForm();
-await ctx.bot.closeForm();
-```
-
-### Seeing what the bot saw
-
-The optional **viewer** is an HTTP hub on the bot (`gotestbds/viewer/`) that
-streams world snapshots and serves a three.js web app. Turn it on with
-`-viewer` (plus `-viewer-address`, `-viewer-artifacts`, `-viewer-app` as needed),
-the matching `GOTESTBDS_VIEWER*` env vars, or a `[Viewer]` section in
-`config.toml`. Details and the capture harness live in
-[`viewer/README.md`](viewer/README.md); the wire contract is
-[`viewer/PROTOCOL.md`](viewer/PROTOCOL.md).
-
-With a viewer attached, a test can capture a still of the bot's view. It
-returns null instead of throwing when nobody is rendering, so the same test
-runs unchanged without a viewer:
+`C` cycles first-person, follow, and orbit. From a test:
 
 ```typescript
 await ctx.screenshot("after-the-shrine-lights-up");
 ```
 
-Stills and one whole-run video (`run.webm`) are reported as artefacts on the
-`testEnd` and `runEnd` events. Capture is best effort — unregistered
-`screenshot` / missing harness never fails a test.
+That returns null when nobody is rendering. The same test runs in CI with or
+without a viewer. Stills and one `run.webm` show up as artefacts on `testEnd`
+and `runEnd`.
 
-### Reporting to CI
+Pack-specific HUD, title tokens, and form routing live in an extension
+directory (`--viewer-extensions`). The viewer paints the server's JSON UI
+without per-pack code. The extension API is in
+[viewer/README.md](viewer/README.md#viewer-extensions).
 
-`StructuredReporter` prints one JSON object per event, prefixed
-`[GOTESTBDS]`, to BDS stdout:
+## Render a short
+
+Record a take while the bot plays, then render it later. Film mode does not
+open a live stream. It replays the recording on a virtual clock, one output
+frame at a time, so motion, animation, particles, and the sky all read virtual
+time. The default camera is the actor. A camera track replaces it after the
+fact, so you can re-shoot the camera without playing the scene again. Software
+GL is enough (`--gpu` defaults to SwiftShader).
+
+Build the viewer once (`cd viewer && npm install && npm run build`). Record
+from the repo root while the bot plays:
+
+```bash
+go run . --viewer --viewer-app ./viewer/dist --record ./take \
+  --address 127.0.0.1:19134 --name "Test Bot"
+```
+
+Render that take afterwards, from `viewer/`:
+
+```bash
+npm run film -- render \
+  --take ../take --bot "Test Bot" \
+  --from 0 --to 8 \
+  --width 1080 --height 1920 --fps 60 \
+  --out ./clip.mp4
+```
+
+Odd sizes are padded by one pixel for the encoder. Diagnostic HUD, name tags,
+and view bobbing stay off unless you ask for them. Details are in
+[viewer/README.md](viewer/README.md#film-mode).
+
+This is enough to film a server that has no real client in the loop. Bots
+stage the scene and record the take. The viewer renders every frame. A separate
+editor can lay titles, music, and a generated voice on top. That editor is not
+this repo. The picture is.
+
+<p align="center">
+  <img src="images/short.jpg" width="280" alt="A finished vertical short. The city footage is the viewer. The title sits on top.">
+</p>
+
+<p align="center">
+  <sub>A promo short cut from a take like the clips above. Footage from this viewer. Type and voice from elsewhere.</sub>
+</p>
+
+## Report to CI
+
+`StructuredReporter` writes one JSON object per event, prefixed `[GOTESTBDS]`:
 
 ```
 [GOTESTBDS]{"kind":"testEnd","suite":"Shrines","name":"...","status":"passed","durationMs":812}
 [GOTESTBDS]{"kind":"runEnd","runId":"ci-123","totals":{"total":1,"passed":1,"failed":0,"skipped":0}}
 ```
 
-Whatever supervises BDS can tail stdout, aggregate those events, and decide a
-build's fate without parsing human-readable log output.
+Whatever supervises BDS tails stdout and decides the build. No log scraping.
 
-## Regenerating instruction types
+| Module | Role |
+| --- | --- |
+| `bot.ts` | Actions and observations |
+| `runner.ts` | Suites, timeouts, tag filters, hooks, `ctx.track`, `ctx.screenshot` |
+| `assert.ts` | `assertNearPosition`, `assertBlockAt`, `assertEventually`, and the usual equality checks |
+| `wait.ts` | `waitFor`, `waitForValue`, `retry`, `sleep`. Timeouts name what they were waiting for |
+| `reporter.ts` | `ConsoleReporter` for humans, `StructuredReporter` for CI |
+| `protocol.ts` | The chat envelope, if you are building your own client |
 
-The TypeScript instruction parameter types are generated from the Go
-instruction structs, so the two cannot drift:
-
-```bash
-npm run generate:types
-```
-
-Adding an instruction means adding it in `gotestbds/instruction/`, registering it
-in `pull.go`, regenerating, and — if it is worth a friendlier signature — adding a
-method to `Bot`.
-
-## Viewer extensions
-
-The viewer paints a server's resource-pack JSON UI (`ui/*.json` from the pack
-stack) without any per-pack code. Pack-specific overlays and bind quirks live
-in a directory of ES modules the bot loads at runtime.
-
-```bash
-go run . --viewer --viewer-extensions ./my-ui
-# or
-GOTESTBDS_VIEWER_EXTENSIONS=./my-ui
-```
-
-The directory needs a `manifest.json`:
-
-```json
-{
-  "modules": ["./overlay.mjs"],
-  "bot": { "titleTokenPrefix": "@@" }
-}
-```
-
-`bot.titleTokenPrefix` (or `--title-token-prefix` / `GOTESTBDS_TITLE_TOKEN_PREFIX`)
-splits SetTitle writes of the form `prefix + token + ":" + value` onto the
-`titleToken` SSE event and hides them from the plain title lane. Empty prefix
-(the default) leaves every title as plain text and emits no token frames.
-Flag and env win over the manifest.
-
-The hub serves the directory at `GET /extensions/…` and advertises it from
-`GET /viewer.json`. JSON UI still comes from the server's resource pack.
-Pack-specific screens, layout, and title chrome belong in a module.
-
-Each module exports `viewerExtension` (or a default object):
-
-| Field | Role |
-|---|---|
-| `hudScreens` | Extra `root_panel` children to keep, or `{ id, namespace, name, wrapStack? }` fallbacks to mount |
-| `layoutRules` | Namespace/name corrections: `iconHosts`, `capRight`, `clipDock`, `maxWidth`, `layoutHiddenChildren`, `stackFactoryChildNames`, `clampToViewport`. Absent rules change nothing |
-| `titleTokenClearDelayMs` | Token name → ms to hold a non-empty value after an empty clear |
-| `captureGates` | `{ labelIncludes, ready(tokens, root) }` still gates for `noSettle` captures |
-| `preloadTextures` | Pack texture paths (no extension) warmed before first paint |
-| `resolveTitle(input)` | Raw `#hud_title_text_string`. First module that defines it wins. `input` is `{ title, subtitle, actionBar, tokens }` |
-| `seedGlobals(tokens, set)` | Extra JSON UI globals (`set("#prop", value)`) before bind |
-| `onBind(ctx)` | Mutate `ctx.props` after generic bind. `ctx` carries `name`, `namespace`, `authored` (`$variables`), `bindings`, `title`, `subtitle`, `actionBar`, `tokens`, `form`, `bot`, `vitals` |
-| `afterTree({ root, title, tokens })` | Walk the bound HUD tree once per frame, before layout |
-| `mount(host, api)` | DOM overlay. `api.onFrame(frame)` receives title, subtitle, actionBar, `tokens`, `form`, `bot`, `vitals` |
-| `formRoutes` | `{ flag, screen }` pairs. First title-flag match picks a JSON UI screen (`namespace.name`). Absent → vanilla long/custom form |
-
-`tokens` is the latest prefixed title write per token name (the `titleToken` stream event). No prefix → `{}`.
+You should not build that envelope by hand. Use `Bot`.
 
 ## License
 
-...
+[ISC](https://www.isc.org/licenses/).

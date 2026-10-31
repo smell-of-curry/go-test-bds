@@ -193,3 +193,53 @@ testdata/         recorded JSONL + expected counts + smoke.png
 tests/            Playwright smoke + Go golden stream + capture harness + fixture SSE server
 ```
 
+## Viewer extensions
+
+The viewer paints a server's resource-pack JSON UI (`ui/*.json` from the pack
+stack) without any per-pack code. Pack-specific overlays and bind quirks live
+in a directory of ES modules the bot loads at runtime.
+
+```bash
+go run . --viewer --viewer-extensions ./my-ui
+# or
+GOTESTBDS_VIEWER_EXTENSIONS=./my-ui
+```
+
+The directory needs a `manifest.json`:
+
+```json
+{
+  "modules": ["./overlay.mjs"],
+  "bot": { "titleTokenPrefix": "@@" }
+}
+```
+
+`bot.titleTokenPrefix` (or `--title-token-prefix` / `GOTESTBDS_TITLE_TOKEN_PREFIX`)
+splits SetTitle writes of the form `prefix + token + ":" + value` onto the
+`titleToken` SSE event and hides them from the plain title lane. Empty prefix
+(the default) leaves every title as plain text and emits no token frames.
+Flag and env win over the manifest.
+
+The hub serves the directory at `GET /extensions/…` and advertises it from
+`GET /viewer.json`. JSON UI still comes from the server's resource pack.
+Pack-specific screens, layout, and title chrome belong in a module.
+
+Each module exports `viewerExtension` (or a default object):
+
+| Field | Role |
+| --- | --- |
+| `hudScreens` | Extra `root_panel` children to keep, or `{ id, namespace, name, wrapStack? }` fallbacks to mount |
+| `layoutRules` | Namespace/name corrections: `iconHosts`, `capRight`, `clipDock`, `maxWidth`, `layoutHiddenChildren`, `stackFactoryChildNames`, `clampToViewport`. Absent rules change nothing |
+| `titleTokenClearDelayMs` | Token name → ms to hold a non-empty value after an empty clear |
+| `captureGates` | `{ labelIncludes, ready(tokens, root) }` still gates for `noSettle` captures |
+| `preloadTextures` | Pack texture paths (no extension) warmed before first paint |
+| `resolveTitle(input)` | Raw `#hud_title_text_string`. First module that defines it wins. `input` is `{ title, subtitle, actionBar, tokens }` |
+| `seedGlobals(tokens, set)` | Extra JSON UI globals (`set("#prop", value)`) before bind |
+| `onBind(ctx)` | Mutate `ctx.props` after generic bind. `ctx` carries `name`, `namespace`, `authored` (`$variables`), `bindings`, `title`, `subtitle`, `actionBar`, `tokens`, `form`, `bot`, `vitals` |
+| `afterTree({ root, title, tokens })` | Walk the bound HUD tree once per frame, before layout |
+| `mount(host, api)` | DOM overlay. `api.onFrame(frame)` receives title, subtitle, actionBar, `tokens`, `form`, `bot`, `vitals` |
+| `formRoutes` | `{ flag, screen }` pairs. First title-flag match picks a JSON UI screen (`namespace.name`). Absent → vanilla long/custom form |
+
+`tokens` is the latest prefixed title write per token name (the `titleToken`
+stream event). No prefix → `{}`.
+
