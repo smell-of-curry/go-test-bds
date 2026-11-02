@@ -927,6 +927,9 @@ func (e *encoder) encodeEntity(a *actor.Actor, ent gw.Entity) Entity {
 	if out.Props == nil {
 		out.Props = map[string]any{}
 	}
+	if v, ok := ent.(interface{ Vehicle() int64 }); ok {
+		out.Vehicle = v.Vehicle()
+	}
 	if idn, ok := ent.(interface{ UUID() uuid.UUID }); ok && a != nil {
 		if ap, ok := a.Appearance(idn.UUID()); ok {
 			out.Skin = &EntitySkin{

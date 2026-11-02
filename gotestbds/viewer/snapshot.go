@@ -340,6 +340,9 @@ type Entity struct {
 	// Emote is the latest emote on this entity. Replaced by a newer one;
 	// cleared when the entity is removed. The renderer chooses the duration.
 	Emote *EntityEmote `json:"emote,omitempty"`
+	// Vehicle is the ridden entity's unique id while this entity is a rider.
+	// Omitted when not riding. Recorded from SetActorLink.
+	Vehicle int64 `json:"vehicle,omitempty"`
 }
 
 // EntitySkin points at a PNG of the player's skin texture.

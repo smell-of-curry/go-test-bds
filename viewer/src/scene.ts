@@ -4,6 +4,7 @@ import type { CameraController } from "./camera";
 import { CloudField } from "./clouds";
 import {
   addLocomotionPoses,
+  addRidePoses,
   applyBonePoses,
   applyEntityYaw,
   buildItemSprite,
@@ -928,6 +929,8 @@ export class ViewerScene {
       }
       node.group.visible = this.worldVisible;
       node.lifeSec += dtSec;
+      // Keep server seating and heading: mounts and passengers have different offsets.
+      const riding = typeof ent.vehicle === "number" && ent.vehicle !== 0;
       node.group.position.set(ent.pos[0], ent.pos[1], ent.pos[2]);
       if (ent.type === "minecraft:item" && node.itemSprite) {
         tickDroppedItem(node.itemSprite.root, node.lifeSec, 0);
@@ -936,11 +939,17 @@ export class ViewerScene {
         const poses: Map<string, BoneAnimPose> = node.animator
           ? node.animator.tick(dtSec, ent, null)
           : new Map();
-        const speed = node.animator
-          ? node.animator.horizontalBlocksPerSec
-          : stepHorizontalMove(node.move, ent.pos, dtSec, ent.vel).blocksPerSec;
-        tickLocomotion(node.loco, dtSec, speed, ent.swing ?? 0);
-        addLocomotionPoses(node.loco, node.model.bones.keys(), poses);
+        if (riding) {
+          tickLocomotion(node.loco, dtSec, 0, 0);
+          addRidePoses(node.model.bones.keys(), poses);
+        } else {
+          const speed = node.animator
+            ? node.animator.horizontalBlocksPerSec
+            : stepHorizontalMove(node.move, ent.pos, dtSec, ent.vel)
+                .blocksPerSec;
+          tickLocomotion(node.loco, dtSec, speed, ent.swing ?? 0);
+          addLocomotionPoses(node.loco, node.model.bones.keys(), poses);
+        }
         this.applyEmote(ent, poses);
         const headPitch = node.animator?.drivesHead() ? 0 : (ent.rot[1] ?? 0);
         applyBonePoses(node.model.bones, poses, headPitch);

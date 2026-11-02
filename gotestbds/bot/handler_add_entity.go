@@ -16,23 +16,33 @@ type AddEntityHandler struct{}
 func (*AddEntityHandler) Handle(p packet.Packet, b *Bot, a *actor.Actor) error {
 	ent := entity.CreateFromPacket(p)
 	var rot cube.Rotation
+	var links []protocol.EntityLink
 	switch pk := p.(type) {
 	case *packet.AddActor:
+		links = pk.EntityLinks
 		rot = cube.Rotation{float64(pk.Yaw), float64(pk.Pitch)}
 		setHeadYaw(ent, float64(pk.HeadYaw))
 		setProperties(ent, pk.EntityProperties)
 	case *packet.AddPlayer:
+		links = pk.EntityLinks
 		rot = cube.Rotation{float64(pk.Yaw), float64(pk.Pitch)}
 		setHeadYaw(ent, float64(pk.HeadYaw))
 		setProperties(ent, pk.EntityProperties)
 	}
 	ent.Move(entity.FeetOf(ent, ent.Position()), rot)
 	a.World().AddEntity(ent)
+	for _, link := range links {
+		if err := (&SetActorLinkHandler{}).Handle(&packet.SetActorLink{EntityLink: link}, b, a); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
 func setProperties(ent world.Entity, p protocol.EntityProperties) {
-	if e, ok := ent.(interface{ SetProperties(protocol.EntityProperties) }); ok {
+	if e, ok := ent.(interface {
+		SetProperties(protocol.EntityProperties)
+	}); ok {
 		e.SetProperties(p)
 	}
 }

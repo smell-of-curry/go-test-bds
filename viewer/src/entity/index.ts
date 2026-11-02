@@ -41,6 +41,7 @@ export {
 } from "./animation";
 export {
   addLocomotionPoses,
+  addRidePoses,
   classifyLimb,
   createLocomotion,
   tickLocomotion,

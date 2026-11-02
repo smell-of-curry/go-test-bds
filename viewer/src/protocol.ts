@@ -139,6 +139,8 @@ export interface Entity {
   skin?: PlayerSkin;
   /** Present while a persona emote is playing. */
   emote?: EntityEmote;
+  /** Ridden entity unique id. Absent when this entity is not a rider. */
+  vehicle?: number;
 }
 
 export interface LookingAt {

@@ -493,6 +493,9 @@ components carry geometry / material_instances (network palette wins over any
     `geometry.humanoid.custom` is wide.
   - `geometry` is the resource patch's `geometry.default`, or `""` when the
     patch is missing or unparsable.
+- `vehicle` is the ridden entity unique id, from `SetActorLink` or spawn-packet
+  links. Omitted when not riding. It is a unique id (`uid`), not a runtime id
+  (`rid`). Rider position and heading remain the server-provided values.
 - `emote` is the latest `packet.Emote` for that entity's runtime id (and the
   emote the bot itself just sent). A newer emote replaces it. It stays until
   the entity is removed; the renderer decides how long to play it.

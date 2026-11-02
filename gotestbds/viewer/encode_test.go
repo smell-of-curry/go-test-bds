@@ -466,6 +466,24 @@ func TestColumnSectionsNeverNull(t *testing.T) {
 	}
 }
 
+func TestEncodeRiderVehicle(t *testing.T) {
+	dfworld.DefaultBlockRegistry.Finalize()
+	ent := entity.NewEnt(mgl64.Vec3{1, 64, 2}, protocol.EntityMetadata{}, 42, -42, "minecraft:player")
+	ent.SetVehicle(-99)
+	enc := newEncoder("TestBot", 8, 0)
+	out := enc.encodeEntity(nil, ent)
+	if out.Vehicle != -99 {
+		t.Fatalf("vehicle=%d", out.Vehicle)
+	}
+	raw, err := json.Marshal(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(raw, []byte(`"vehicle":-99`)) {
+		t.Fatalf("json missing vehicle: %s", raw)
+	}
+}
+
 // TestEncodeDroppedItemUsesHeldMain ensures dropped stacks ride held.main via Item().
 func TestEncodeDroppedItemUsesHeldMain(t *testing.T) {
 	dfworld.DefaultBlockRegistry.Finalize()

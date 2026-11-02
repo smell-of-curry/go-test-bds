@@ -33,6 +33,10 @@ type Ent struct {
 	emoteID   string
 	emoteTick uint64
 	emoteSet  bool
+
+	// vehicle is the ridden entity's unique id. 0 means not riding.
+	// Set from SetActorLink so a recording bot can draw other players mounted.
+	vehicle int64
 }
 
 // NewEnt ...
@@ -156,6 +160,22 @@ func (e *Ent) SetEmote(id string, startTick uint64) {
 	e.emoteID = id
 	e.emoteTick = startTick
 	e.emoteSet = id != ""
+}
+
+// SetVehicle records the ridden entity unique id. Pass 0 when the link is removed.
+func (e *Ent) SetVehicle(uid int64) {
+	if e == nil {
+		return
+	}
+	e.vehicle = uid
+}
+
+// Vehicle returns the ridden entity unique id, or 0 when this entity is not riding.
+func (e *Ent) Vehicle() int64 {
+	if e == nil {
+		return 0
+	}
+	return e.vehicle
 }
 
 // Emote returns the latest emote, if one has been set.

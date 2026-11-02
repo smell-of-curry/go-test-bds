@@ -5,6 +5,7 @@ import (
 
 	"github.com/df-mc/dragonfly/server/world"
 	"github.com/go-gl/mathgl/mgl32"
+	"github.com/go-gl/mathgl/mgl64"
 	"github.com/sandertv/gophertunnel/minecraft"
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
@@ -59,6 +60,43 @@ func TestUseItemOnEntitySendsInteract(t *testing.T) {
 	}
 	if data.TargetEntityRuntimeID != 5 {
 		t.Fatalf("target = %d", data.TargetEntityRuntimeID)
+	}
+}
+
+func TestSetActorLinkRecordsOtherRiders(t *testing.T) {
+	a, _ := newRecordingActor(t)
+	rider := entity.NewEnt(mgl64.Vec3{1, 64, 1}, nil, 11, -77, "minecraft:player")
+	mount := entity.NewEnt(mgl64.Vec3{1, 64, 1}, nil, 12, -88, "pokeb:bike")
+	a.World().AddEntity(rider)
+	a.World().AddEntity(mount)
+	err := (&SetActorLinkHandler{}).Handle(&packet.SetActorLink{
+		EntityLink: protocol.EntityLink{
+			RiddenEntityUniqueID: mount.UniqueID(),
+			RiderEntityUniqueID:  rider.UniqueID(),
+			Type:                 protocol.EntityLinkRider,
+		},
+	}, nil, a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rider.Vehicle() != mount.UniqueID() {
+		t.Fatalf("rider vehicle = %d, want %d", rider.Vehicle(), mount.UniqueID())
+	}
+	if a.VehicleUniqueID() != 0 {
+		t.Fatalf("recording bot vehicle = %d, want 0", a.VehicleUniqueID())
+	}
+	err = (&SetActorLinkHandler{}).Handle(&packet.SetActorLink{
+		EntityLink: protocol.EntityLink{
+			RiddenEntityUniqueID: mount.UniqueID(),
+			RiderEntityUniqueID:  rider.UniqueID(),
+			Type:                 protocol.EntityLinkRemove,
+		},
+	}, nil, a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rider.Vehicle() != 0 {
+		t.Fatalf("rider vehicle after unlink = %d", rider.Vehicle())
 	}
 }
 
@@ -128,5 +166,32 @@ func TestSetActorLinkSteerSendsPredictedVehicle(t *testing.T) {
 	}
 	if a.VehicleUniqueID() != 0 {
 		t.Fatalf("vehicle after unlink = %d", a.VehicleUniqueID())
+	}
+}
+
+func TestAddEntityRecordsSpawnRiderLinks(t *testing.T) {
+	for _, player := range []bool{false, true} {
+		name := "actor"
+		if player {
+			name = "player"
+		}
+		t.Run(name, func(t *testing.T) {
+			a, _ := newRecordingActor(t)
+			links := []protocol.EntityLink{{RiderEntityUniqueID: -77, RiddenEntityUniqueID: -88, Type: protocol.EntityLinkPassenger}}
+			var p packet.Packet = &packet.AddActor{EntityRuntimeID: 11, EntityUniqueID: -77, EntityType: "minecraft:pig", EntityLinks: links}
+			if player {
+				p = &packet.AddPlayer{EntityRuntimeID: 11, AbilityData: protocol.AbilityData{EntityUniqueID: -77}, EntityLinks: links}
+			}
+			if err := (&AddEntityHandler{}).Handle(p, nil, a); err != nil {
+				t.Fatal(err)
+			}
+			rider, ok := a.World().EntityByUniqueID(-77)
+			if !ok {
+				t.Fatal("rider missing")
+			}
+			if got := rider.(interface{ Vehicle() int64 }).Vehicle(); got != -88 {
+				t.Fatalf("vehicle = %d, want -88", got)
+			}
+		})
 	}
 }

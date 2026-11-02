@@ -21,6 +21,14 @@ const PHASE_PER_BLOCK = 3.5;
 const LEG_SWING_DEG = 34;
 /** Max arm swing in degrees at full amplitude. */
 const ARM_SWING_DEG = 28;
+/**
+ * Limb pitch while riding, matching vanilla `animation.player.riding.*`.
+ * Negative X swings the limb toward the face. Positive stuck the arms and
+ * legs out the back, so the body read as facing the tail.
+ */
+const RIDE_LEG_DEG = -80;
+/** Arm pitch while riding, reaching toward the bars. */
+const RIDE_ARM_DEG = -36;
 /** One-shot arm swing duration in seconds. */
 const SWING_SEC = 0.35;
 /** Peak one-shot swing rotation in degrees (arm raises forward/up). */
@@ -129,6 +137,28 @@ export function classifyLimb(boneName: string): LimbClass | null {
     phaseSign: lead ? 1 : -1,
     side: left ? "left" : "right",
   };
+}
+
+/**
+ * Sit pose: both legs and both arms in the forward swing, no gait.
+ * Bones a pack animation already rotated this frame are left alone.
+ *
+ * @param boneNames - Model bone names.
+ * @param poses - Pose accumulator (mutated).
+ */
+export function addRidePoses(
+  boneNames: Iterable<string>,
+  poses: Map<string, BoneAnimPose>,
+): void {
+  for (const name of boneNames) {
+    const limb = classifyLimb(name);
+    if (!limb) continue;
+    const existing = poses.get(name);
+    if (existing && hasRotation(existing)) continue;
+    const pose = existing ?? emptyBonePose();
+    pose.rotation[0] += limb.kind === "leg" ? RIDE_LEG_DEG : RIDE_ARM_DEG;
+    poses.set(name, pose);
+  }
 }
 
 /**

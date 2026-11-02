@@ -65,6 +65,23 @@ export function stepHorizontalMove(
   vel: [number, number, number],
 ): MoveSample {
   const dt = Number.isFinite(dtSec) && dtSec > 0 ? dtSec : 0;
+  const velBps =
+    Math.hypot(
+      Number.isFinite(vel[0]) ? vel[0] : 0,
+      Number.isFinite(vel[2]) ? vel[2] : 0,
+    ) * TICKS_PER_SEC;
+  // A film present redraws the same instant (dt 0). Treating that as a stop
+  // zeroed modified_move_speed and the bike controller dropped into idle.
+  if (!(dt > 0)) {
+    if (!track.last) track.last = [pos[0], pos[1], pos[2]];
+    const blocksPerSec = Math.max(velBps, track.smoothed);
+    return {
+      blocksPerSec,
+      moveSpeed: blocksPerSec / TICKS_PER_SEC,
+      distance: 0,
+      delta: [0, 0, 0],
+    };
+  }
   let dx = 0;
   let dy = 0;
   let dz = 0;
@@ -77,18 +94,13 @@ export function stepHorizontalMove(
     if (horiz > TELEPORT_BLOCKS) {
       track.smoothed = 0;
     } else {
-      const instant = dt > 0 ? horiz / dt : 0;
-      const alpha = dt > 0 ? 1 - Math.exp(-dt / SPEED_TAU_SEC) : 1;
+      const instant = horiz / dt;
+      const alpha = 1 - Math.exp(-dt / SPEED_TAU_SEC);
       track.smoothed += (instant - track.smoothed) * alpha;
       distance = horiz;
     }
   }
   track.last = [pos[0], pos[1], pos[2]];
-  const velBps =
-    Math.hypot(
-      Number.isFinite(vel[0]) ? vel[0] : 0,
-      Number.isFinite(vel[2]) ? vel[2] : 0,
-    ) * TICKS_PER_SEC;
   const blocksPerSec = Math.max(velBps, track.smoothed);
   return {
     blocksPerSec,
