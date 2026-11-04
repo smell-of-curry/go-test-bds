@@ -15,7 +15,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.24"
+          go-version-file: go.mod
 
       - name: Vet
         run: go vet ./...
@@ -34,11 +34,14 @@ jobs:
       - name: Setup Node.js & Cache Dependencies
         uses: actions/setup-node@v4
         with:
-          node-version: "latest"
+          node-version: "24"
           cache: "npm"
 
       - name: Install Dependencies
         run: npm ci
+
+      - name: Check ESLint
+        run: npx eslint --config eslint.config.mjs .
 
       - name: Run ESLint (SARIF)
         run: |

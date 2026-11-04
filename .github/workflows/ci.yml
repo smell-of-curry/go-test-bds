@@ -111,11 +111,16 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "24"
           cache: npm
 
       - name: Install npm dependencies
         run: npm ci
+
+      - name: Typecheck and test SDK
+        run: |
+          npx tsc --noEmit
+          npm test
 
       - name: Bundle e2e fixture pack
         run: npm run build:e2e-pack
