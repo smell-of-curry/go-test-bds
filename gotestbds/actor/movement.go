@@ -86,6 +86,9 @@ type movementData struct {
 	mc *physics.Computer
 }
 
+// HoldingInput reports whether an explicit held-input instruction owns movement.
+func (a *Actor) HoldingInput() bool { return a.holdTicks > 0 }
+
 // CurrentTick returns current tick of the actor
 func (a *Actor) CurrentTick() uint64 {
 	return a.tick

@@ -31,6 +31,11 @@ func (*CorrectPlayerMovePredictionHandler) Handle(p packet.Packet, b *Bot, a *ac
 	correct := p.(*packet.CorrectPlayerMovePrediction)
 	pos := mcmath.Vec32To64(correct.Position)
 	rot := cube.Rotation{float64(correct.Rotation[0]), float64(correct.Rotation[1])}
+	// Corrections refer to an earlier tick. Preserve the current instructed look
+	// while input is held; applying an old yaw can reverse a forward walk.
+	if a.HoldingInput() {
+		rot = a.Rotation()
+	}
 	feet := pos.Sub(mgl64.Vec3{0, eyeOffset})
 	a.Move(feet, rot)
 	a.SetVelocity(mgl64.Vec3{})

@@ -10,6 +10,7 @@ import (
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/actor"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/inventory"
+	"github.com/smell-of-curry/go-test-bds/gotestbds/mcmath/physics/movement"
 )
 
 // TestCorrectPlayerMovePredictionUsesEyeOffset: wire position matches
@@ -87,5 +88,49 @@ func TestCorrectIgnoredWhileNavigating(t *testing.T) {
 	}
 	if a.Position() != before {
 		t.Fatalf("Correct moved actor while navigating: %v → %v", before, a.Position())
+	}
+}
+
+// Historical correction yaw must not turn an active forward instruction around.
+func TestCorrectDuringHoldPreservesLookButAcceptsPosition(t *testing.T) {
+	world.DefaultBlockRegistry.Finalize()
+
+	conn := &recordingConn{stubConn: stubConn{game: minecraft.GameData{
+		EntityRuntimeID: 1,
+		EntityUniqueID:  1,
+		Dimension:       0,
+		ChunkRadius:     8,
+		PlayerPosition:  mgl32.Vec3{10.5, 70, 10.5},
+	}}}
+	a := actor.Config{
+		Conn:      conn,
+		Inventory: inventory.NewHandle(36, 0, nil),
+		Offhand:   inventory.NewHandle(1, 0, nil),
+		Armour:    inventory.NewArmour(nil),
+		Ui:        inventory.NewHandle(54, 0, nil),
+	}.New()
+
+	a.Move(a.Position(), cube.Rotation{180, 12})
+	if _, err := a.StartHold(movement.Input{Forward: true}, 80); err != nil {
+		t.Fatal(err)
+	}
+	err := (&CorrectPlayerMovePredictionHandler{}).Handle(&packet.CorrectPlayerMovePrediction{
+		Position: mgl32.Vec3{12.5, 70 + eyeOffset, 14.5}, Rotation: mgl32.Vec2{0, 0},
+	}, nil, a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.Rotation() != (cube.Rotation{180, 12}) {
+		t.Fatalf("historical correction replaced held look: %v", a.Rotation())
+	}
+	if a.Position().X() != 12.5 || a.Position().Z() != 14.5 {
+		t.Fatalf("position correction not applied: %v", a.Position())
+	}
+	a.StopHold()
+	_ = (&CorrectPlayerMovePredictionHandler{}).Handle(&packet.CorrectPlayerMovePrediction{
+		Position: mgl32.Vec3{12.5, 70 + eyeOffset, 14.5}, Rotation: mgl32.Vec2{45, 5},
+	}, nil, a)
+	if a.Rotation() != (cube.Rotation{45, 5}) {
+		t.Fatalf("idle correction was ignored: %v", a.Rotation())
 	}
 }
