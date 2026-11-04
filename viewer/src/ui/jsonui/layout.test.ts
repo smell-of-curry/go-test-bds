@@ -11,23 +11,6 @@ import type { PropertyBag, ResolvedChild, ResolvedElement } from "./types";
 
 const VP = { width: 200, height: 100 };
 
-const sideRules = {
-  iconHosts: [
-    { namespace: "side_panel", name: "pokemon_icon_wrapper" },
-    { namespace: "side_panel", name: "pokemon_selected_indicator" },
-  ],
-  capRight: [
-    {
-      namespace: "side_panel",
-      name: "main",
-      maxWidthRatio: 0.25,
-      insetRatio: 0.5,
-      minInset: 12,
-    },
-  ],
-  clipDock: [{ namespace: "side_panel", name: "dock" }],
-};
-
 const measureStub: MeasureText = (text, fontScale) => {
   const lines = text.length ? text.split("\n") : [""];
   let maxLen = 0;
@@ -725,29 +708,23 @@ describe("layoutTree self-axis %x/%y", () => {
     assert.ok(Math.abs(tree.box.w - 2.2222 * 192) < 0.01);
   });
 
-  it("caps a right-anchored panel when a layout rule asks", () => {
-    // Capture frames are ~640gui wide; authored 427gui main + dock offset
-    // painted the tall black slab. Clamp keeps plate art on-screen.
-    const wide = { width: 640, height: 360 };
-    const main: ResolvedElement = {
-      type: "panel",
-      name: "main",
-      namespace: "side_panel",
-      props: {
+  it("keeps a right-anchored panel's authored width when it overflows", () => {
+    // Sidebar main ["222.22%y", 192] is ~426.7 wide and stays that wide
+    // when anchored to the screen's right edge.
+    const vp = { width: 200, height: 200 };
+    const w = 2.2222 * 192;
+    const tree = layoutTree(
+      el("panel", {
         size: ["222.22%y", 192],
-        anchor_from: "top_right",
-        anchor_to: "top_right",
-      },
-      controls: [],
-      bindings: [],
-    };
-    const tree = layoutTree(main, wide, {
-      measureText: measureStub,
-      rules: sideRules,
-    });
+        anchor_from: "right_middle",
+        anchor_to: "right_middle",
+      }),
+      vp,
+      { measureText: measureStub },
+    );
     assert.equal(tree.box.h, 192);
-    assert.ok(tree.box.w <= wide.width * 0.25 + 0.5);
-    assert.ok(tree.box.x + tree.box.w <= wide.width - 1);
+    assert.ok(Math.abs(tree.box.w - w) < 0.05, `w=${tree.box.w}`);
+    assert.ok(Math.abs(tree.box.x - (vp.width - w)) < 0.05, `x=${tree.box.x}`);
   });
 
   it("makes square icons with [100%y, 100%]", () => {
@@ -773,150 +750,183 @@ describe("layoutTree self-axis %x/%y", () => {
     assert.deepEqual(boxOf(tree.children[0]!), { x: 0, y: 0, w: 32, h: 32 });
   });
 
-  it("sidebar icon hosts content-size to the left of the row", () => {
-    const row: ResolvedElement = {
-      type: "panel",
-      name: "pokemon_sidebar_pokemon",
-      namespace: "side_panel",
-      props: {
+  it("sizeless panel fills the parent; a 100%y child centers in it", () => {
+    const row = el(
+      "panel",
+      {
         size: [160, 32],
         anchor_from: "top_left",
         anchor_to: "top_left",
       },
-      bindings: [],
-      controls: [
-        child("pokemon_icon_wrapper", {
-          type: "panel",
-          name: "pokemon_icon_wrapper",
-          namespace: "side_panel",
-          // Latched fill size must not disable left/content host treatment.
-          props: { size: ["100%", "100%"] },
-          bindings: [],
-          controls: [
-            child("ball_icon", {
-              type: "image",
-              name: "ball_icon",
-              namespace: "side_panel",
-              props: {
-                size: ["100%y", "100%"],
-                anchor_from: "top_left",
-                anchor_to: "top_left",
-              },
-              bindings: [],
-              controls: [],
-            }),
-          ],
-        }),
+      [
+        child(
+          "wrap",
+          el(
+            "panel",
+            {},
+            [
+              child(
+                "ball",
+                el("image", { size: ["100%y", "100%"] }, [], "ball_icon"),
+              ),
+            ],
+            "pokemon_icon_wrapper",
+          ),
+        ),
       ],
-    };
-    const tree = layoutTree(
-      row,
-      { width: 640, height: 360 },
-      { measureText: measureStub, rules: sideRules },
     );
+    const tree = layoutTree(row, VP, { measureText: measureStub });
     const host = tree.children[0]!;
-    assert.ok(
-      host.box.w <= 33 && host.box.h <= 33,
-      `host=${JSON.stringify(host.box)}`,
-    );
-    assert.ok(
-      host.box.x <= tree.box.x + 1,
-      `host.x=${host.box.x} row.x=${tree.box.x}`,
-    );
+    assert.deepEqual(boxOf(host), { x: 0, y: 0, w: 160, h: 32 });
+    const ball = host.children[0]!;
+    assert.ok(Math.abs(ball.box.w - 32) < 0.01, `w=${ball.box.w}`);
+    assert.ok(Math.abs(ball.box.h - 32) < 0.01, `h=${ball.box.h}`);
+    assert.ok(Math.abs(ball.box.x - (160 - 32) / 2) < 0.01, `x=${ball.box.x}`);
   });
 
-  it("hidden ball_icon still lays out pokemon_icon children", () => {
-    const ball: ResolvedElement = {
-      type: "image",
-      name: "ball_icon",
-      namespace: "side_panel",
-      props: {
+  it("hidden elements do not lay out children", () => {
+    const ball = el(
+      "image",
+      {
         size: [32, 32],
         visible: false,
         anchor_from: "top_left",
         anchor_to: "top_left",
       },
-      bindings: [],
-      controls: [
-        child("pokemon_icon", {
-          type: "image",
-          name: "pokemon_icon",
-          namespace: "side_panel",
-          props: {
+      [
+        child(
+          "pokemon_icon",
+          el("image", {
             size: [24, 24],
             anchor_from: "top_left",
             anchor_to: "top_left",
-          },
-          bindings: [],
-          controls: [],
-        }),
+          }),
+        ),
       ],
-    };
-    const tree = layoutTree(
-      ball,
-      { width: 640, height: 360 },
-      {
-        measureText: measureStub,
-        rules: { layoutHiddenChildren: [{ name: "ball_icon" }] },
-      },
+      "ball_icon",
     );
+    const tree = layoutTree(ball, VP, { measureText: measureStub });
     assert.equal(tree.visible, false);
-    assert.equal(tree.children.length, 1);
-    assert.ok(tree.children[0]!.box.w >= 24);
+    assert.equal(tree.children.length, 0);
   });
 
-  it("dock clips paint box but lays children against full width", () => {
-    const main: ResolvedElement = {
-      type: "panel",
-      name: "main",
-      namespace: "side_panel",
-      props: {
+  it("right-anchored offset is not clipped to the parent", () => {
+    const main = el(
+      "panel",
+      {
         size: [160, 192],
         anchor_from: "top_right",
         anchor_to: "top_right",
       },
-      bindings: [],
-      controls: [
-        child("dock", {
-          type: "image",
-          name: "dock",
-          namespace: "side_panel",
-          props: {
-            size: ["100%", "100%"],
-            offset: ["47%", "0%"],
-            anchor_from: "right_middle",
-            anchor_to: "right_middle",
-          },
-          bindings: [],
-          controls: [
-            child("marker", {
-              type: "panel",
-              name: "marker",
-              namespace: "side_panel",
-              props: {
-                size: [20, 20],
-                anchor_from: "left_middle",
-                anchor_to: "left_middle",
-              },
-              bindings: [],
-              controls: [],
-            }),
-          ],
-        }),
+      [
+        child(
+          "dock",
+          el(
+            "image",
+            {
+              size: ["100%", "100%"],
+              offset: ["47%", "0%"],
+              anchor_from: "right_middle",
+              anchor_to: "right_middle",
+            },
+            [
+              child(
+                "marker",
+                el("panel", {
+                  size: [20, 20],
+                  anchor_from: "left_middle",
+                  anchor_to: "left_middle",
+                }),
+              ),
+            ],
+            "dock",
+          ),
+        ),
       ],
-    };
+    );
     const tree = layoutTree(
       main,
       { width: 200, height: 200 },
-      { measureText: measureStub, rules: { clipDock: sideRules.clipDock } },
+      {
+        measureText: measureStub,
+      },
     );
     const dock = tree.children[0]!;
     const marker = dock.children[0]!;
-    assert.ok(dock.box.w < 160, `clipped dock w=${dock.box.w}`);
-    assert.ok(
-      marker.box.x <= dock.box.x + 1,
-      `marker.x=${marker.box.x} dock.x=${dock.box.x}`,
+    assert.ok(Math.abs(dock.box.w - 160) < 0.01, `w=${dock.box.w}`);
+    const expectedX = tree.box.x + 160 * 0.47;
+    assert.ok(Math.abs(dock.box.x - expectedX) < 0.05, `x=${dock.box.x}`);
+    assert.ok(dock.box.x + dock.box.w > 200);
+    assert.ok(Math.abs(marker.box.x - dock.box.x) < 0.01);
+  });
+
+  it("centers a sidebar ball near the right edge of a 960-wide screen", () => {
+    // GUI scale 2 on 1920×1080. main is 222.22%y × 192, right-anchored.
+    // dock offset 47% shifts that box past the screen; a sizeless wrapper
+    // fills the row and a 100%y ball centers in it (~947).
+    const vp = { width: 960, height: 540 };
+    const main = el(
+      "panel",
+      {
+        size: ["222.22%y", 192],
+        anchor_from: "right_middle",
+        anchor_to: "right_middle",
+      },
+      [
+        child(
+          "dock",
+          el(
+            "image",
+            {
+              size: ["100%", "100%"],
+              offset: ["47%", "0%"],
+              anchor_from: "right_middle",
+              anchor_to: "right_middle",
+            },
+            [
+              child(
+                "entry",
+                el(
+                  "panel",
+                  {
+                    size: ["100%", 32],
+                    anchor_from: "top_left",
+                    anchor_to: "top_left",
+                  },
+                  [
+                    child(
+                      "wrap",
+                      el("panel", {}, [
+                        child(
+                          "ball",
+                          el(
+                            "image",
+                            { size: ["100%y", "100%"] },
+                            [],
+                            "ball_icon",
+                          ),
+                        ),
+                      ]),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+            "dock",
+          ),
+        ),
+      ],
     );
+    const tree = layoutTree(main, vp, { measureText: measureStub });
+    const dock = tree.children[0]!;
+    const ball = dock.children[0]!.children[0]!.children[0]!;
+    const cx = ball.box.x + ball.box.w / 2;
+    assert.ok(Math.abs(tree.box.w - 2.2222 * 192) < 0.05);
+    assert.ok(
+      Math.abs(cx - 947) < 2,
+      `cx=${cx} ball=${JSON.stringify(ball.box)}`,
+    );
+    assert.ok(ball.box.x + ball.box.w > vp.width);
   });
 });
 

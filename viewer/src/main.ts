@@ -15,6 +15,7 @@ import { LOADING_CLEAR, ViewerScene } from "./scene";
 import { SnapshotStream, streamUrlFromSearch } from "./stream";
 import { Store } from "./store";
 import { createTexturedMesher } from "./terrain";
+import { ensureMojangles } from "./ui/mojangles";
 import { initHud } from "./ui";
 import { createJsonUiRuntime } from "./ui/jsonui/runtime";
 import { initWaypointStrip } from "./ui/waypointStrip";
@@ -210,6 +211,7 @@ try {
 } catch {
   /* fixture streams may be relative */
 }
+void ensureMojangles(jsonUiAssetBase);
 const jsonUi = createJsonUiRuntime({
   assetBaseUrl: jsonUiAssetBase,
   onExtensions(loaded) {

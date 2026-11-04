@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/sandertv/gophertunnel/minecraft"
-	"github.com/smell-of-curry/go-test-bds/gotestbds/actor"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/bot"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/instruction"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/viewer"
@@ -45,24 +44,24 @@ func (t *Test) Run() error {
 	return t.RunCtx(context.Background())
 }
 
+// sessionOpts tunes drive. The zero value is a normal bot session.
+type sessionOpts struct {
+	// passive skips local physics and outbound movement. Shadow mode sets this
+	// so the actor follows the real client instead of simulating its own walk.
+	passive bool
+	// skipSpawnGrace skips the post-spawn pause normal bots need before BDS
+	// accepts movement. Shadow must read packets immediately or the real
+	// client stalls behind an unread server connection.
+	skipSpawnGrace bool
+	// ready runs once the bot exists, before the tick loop blocks.
+	ready func(*bot.Bot)
+}
+
 // RunCtx runs text with context.
 func (t *Test) RunCtx(ctx context.Context) error {
 	// resetting rejoin value.
 	t.rejoin = false
-	if t.Logger == nil {
-		t.Logger = slog.Default()
-	}
-
-	if t.Instructions == nil {
-		t.Instructions = instruction.DefaultPull(nil)
-	}
-	if t.Viewer != nil {
-		instruction.RegisterViewer(t.Instructions, t.Viewer)
-	}
-
-	if t.InstructionPrefix == "" {
-		t.InstructionPrefix = DefaultInstructionPrefix
-	}
+	t.prepare()
 
 	// Register the stream before dial/spawn. The capture harness starts as soon
 	// as BDS `list` shows the bot, which is before pack ingest finishes —
@@ -99,18 +98,59 @@ func (t *Test) RunCtx(ctx context.Context) error {
 		t.Viewer.WriteRecordingMeta()
 	}
 
+	if err := t.drive(ctx, conn, sessionOpts{}); err != nil {
+		return err
+	}
+	if t.rejoin {
+		// rejoining...
+		return t.RunCtx(ctx)
+	}
+	return nil
+}
+
+// prepare fills logger, instruction pull, and prefix defaults.
+func (t *Test) prepare() {
+	if t.Logger == nil {
+		t.Logger = slog.Default()
+	}
+	if t.Instructions == nil {
+		t.Instructions = instruction.DefaultPull(nil)
+	}
+	if t.Viewer != nil {
+		instruction.RegisterViewer(t.Instructions, t.Viewer)
+	}
+	if t.InstructionPrefix == "" {
+		t.InstructionPrefix = DefaultInstructionPrefix
+	}
+}
+
+// drive runs the bot on an already-spawned connection until it stops.
+//
+// @param ctx Cancelled to close the bot.
+// @param conn Spawned server connection. Closed when the tick loop exits.
+// @param opts Passive and spawn-grace knobs. Zero value matches a normal bot.
+// @returns nil when the tick loop stops. Rejoin is handled by RunCtx.
+func (t *Test) drive(ctx context.Context, conn bot.Conn, opts sessionOpts) error {
 	b := bot.NewBot(conn, t.Logger.With("src", "bot"))
+	if opts.passive {
+		b.SetPassive(true)
+	}
+	// Before the loop: the first tick must already export to the viewer.
+	// Execute would race that tick and drop the opening snapshots.
+	b.SetHandler(NewTestingHandler(b, t))
+	if opts.ready != nil {
+		opts.ready(b)
+	}
 	if t.Fleet != nil {
+		botName := conn.IdentityData().DisplayName
 		t.Fleet.Add(botName, b, t.Instructions, t.InstructionTimeout)
 		defer t.Fleet.Remove(botName, b)
 	}
-	h := NewTestingHandler(b, t)
-	b.Execute(func(a *actor.Actor) {
-		a.Handle(h)
-	})
 
 	// without this delay BDS won't let Actor move.
-	time.Sleep(time.Second * 2)
+	if !opts.skipSpawnGrace {
+		time.Sleep(time.Second * 2)
+	}
 
 	// The tick loop only stops when the bot is closed, so cancellation has to
 	// close it: without this the bot ignored SIGTERM, outlived whatever spawned
@@ -127,11 +167,6 @@ func (t *Test) RunCtx(ctx context.Context) error {
 
 	b.StartTickLoop()
 	close(stopped)
-
-	if t.rejoin {
-		// rejoining...
-		return t.RunCtx(ctx)
-	}
 	return nil
 }
 

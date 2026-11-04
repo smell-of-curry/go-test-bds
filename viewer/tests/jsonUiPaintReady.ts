@@ -2,7 +2,7 @@
  * Deterministic paint settle for JSON-UI golden screenshots.
  *
  * JSON UI paints textures via CSS `background-image` / `border-image` (not
- * `<img>`), and labels use the `"Minecraft"` font stack. A fixed timeout
+ * `<img>`), and labels use Mojangles outlines. A fixed timeout
  * races font fallback swaps and unfinished CSS image decodes — goldens then
  * flake on text rows, HP-bar fills, and pokemon/ball icons that bind a frame
  * later than the dock chrome.
@@ -153,12 +153,17 @@ export async function waitForJsonUiPaintReady(page: Page): Promise<Buffer> {
     }
 
     await document.fonts.ready;
+    const w = window as unknown as { __mojanglesReady?: boolean };
+    if (document.getElementById("mojangles-face")) {
+      const start = performance.now();
+      while (w.__mojanglesReady !== true && performance.now() - start < 8000) {
+        await new Promise<void>((r) => setTimeout(r, 20));
+      }
+    }
     try {
-      await document.fonts.load(
-        '16px "Minecraft", ui-sans-serif, system-ui, "Segoe UI", sans-serif',
-      );
+      await document.fonts.load('10px "Mojangles"');
     } catch {
-      /* ignore */
+      /* 404 — fallback stack */
     }
 
     const urls = last.split("\n").filter(Boolean);

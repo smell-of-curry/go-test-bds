@@ -1,7 +1,15 @@
 /**
- * Minecraft `§` legacy format codes → coloured DOM spans.
- * Unknown codes are stripped. Does not implement obfuscated/`k`.
+ * Minecraft `§` legacy format codes → coloured runs.
+ * Unknown codes are stripped. Obfuscated `§k` is stripped.
+ * When Mojangles outlines are loaded, the fragment is a pixel canvas
+ * (shadow at +1 design pixel, colour × 0.25) instead of CSS text.
  */
+
+import {
+  mojanglesLoaded,
+  renderMojanglesCanvas,
+  type PaintRun,
+} from "./mojangles";
 
 const COLOR: Record<string, string> = {
   "0": "#000000",
@@ -95,39 +103,89 @@ export function parseFormatCodes(input: string): FormatSegment[] {
 }
 
 /**
- * Map Minecraft private-use glyphs the canvas font lacks onto unicode, and
- * drop unknown PUA codepoints (avoids tofu next to sidebar names).
- *
- * Pack font maps: U+E108 male, U+E109 female, U+E10A shiny.
+ * Keep pack private-use glyphs (drawn from `font/glyph_XX.png`) and drop
+ * other PUA code points so a missing page does not paint tofu.
  *
  * @param input - Raw text that may contain PUA glyphs.
- * @returns text safe for system/canvas fonts.
+ * @returns text with unknown PUA removed. U+E108/E109/E10A stay as themselves.
  */
 export function mapMinecraftGlyphs(input: string): string {
   let out = "";
   for (const ch of input) {
     const code = ch.codePointAt(0) ?? 0;
-    if (code === 0xe108) out += "♂";
-    else if (code === 0xe109) out += "♀";
-    else if (code === 0xe10a) out += "★";
-    else if (code >= 0xe000 && code <= 0xf8ff) continue;
-    else out += ch;
+    // Male / female / shiny pages ship in resource packs; the atlas draws them.
+    if (code === 0xe108 || code === 0xe109 || code === 0xe10a) {
+      out += ch;
+      continue;
+    }
+    if (code >= 0xe000 && code <= 0xf8ff) continue;
+    out += ch;
   }
   return out;
 }
 
+/** Options for {@link formatCodesToFragment}. */
+export interface FormatPaint {
+  /** Base label color, overridden by explicit legacy format codes. */
+  color?: string;
+  /** Design pixel → CSS pixel. Default 2 (Bedrock GUI scale 2). */
+  guiScale?: number;
+  /** Bedrock shadow: +1 design pixel, colour × 0.25. */
+  shadow?: boolean;
+}
+
 /**
- * Render format-coded text into a document fragment of coloured spans.
+ * Render format-coded text. Mojangles, when loaded, becomes one pixel canvas;
+ * otherwise coloured spans on the fallback stack.
  *
  * @param input - Raw text that may contain `§` codes.
+ * @param paint - Scale and shadow, including the fallback spans.
  * @returns a DocumentFragment ready to append.
  */
-export function formatCodesToFragment(input: string): DocumentFragment {
+export function formatCodesToFragment(
+  input: string,
+  paint?: FormatPaint,
+): DocumentFragment {
   const frag = document.createDocumentFragment();
-  for (const seg of parseFormatCodes(mapMinecraftGlyphs(input))) {
+  const mapped = mapMinecraftGlyphs(input);
+  const segs = parseFormatCodes(mapped);
+  if (mojanglesLoaded()) {
+    const runs: PaintRun[] = segs
+      .filter((s) => s.text)
+      .map((s) => ({
+        text: s.text,
+        color: s.color ?? paint?.color,
+        bold: s.bold,
+        italic: s.italic,
+      }));
+    const canvas = renderMojanglesCanvas(runs, {
+      guiScale: paint?.guiScale ?? 2,
+      shadow: paint?.shadow ?? false,
+    });
+    if (canvas) {
+      // Canvas has no text node. Hidden spans keep the string and § colour
+      // for queries (tests, a11y) without painting a second font.
+      frag.appendChild(canvas);
+      for (const seg of segs) {
+        if (!seg.text) continue;
+        const span = document.createElement("span");
+        span.hidden = true;
+        if (seg.color) span.style.color = seg.color;
+        span.textContent = seg.text;
+        frag.appendChild(span);
+      }
+      return frag;
+    }
+  }
+  for (const seg of segs) {
     if (!seg.text) continue;
     const span = document.createElement("span");
     if (seg.color) span.style.color = seg.color;
+    if (paint?.shadow) {
+      const offset = paint.guiScale ?? 2;
+      const color = seg.color ?? paint.color ?? "#ffffff";
+      span.style.textShadow = `${offset}px ${offset}px 0 color-mix(in srgb, ${color} 25%, black)`;
+    }
     if (seg.bold) span.style.fontWeight = "700";
     if (seg.italic) span.style.fontStyle = "italic";
     if (seg.underline || seg.strike) {

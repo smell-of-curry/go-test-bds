@@ -13,6 +13,63 @@ import {
   loadJsonlFrames,
   type JsonlFrame,
 } from "./fixtureServer";
+import { handleFontFile } from "./fontFile";
+
+test("installed Mojangles paints base label colors and format overrides", async ({
+  page,
+}, testInfo) => {
+  test.skip(
+    !process.env.GOTESTBDS_VIEWER_FONT_DIR,
+    "requires an installed Minecraft font",
+  );
+  const h = await startHarness();
+  try {
+    await openViewer(
+      page,
+      `${h.base}?stream=${encodeURIComponent(h.streamUrl)}`,
+    );
+    await page.waitForFunction(
+      () =>
+        (window as unknown as { __mojanglesLoaded?: boolean })
+          .__mojanglesLoaded === true,
+    );
+    const colors = await page.evaluate(async () => {
+      const modulePath = "/src/ui/formatCodes.ts";
+      const { formatCodesToFragment } = await import(modulePath);
+      const panel = document.createElement("div");
+      panel.id = "font-color-probe";
+      panel.style.cssText =
+        "position:fixed;left:20px;top:240px;z-index:100;background:#bbb;padding:20px";
+      panel.appendChild(
+        formatCodesToFragment("Dark label §cRed", {
+          color: "rgb(16, 32, 48)",
+          guiScale: 4,
+          shadow: true,
+        }),
+      );
+      document.body.appendChild(panel);
+      const canvas = panel.querySelector("canvas")!;
+      const pixels = canvas
+        .getContext("2d")!
+        .getImageData(0, 0, canvas.width, canvas.height).data;
+      const seen = new Set<string>();
+      for (let i = 0; i < pixels.length; i += 4) {
+        if (pixels[i + 3] === 255)
+          seen.add(`${pixels[i]},${pixels[i + 1]},${pixels[i + 2]}`);
+      }
+      return [...seen];
+    });
+    expect(colors).toContain("16,32,48");
+    expect(colors).toContain("255,85,85");
+    expect(colors).toContain("4,8,12");
+    await page
+      .locator("#font-color-probe")
+      .screenshot({ path: testInfo.outputPath("mojangles-colors.png") });
+  } finally {
+    await page.close().catch(() => undefined);
+    await h.close();
+  }
+});
 
 const here = dirname(fileURLToPath(import.meta.url));
 const viewerRoot = join(here, "..");
@@ -58,6 +115,7 @@ async function startHarness(bootstrap?: JsonlFrame[]): Promise<Harness> {
       stream.handle(req, res);
       return;
     }
+    if (handleFontFile(url.pathname, res)) return;
     res.writeHead(404);
     res.end("not found");
   }
@@ -133,12 +191,15 @@ test("chat event renders coloured line in player HUD", async ({ page }) => {
       return {
         text: line?.textContent ?? "",
         color: span ? (span as HTMLElement).style.color : "",
+        shadow: span ? (span as HTMLElement).style.textShadow : "",
+        canvas: !!line?.querySelector("canvas"),
       };
     });
     expect(got.text).toContain("Welcome to the arena");
     expect(got.color.toLowerCase()).toMatch(
       /55ff55|#55ff55|rgb\(85,\s*255,\s*85\)/,
     );
+    if (!got.canvas) expect(got.shadow).toContain("2px 2px");
   } finally {
     await page.close().catch(() => undefined);
     await h.close();

@@ -53,6 +53,10 @@ type Actor struct {
 
 	cmdMu   sync.Mutex
 	cmdWait map[uuid.UUID]chan CommandResult
+
+	// passive skips local movement. Shadow mode sets it: the real client owns
+	// position, and gravity plus SendMovement would fight that.
+	passive bool
 }
 
 // Handler returns Actor's handler.
@@ -319,13 +323,30 @@ func (a *Actor) SetHeldItems(main, off item.Stack) error {
 // one tick and looked idle to BDS → Correct spam).
 func (a *Actor) Tick() {
 	a.Handler().HandleTick(a, a.CurrentTick())
-	a.tickPhysicsOnly()
-	a.tickNavigating()
-	a.tickHoldInput()
-	a.SendMovement()
-	a.clearMovement()
+	if a.passive {
+		// Keep the unload window on the mirrored feet. Physics would walk the
+		// actor off that spot; SendMovement would write a packet the proxy drops.
+		a.SetChunkLoadCenter(cube.PosFromVec3(a.Position()))
+	} else {
+		a.tickPhysicsOnly()
+		a.tickNavigating()
+		a.tickHoldInput()
+		a.SendMovement()
+		a.clearMovement()
+	}
 	a.tick++
 	a.unloadChunks()
+}
+
+// SetPassive turns local movement on or off.
+//
+// Call it before the tick loop starts. When passive is true, Tick still runs
+// HandleTick, increments the tick, and unloads chunks, but skips physics,
+// navigation, held input, and SendMovement.
+//
+// @param passive True to follow an external position instead of simulating one.
+func (a *Actor) SetPassive(passive bool) {
+	a.passive = passive
 }
 
 // NearestEntity returns nearest to Actor entity and distance to it.
@@ -512,6 +533,15 @@ func (a *Actor) LastForm() (*Form, bool) {
 	return a.lastForm, true
 }
 
+// DismissForm marks the open form used without sending ModalFormResponse.
+//
+// Shadow mode calls this when the real client already answered.
+func (a *Actor) DismissForm() {
+	if a.lastForm != nil {
+		a.lastForm.used = true
+	}
+}
+
 // ReceiveSign makes Actor receive Sign.
 func (a *Actor) ReceiveSign(s *Sign) {
 	a.Handler().HandleReceiveSign(a, s)
@@ -545,6 +575,15 @@ func (a *Actor) LastDialogue() (*Dialogue, bool) {
 		return nil, false
 	}
 	return a.lastDialogue, true
+}
+
+// DismissDialogue marks the open NPC dialogue used without sending NPCRequest.
+//
+// Shadow mode calls this when the real client already closed or answered it.
+func (a *Actor) DismissDialogue() {
+	if a.lastDialogue != nil {
+		a.lastDialogue.used = true
+	}
 }
 
 // ReceiveCommandOutput makes Actor receive command output messages.
@@ -990,6 +1029,15 @@ func (a *Actor) CurrentContainer() (*Container, bool) {
 		return nil, false
 	}
 	return a.container, true
+}
+
+// DismissContainer marks the open container closed without sending ContainerClose.
+//
+// Shadow mode calls this when the real client already closed the window.
+func (a *Actor) DismissContainer() {
+	if a.container != nil {
+		a.container.closed = true
+	}
 }
 
 // ToggleCrafterSlot enables or disables crafter slot.

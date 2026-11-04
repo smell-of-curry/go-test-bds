@@ -11,6 +11,27 @@ import (
 	botworld "github.com/smell-of-curry/go-test-bds/gotestbds/world"
 )
 
+// A real client owns its position in shadow mode, even over loaded air.
+func TestPassiveTickDoesNotSimulateGravity(t *testing.T) {
+	world.DefaultBlockRegistry.Finalize()
+	a := Config{Conn: navStubConn{pos: mgl32.Vec3{0.5, 65, 0.5}}}.New()
+	a.world.AddChunk(world.ChunkPos{0, 0}, botworld.NewColumn(
+		chunk.New(world.DefaultBlockRegistry, world.Overworld.Range()), nil,
+	))
+	a.SetPassive(true)
+	start := a.Position()
+	tick := a.CurrentTick()
+	for range 20 {
+		a.Tick()
+	}
+	if a.Position() != start {
+		t.Fatalf("passive actor fell from %v to %v", start, a.Position())
+	}
+	if a.CurrentTick() != tick+20 {
+		t.Fatal("passive actor stopped ticking")
+	}
+}
+
 // TestChunkLoadedAt covers the guard that keeps physics from running against a
 // chunk that has not arrived. Without it a bot spawns, reads the missing world
 // as air, and falls out of it before its first chunk is received.

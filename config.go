@@ -32,6 +32,16 @@ type Config struct {
 		// battling or any other two-player feature need more than one.
 		Count int
 	}
+	// Shadow, when Listen is set, runs a pass-through proxy instead of bots.
+	// A real client dials Listen; the proxy dials Network.ServerAddress and
+	// feeds every server packet into a passive bot so the viewer can render it.
+	Shadow struct {
+		Listen string
+		// Packs are local resource-pack folders or .mcpack/.zip files. When
+		// set, shadow mode serves these instead of downloading the server's
+		// packs over RakNet.
+		Packs []string
+	}
 	// Viewer configures the optional state-export HTTP server. Disabled by
 	// default so a run behaves identically whether or not anyone is watching.
 	Viewer struct {
@@ -271,6 +281,35 @@ func applyEnv(c *Config) {
 	if v := os.Getenv("GOTESTBDS_RECORD"); v != "" {
 		c.Record = v
 	}
+	if v := os.Getenv("GOTESTBDS_SHADOW_LISTEN"); v != "" {
+		c.Shadow.Listen = v
+	}
+	if v := os.Getenv("GOTESTBDS_SHADOW_PACKS"); v != "" {
+		c.Shadow.Packs = splitList(v)
+	}
+}
+
+// splitList splits a comma-separated list and drops empty items.
+func splitList(v string) []string {
+	parts := strings.Split(v, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// packList is a repeatable flag. Each Set accepts one path or a comma-separated list.
+type packList []string
+
+func (p *packList) String() string { return strings.Join(*p, ",") }
+
+func (p *packList) Set(v string) error {
+	*p = append(*p, splitList(v)...)
+	return nil
 }
 
 // applyFlags overlays command line flags onto a configuration.
@@ -302,6 +341,9 @@ func applyFlags(c *Config) error {
 	skinPath := set.String("skin", c.Skin.Path, "PNG skin applied at login (64x32, 64x64, or 128x128)")
 	skinSlim := set.Bool("skin-slim", c.Skin.Slim, "use the slim arm model for --skin")
 	recordDir := set.String("record", c.Record, "directory for an offline SSE recording (requires --viewer)")
+	shadowListen := set.String("shadow-listen", c.Shadow.Listen, "host:port for shadow proxy mode (empty: spawn bots)")
+	var shadowPacks packList
+	set.Var(&shadowPacks, "shadow-pack", "local resource pack folder or .mcpack/.zip (repeatable, or comma-separated)")
 
 	if err := set.Parse(os.Args[1:]); err != nil {
 		return err
@@ -335,6 +377,12 @@ func applyFlags(c *Config) error {
 	c.Skin.Path = *skinPath
 	c.Skin.Slim = *skinSlim
 	c.Record = *recordDir
+	c.Shadow.Listen = *shadowListen
+	set.Visit(func(f *flag.Flag) {
+		if f.Name == "shadow-pack" {
+			c.Shadow.Packs = append([]string(nil), shadowPacks...)
+		}
+	})
 	return nil
 }
 

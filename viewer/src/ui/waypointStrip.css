@@ -9,7 +9,7 @@
   inset: 0;
   pointer-events: none;
   z-index: 5;
-  font-family: "Minecraft", ui-sans-serif, system-ui, "Segoe UI", sans-serif;
+  font-family: "Mojangles", ui-sans-serif, system-ui, "Segoe UI", sans-serif;
   color: #fff;
 }
 
@@ -57,7 +57,7 @@
 }
 
 .jh-waypoint-text {
-  font-size: calc(var(--jh-px) * 7);
-  text-shadow: 1px 1px 0 #000;
+  font-size: calc(var(--jh-px) * 8);
+  text-shadow: var(--jh-px) var(--jh-px) 0 rgb(64, 64, 64);
   white-space: nowrap;
 }

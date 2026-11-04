@@ -52,7 +52,7 @@ client.
    can time out on its own.
 6. **Assert both sides.** The Script API is what the server believes.
    Observation instructions (`getState`, `getInventory`, `getForm`, `getBlock`,
-   `getNearbyEntities`, `getMessages`) return what the *client* was told. A
+   `getNearbyEntities`, `getMessages`) return what the _client_ was told. A
    desync the server cannot see is a failed test. That is the point.
 7. **Clean up even when the test fails.** `ctx.track` runs in reverse on pass,
    fail, or timeout. Register the cleanup when you create the thing, or the
@@ -161,13 +161,13 @@ scriptevent yourns:run {"runId":"ci-123"}
 
 ### What you can ask the bot to do
 
-| Act | Observe |
-| --- | --- |
-| Chat, run a command, jump, sneak, hold movement | Position, dimension, rotation (`getState`) |
-| Path to a block, look at a block, entity, or point | The block the client has (`getBlock`) |
-| Break, place, interact with a block or entity, attack | Nearby entities |
-| Open inventory transactions, change the held slot | Inventory, including a forced resync |
-| Wait for a form, click by text or index, walk a chain, dismiss | The open form, recent chat |
+| Act                                                            | Observe                                    |
+| -------------------------------------------------------------- | ------------------------------------------ |
+| Chat, run a command, jump, sneak, hold movement                | Position, dimension, rotation (`getState`) |
+| Path to a block, look at a block, entity, or point             | The block the client has (`getBlock`)      |
+| Break, place, interact with a block or entity, attack          | Nearby entities                            |
+| Open inventory transactions, change the held slot              | Inventory, including a forced resync       |
+| Wait for a form, click by text or index, walk a chain, dismiss | The open form, recent chat                 |
 
 Anything the wrapper does not cover yet is still reachable with `runAction` /
 `runActionForData`. Instruction parameter types are generated from the Go
@@ -187,7 +187,7 @@ An observation is only as good as what BDS pushes.
   such as `/give` or `/replaceitem`, resyncs the window, and it resyncs all of
   it. `Bot.getInventory` forces one server-side (a marker item, added and
   cleared) before reading. Pass `{ sync: false }` to read the stale copy on
-  purpose. That is how you assert what the client has *not* been told.
+  purpose. That is how you assert what the client has _not_ been told.
 
 ## Watch a run
 
@@ -268,17 +268,43 @@ this repo. The picture is.
 
 Whatever supervises BDS tails stdout and decides the build. No log scraping.
 
-| Module | Role |
-| --- | --- |
-| `bot.ts` | Actions and observations |
-| `runner.ts` | Suites, timeouts, tag filters, hooks, `ctx.track`, `ctx.screenshot` |
-| `assert.ts` | `assertNearPosition`, `assertBlockAt`, `assertEventually`, and the usual equality checks |
-| `wait.ts` | `waitFor`, `waitForValue`, `retry`, `sleep`. Timeouts name what they were waiting for |
-| `reporter.ts` | `ConsoleReporter` for humans, `StructuredReporter` for CI |
-| `protocol.ts` | The chat envelope, if you are building your own client |
+| Module        | Role                                                                                     |
+| ------------- | ---------------------------------------------------------------------------------------- |
+| `bot.ts`      | Actions and observations                                                                 |
+| `runner.ts`   | Suites, timeouts, tag filters, hooks, `ctx.track`, `ctx.screenshot`                      |
+| `assert.ts`   | `assertNearPosition`, `assertBlockAt`, `assertEventually`, and the usual equality checks |
+| `wait.ts`     | `waitFor`, `waitForValue`, `retry`, `sleep`. Timeouts name what they were waiting for    |
+| `reporter.ts` | `ConsoleReporter` for humans, `StructuredReporter` for CI                                |
+| `protocol.ts` | The chat envelope, if you are building your own client                                   |
 
 You should not build that envelope by hand. Use `Bot`.
 
 ## License
 
 [ISC](https://www.isc.org/licenses/).
+
+## Compare with a real client
+
+The optional shadow proxy forwards a real Bedrock client's packets to a local
+BDS and mirrors its state into the viewer. The real client owns movement; the
+viewer actor stays passive. This is a development listener without Xbox
+authentication, intended for a trusted local test server.
+
+```sh
+go run . --address 127.0.0.1:19132 --shadow-listen 127.0.0.1:19133 \
+  --viewer --viewer-address 127.0.0.1:19140 --viewer-app viewer/dist
+```
+
+Connect Minecraft to port 19133. Resource packs are downloaded during the
+initial probe; repeat `--shadow-pack /path/to/pack` to use local pack archives or
+directories instead. Environment equivalents are `GOTESTBDS_SHADOW_LISTEN` and
+`GOTESTBDS_SHADOW_PACKS` (comma-separated paths).
+
+For pixel-font UI rendering, set `GOTESTBDS_VIEWER_FONT_DIR` to a directory
+containing `Mojangles.ttf` from your installed client before starting the viewer
+host. No Minecraft font is bundled. Without it, labels use the system fallback.
+The same variable enables the optional font raster tests in `viewer/`.
+
+Recovered real-client observations and outstanding comparison work are in
+[viewer/FINDINGS-jsonui.md](viewer/FINDINGS-jsonui.md). Automated regression
+checks do not establish complete visual parity with every Bedrock screen.

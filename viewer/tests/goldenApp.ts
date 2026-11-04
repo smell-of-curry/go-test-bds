@@ -7,6 +7,7 @@
  * `GOLDEN_USE_BASELINE=0` keeps solid fixtures.
  */
 import { existsSync, readFileSync } from "node:fs";
+import { handleFontFile } from "./fontFile";
 import {
   createServer as createHttpServer,
   type IncomingMessage,
@@ -182,6 +183,7 @@ export async function startGoldenApp(): Promise<GoldenApp> {
     if (url.pathname.startsWith("/pack/vanilla/ui/")) {
       if (handleJsonUiPackRequest(req, res)) return;
     }
+    if (handleFontFile(url.pathname, res)) return;
     if (
       url.pathname === "/packs/index" ||
       url.pathname.startsWith("/pack/") ||

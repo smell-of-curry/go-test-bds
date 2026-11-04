@@ -4,9 +4,13 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  absolutePaintLayer,
+  fitImageBackgroundCss,
+  imageKeepsRatio,
+  labelClipsWithEllipsis,
   lookupTextureInfo,
   ninesliceCenterIsEmpty,
-  paintLayerZIndex,
+  paintChildOrder,
   resolveImageUv,
   uvBackgroundCss,
   type JsonUiAssets,
@@ -54,16 +58,120 @@ describe("uvBackgroundCss", () => {
   });
 });
 
-describe("paintLayerZIndex", () => {
-  it("keeps button_content above button_image chrome", () => {
-    assert.equal(paintLayerZIndex("button_image", 1), 1);
-    assert.equal(paintLayerZIndex("button_content", 0), 2);
-    assert.equal(paintLayerZIndex("main_label", 0), 0);
+describe("imageKeepsRatio", () => {
+  it("defaults true and only an explicit false stretches", () => {
+    assert.equal(imageKeepsRatio(undefined), true);
+    assert.equal(imageKeepsRatio(true), true);
+    assert.equal(imageKeepsRatio("true"), true);
+    assert.equal(imageKeepsRatio(false), false);
+    assert.equal(imageKeepsRatio("false"), false);
+  });
+});
+
+describe("fitImageBackgroundCss", () => {
+  it("aspect-fits an 8×8 texture into a 1920×1080 screen, centered", () => {
+    const css = fitImageBackgroundCss(
+      { w: 8, h: 8 },
+      null,
+      null,
+      {
+        w: 1920,
+        h: 1080,
+      },
+      true,
+    );
+    assert.equal(css.size, "1080px 1080px");
+    assert.equal(css.position, "420px 0px");
   });
 
-  it("keeps pack negative layers (hollow control behind sibling chrome)", () => {
-    assert.equal(paintLayerZIndex("control", -1), -1);
-    assert.equal(paintLayerZIndex("main_label", -1), -1);
+  it("aspect-fits a 1:2 checker into a 2:1 box", () => {
+    const css = fitImageBackgroundCss(
+      { w: 16, h: 32 },
+      null,
+      null,
+      {
+        w: 120,
+        h: 60,
+      },
+      true,
+    );
+    assert.equal(css.size, "30px 60px");
+    assert.equal(css.position, "45px 0px");
+  });
+
+  it("uses uv_size aspect, not the full texture", () => {
+    const css = fitImageBackgroundCss(
+      { w: 16, h: 32 },
+      [0, 0],
+      [8, 8],
+      {
+        w: 64,
+        h: 32,
+      },
+      true,
+    );
+    assert.equal(css.size, "64px 128px");
+    assert.equal(css.position, "16px 0px");
+  });
+
+  it("stretches when keep_ratio is false", () => {
+    const css = fitImageBackgroundCss(
+      { w: 16, h: 32 },
+      null,
+      null,
+      {
+        w: 120,
+        h: 60,
+      },
+      false,
+    );
+    assert.equal(css.size, "120px 60px");
+    assert.equal(css.position, "0px 0px");
+  });
+});
+
+describe("labelClipsWithEllipsis", () => {
+  it("clips a one-line box and skips wrap targets", () => {
+    assert.equal(labelClipsWithEllipsis("The quick", 8, 1, undefined), true);
+    assert.equal(labelClipsWithEllipsis("a\nb", 8, 1, undefined), false);
+    assert.equal(labelClipsWithEllipsis("The quick", 12, 1, 60), false);
+    assert.equal(labelClipsWithEllipsis("The quick", 18, 1, undefined), false);
+  });
+});
+
+describe("absolutePaintLayer", () => {
+  it("adds layer to the parent", () => {
+    assert.equal(absolutePaintLayer(0, 0), 0);
+    assert.equal(absolutePaintLayer(2, -1), 1);
+    assert.equal(absolutePaintLayer(4, 3), 7);
+  });
+
+  it("puts a vanilla button label above button_image", () => {
+    // common_buttons.new_ui_button_panel layer 1:
+    //   button_image layer 1
+    //   button_content (layer 0)
+    //     button_content_panel layer 3
+    //       content layer 2
+    const panel = absolutePaintLayer(0, 1);
+    const image = absolutePaintLayer(panel, 1);
+    const content = absolutePaintLayer(panel, 0);
+    const typePanel = absolutePaintLayer(content, 3);
+    const label = absolutePaintLayer(typePanel, 2);
+    assert.ok(label > image, `label=${label} image=${image}`);
+  });
+});
+
+describe("paintChildOrder", () => {
+  it("sorts by layer then declaration index", () => {
+    const ordered = paintChildOrder([
+      { layer: 1, name: "button_image" },
+      { layer: 0, name: "button_content" },
+      { layer: 1, name: "border" },
+    ]);
+    assert.deepEqual(
+      ordered.map((row) => row.name),
+      ["button_content", "button_image", "border"],
+    );
   });
 });
 

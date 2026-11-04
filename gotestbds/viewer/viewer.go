@@ -37,6 +37,11 @@ type Options struct {
 	// /extensions/ and advertised by GET /viewer.json. Empty disables it.
 	// manifest.json may set bot.titleTokenPrefix for the title-token lane.
 	ExtensionsDir string
+	// FontDir is a directory of font files served at GET /font/{name}
+	// (basename only). Empty reads GOTESTBDS_VIEWER_FONT_DIR; still empty
+	// means the route 404s. The Mojangles file is Mojang content and is
+	// never copied into this repo.
+	FontDir string
 	// TitleTokenPrefix splits SetTitle writes of the form prefix+name+":"+value
 	// onto the titleToken event lane and hides them from the plain title.
 	// Empty disables the lane. When this is empty and ExtensionsDir is set,
@@ -113,6 +118,9 @@ func New(opts Options) (*Hub, error) {
 	}
 	if opts.TitleTokenPrefix == "" {
 		opts.TitleTokenPrefix = titleTokenPrefixFromManifest(opts.ExtensionsDir)
+	}
+	if opts.FontDir == "" {
+		opts.FontDir = os.Getenv("GOTESTBDS_VIEWER_FONT_DIR")
 	}
 
 	arts, err := newArtifactStore(opts.ArtifactDir)
