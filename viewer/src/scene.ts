@@ -103,6 +103,7 @@ export interface Mesher {
    * @param state - World state for cross-section neighbour lookups.
    * @returns Meshes keyed by block identity, plus culled block-instance count.
    */
+  updateAnimations?(tick: number): void;
   meshSection(
     section: DecodedSection,
     column: StoredColumn,
@@ -918,6 +919,7 @@ export class ViewerScene {
    * @param entities - Interpolated entity map (from {@link MotionLerp}).
    */
   tickEntities(dtSec: number, entities: Map<number, Entity>): void {
+    this.mesher.updateAnimations?.(this.storeRef?.tick ?? 0);
     for (const [rid, ent] of entities) {
       const node = this.entities.get(rid);
       if (!node) continue;

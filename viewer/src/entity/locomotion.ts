@@ -199,10 +199,13 @@ export function addLocomotionPoses(
     const limb = classifyLimb(name);
     if (!limb) continue;
     const existing = poses.get(name);
-    if (existing && hasRotation(existing)) continue; // pack animation wins
+    // Pack gait owns locomotion, but the wire arm swing is independent:
+    // vanilla attack_time is not supplied by the recorded entity metadata.
+    const packRotated = !!existing && hasRotation(existing);
+    if (packRotated && name !== swingArm) continue;
 
     const amplitude = limb.kind === "leg" ? LEG_SWING_DEG : ARM_SWING_DEG;
-    let rotX = walk * amplitude * limb.phaseSign;
+    let rotX = packRotated ? 0 : walk * amplitude * limb.phaseSign;
     if (name === swingArm) rotX += swingRot;
     if (rotX === 0) continue;
 

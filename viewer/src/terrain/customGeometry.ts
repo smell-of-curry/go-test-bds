@@ -16,7 +16,7 @@ import {
   materialFlags,
   transformAboutBlockCenter,
 } from "./permutations";
-import { renderClassFromMethod } from "./palette";
+import { renderClassFromMethod, terrainPassForClass } from "./palette";
 import type { RenderClass } from "./types";
 
 export interface CachedBlockGeometry {
@@ -344,8 +344,7 @@ export function emitCustomBlockTris(
       const flags = materialFlags(mat);
       const method = (mat?.renderMethod ?? "opaque").toLowerCase();
       const rc = renderClassFromMethod(mat?.renderMethod);
-      const pass: "opaque" | "transparent" =
-        rc === "opaque" ? "opaque" : "transparent";
+      const pass: "opaque" | "transparent" = terrainPassForClass(rc);
       const doubleSided = method === "double_sided" || method === "blend";
 
       const positions: number[] = [];

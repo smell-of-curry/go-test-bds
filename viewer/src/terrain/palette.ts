@@ -231,3 +231,12 @@ export function diagnosePaletteCoverage(
 export function isMissingTexture(texture: string): boolean {
   return texture === FALLBACK_TEXTURE;
 }
+
+/** Alpha-tested surfaces write depth; only genuinely blended surfaces need sorting. */
+export function terrainPassForClass(
+  renderClass: RenderClass,
+): "opaque" | "transparent" {
+  return renderClass === "translucent" || renderClass === "liquid"
+    ? "transparent"
+    : "opaque";
+}

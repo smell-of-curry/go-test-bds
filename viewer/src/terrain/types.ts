@@ -65,6 +65,9 @@ export type TintChannel =
 export interface FaceAppearance {
   /** Terrain texture short-name (atlas key), or fallback sentinel. */
   texture: string;
+  /** Explicit state index into a terrain texture array (not a random variant). */
+  textureIndex?: number;
+  mirrorU?: boolean;
   /** Optional biome tint channel. */
   tint: TintChannel;
   /** UV rotation in 90° steps (0..3), applied in mesher. */
@@ -92,6 +95,9 @@ export interface CubeModel {
    * Vertical extent inside the cell, in blocks. Omitted = full cube (0..1),
    * which occludes neighbours. A partial box (carpet) does not.
    */
+  /** Partial box bounds [minX,minY,minZ,maxX,maxY,maxZ]; never greedy merged. */
+  bounds?: [number, number, number, number, number, number];
+  boxes?: Array<[number, number, number, number, number, number]>;
   yBot?: number;
   yTop?: number;
   /**

@@ -168,7 +168,11 @@ export async function renderFilm(
       );
     }
 
+    console.error(
+      `film: applying timeline through ${(fromMs / 1000).toFixed(2)}s`,
+    );
     await page.evaluate((ms) => window.__film?.applyThrough(ms), fromMs);
+    console.error("film: waiting for terrain assets");
     await page.waitForFunction(
       () =>
         window.__film?.bootstrapped === true &&
@@ -186,12 +190,14 @@ export async function renderFilm(
     );
     if (schemaError) throw new Error(schemaError);
 
+    console.error("film: advancing animation clock");
     if (fromMs > 0) await page.clock.runFor(fromMs);
     await page.evaluate((ms) => window.__film?.setNow(ms), fromMs);
     let clock = fromMs;
     const renderer = await page.evaluate(
       () => window.__film?.renderer() ?? "unknown",
     );
+    console.error("film: capturing frames");
     const t0 = performance.now();
     for (let i = 0; i < times.length; i++) {
       const target = times[i]!;

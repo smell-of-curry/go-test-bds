@@ -18,10 +18,12 @@ import {
 } from "./customGeometry";
 import { aoFactor, combinedLight, FACE_SHADE, lightBrightness } from "./light";
 import { createTerrainMaterial } from "./material";
+import { terrainPassForClass } from "./palette";
 import {
   isAir,
   isInvisible,
   isWaterlogFluid,
+  pairedDoorBlock,
   type BlockModelResolver,
 } from "./resolve";
 import {
@@ -116,6 +118,7 @@ export class TexturedMesher implements Mesher {
     },
   ) {
     this.atlas = atlas;
+    atlas.enableAnimation();
     this.resolver = resolver;
     this.biomeAt = opts?.biomeAt ?? null;
     this.custom = opts?.customGeometry ?? null;
@@ -315,7 +318,12 @@ export class TexturedMesher implements Mesher {
             continue;
           }
 
-          const cube = this.resolver.resolveCube(block, wx, wy, wz);
+          const cube = this.resolver.resolveCube(
+            pairedDoorBlock(block, blockAt(x, y + 1, z), blockAt(x, y - 1, z)),
+            wx,
+            wy,
+            wz,
+          );
           if (!cube) continue;
 
           // Flower X: two diagonal quads. Not a cube, so no face culling and no AO.
@@ -410,81 +418,102 @@ export class TexturedMesher implements Mesher {
           }
 
           let exposed = false;
-          const pass: "opaque" | "transparent" =
-            cube.renderClass === "opaque" ? "opaque" : "transparent";
+          const pass: "opaque" | "transparent" = terrainPassForClass(
+            cube.renderClass,
+          );
           const faceDim = cube.faceDimming !== false;
           const skipAo = cube.ambientOcclusion === false;
           const emission = cube.lightEmission ?? 0;
 
-          for (const d of DIRS) {
-            const nb = blockAt(x + d.dx, y + d.dy, z + d.dz);
-            if (!shouldDrawFace(this.resolver, block, nb)) continue;
-            exposed = true;
-            quadsBefore++;
-            const app = cube.faces[d.face];
-            const texName = app.texture || FALLBACK_TEXTURE;
-            const overlayId = `${texName}#overlay`;
-            const splitOverlay =
-              app.overlay === true && this.atlas.has(overlayId);
-            // Overlay flag without a split tile: don't tint the whole side.
-            const channel = app.overlay ? "none" : app.tint;
-            const uv = this.atlas.uvFor(texName, tick, wx, wy, wz);
-            const tint = tintAt(biomeAt, channel, wx, wz);
-            const color = new THREE.Color(tint.r, tint.g, tint.b);
-            if (emission > 0) {
-              const e = Math.min(1, emission);
-              color.r = Math.min(1, color.r + e);
-              color.g = Math.min(1, color.g + e);
-              color.b = Math.min(1, color.b + e);
+          for (const bounds of cube.boxes ?? [cube.bounds]) {
+            for (const d of DIRS) {
+              if (
+                bounds &&
+                cube.boxes &&
+                boxFaceCovered(bounds, d.dir, cube.boxes)
+              )
+                continue;
+              const nb = blockAt(x + d.dx, y + d.dy, z + d.dz);
+              if (!bounds && !shouldDrawFace(this.resolver, block, nb))
+                continue;
+              exposed = true;
+              quadsBefore++;
+              const app = cube.faces[d.face];
+              const texName = app.texture || FALLBACK_TEXTURE;
+              const overlayId = `${texName}#overlay`;
+              const splitOverlay =
+                app.overlay === true && this.atlas.has(overlayId);
+              // Overlay flag without a split tile: don't tint the whole side.
+              const channel = app.overlay ? "none" : app.tint;
+              const uv = this.atlas.uvFor(
+                texName,
+                tick,
+                wx,
+                wy,
+                wz,
+                app.textureIndex,
+              );
+              const tint = tintAt(biomeAt, channel, wx, wz);
+              const color = new THREE.Color(tint.r, tint.g, tint.b);
+              if (emission > 0) {
+                const e = Math.min(1, emission);
+                color.r = Math.min(1, color.r + e);
+                color.g = Math.min(1, color.g + e);
+                color.b = Math.min(1, color.b + e);
+              }
+              const key = `${pass}|${d.dir}|${texName}|${app.tint}|${app.rotation}|${uv.u0},${uv.v0},${uv.u1},${uv.v1}|${faceDim ? 1 : 0}|${skipAo ? 0 : 1}`;
+              emits.push({
+                key,
+                pass,
+                dir: d.dir,
+                x,
+                y,
+                z,
+                du: 1,
+                dv: 1,
+                uv,
+                rotation: app.rotation,
+                color,
+                bounds,
+                mirrorU: app.mirrorU,
+                yTop: cube.yTop ?? 1,
+                yBot: cube.yBot ?? 0,
+                skipFaceShade: !faceDim,
+                skipAo,
+              });
+              if (!splitOverlay) continue;
+              quadsBefore++;
+              const grass = tintAt(biomeAt, "grass", wx, wz);
+              const grassColor = new THREE.Color(grass.r, grass.g, grass.b);
+              if (emission > 0) {
+                const e = Math.min(1, emission);
+                grassColor.r = Math.min(1, grassColor.r + e);
+                grassColor.g = Math.min(1, grassColor.g + e);
+                grassColor.b = Math.min(1, grassColor.b + e);
+              }
+              const ouv = this.atlas.uvRect(overlayId, tick);
+              const okey = `${pass}|${d.dir}|${overlayId}|grass|${app.rotation}|${ouv.u0},${ouv.v0},${ouv.u1},${ouv.v1}|bias`;
+              emits.push({
+                key: okey,
+                pass,
+                dir: d.dir,
+                x,
+                y,
+                z,
+                du: 1,
+                dv: 1,
+                uv: ouv,
+                rotation: app.rotation,
+                color: grassColor,
+                bounds,
+                mirrorU: app.mirrorU,
+                yTop: cube.yTop ?? 1,
+                yBot: cube.yBot ?? 0,
+                skipFaceShade: !faceDim,
+                skipAo,
+                bias: 0.002,
+              });
             }
-            const key = `${pass}|${d.dir}|${texName}|${app.tint}|${app.rotation}|${uv.u0},${uv.v0},${uv.u1},${uv.v1}|${faceDim ? 1 : 0}|${skipAo ? 0 : 1}`;
-            emits.push({
-              key,
-              pass,
-              dir: d.dir,
-              x,
-              y,
-              z,
-              du: 1,
-              dv: 1,
-              uv,
-              rotation: app.rotation,
-              color,
-              yTop: cube.yTop ?? 1,
-              yBot: cube.yBot ?? 0,
-              skipFaceShade: !faceDim,
-              skipAo,
-            });
-            if (!splitOverlay) continue;
-            quadsBefore++;
-            const grass = tintAt(biomeAt, "grass", wx, wz);
-            const grassColor = new THREE.Color(grass.r, grass.g, grass.b);
-            if (emission > 0) {
-              const e = Math.min(1, emission);
-              grassColor.r = Math.min(1, grassColor.r + e);
-              grassColor.g = Math.min(1, grassColor.g + e);
-              grassColor.b = Math.min(1, grassColor.b + e);
-            }
-            const ouv = this.atlas.uvRect(overlayId, tick);
-            const okey = `${pass}|${d.dir}|${overlayId}|grass|${app.rotation}|${ouv.u0},${ouv.v0},${ouv.u1},${ouv.v1}|bias`;
-            emits.push({
-              key: okey,
-              pass,
-              dir: d.dir,
-              x,
-              y,
-              z,
-              du: 1,
-              dv: 1,
-              uv: ouv,
-              rotation: app.rotation,
-              color: grassColor,
-              yTop: cube.yTop ?? 1,
-              yBot: cube.yBot ?? 0,
-              skipFaceShade: !faceDim,
-              skipAo,
-              bias: 0.002,
-            });
           }
           if (exposed) instanceCount++;
 
@@ -622,26 +651,37 @@ export class TexturedMesher implements Mesher {
   ): void {
     const model = this.resolver.resolveLiquid(block);
     if (!model) return;
-    const height = liquidHeight(model.depth);
+    const heights = liquidCornerHeights(block, x, y, z, blockAt, (b) =>
+      this.resolver.occludes(b),
+    );
+    const height = 1;
+    const sameLiquid = (b: Block) => liquidKind(b) === liquidKind(block);
+    const pass = model.tint === "water" ? "transparent" : "opaque";
     const tint = tintAt(biomeAt, model.tint, wx, wz);
     const color = new THREE.Color(tint.r, tint.g, tint.b);
     const still = this.atlas.uvFor(model.textureStill, tick, wx, wy, wz);
     const flow = this.atlas.uvFor(model.textureFlow, tick, wx, wy, wz);
-    const useFlow = model.flowYaw != null;
-    const flowRot = useFlow ? yawToRot(model.flowYaw!) : 0;
+    const useFlow =
+      model.depth > 0 || Math.max(...heights) - Math.min(...heights) > 1e-6;
+    const downhillX = heights[0] + heights[1] - heights[2] - heights[3];
+    const downhillZ = heights[0] + heights[3] - heights[1] - heights[2];
+    const flowYaw =
+      Math.abs(downhillX) + Math.abs(downhillZ) > 1e-6
+        ? (Math.atan2(-downhillX, downhillZ) * 180) / Math.PI
+        : (model.flowYaw ?? 0);
+    const flowRot = useFlow ? yawToRot(flowYaw) : 0;
 
     // Top surface always (unless blocked by liquid above, or the section
     // above was never delivered — that face would be a water ceiling).
     const above = blockAt(x, y + 1, z);
-    if (
-      above !== UNLOADED_NEIGHBOUR &&
-      (!above || this.resolver.renderClassOf(above) !== "liquid")
-    ) {
+    if (above !== UNLOADED_NEIGHBOUR && (!above || !sameLiquid(above))) {
       onQuad();
-      const key = `transparent|2|${model.textureStill}|${model.tint}|top`;
+      const key = `${pass}|2|${model.textureStill}|${model.tint}|top|${x},${y},${z}`;
       emits.push({
         key,
-        pass: "transparent",
+        pass,
+        emission: model.tint === "water" ? 0 : 1,
+        skipAo: true,
         dir: 2,
         x,
         y,
@@ -651,6 +691,7 @@ export class TexturedMesher implements Mesher {
         uv: useFlow ? flow : still,
         rotation: flowRot,
         color,
+        liquidHeights: heights,
         yTop: height,
         yBot: 0,
       });
@@ -661,14 +702,16 @@ export class TexturedMesher implements Mesher {
       if (d.dy !== 0) continue;
       const nb = blockAt(x + d.dx, y + d.dy, z + d.dz);
       if (nb === UNLOADED_NEIGHBOUR) continue;
-      if (nb && this.resolver.renderClassOf(nb) === "liquid") continue;
+      if (nb && sameLiquid(nb)) continue;
       if (nb && this.resolver.occludes(nb)) continue;
       // Unknown neighbour → exposed, unless film hid the unloaded column.
       onQuad();
-      const key = `transparent|${d.dir}|${model.textureFlow}|${model.tint}|side`;
+      const key = `${pass}|${d.dir}|${model.textureFlow}|${model.tint}|side|${x},${y},${z}`;
       emits.push({
         key,
-        pass: "transparent",
+        pass,
+        emission: model.tint === "water" ? 0 : 1,
+        skipAo: true,
         dir: d.dir,
         x,
         y,
@@ -676,8 +719,9 @@ export class TexturedMesher implements Mesher {
         du: 1,
         dv: 1,
         uv: flow,
-        rotation: flowRot,
+        rotation: 0,
         color,
+        liquidHeights: heights,
         yTop: height,
         yBot: 0,
       });
@@ -692,6 +736,7 @@ export class TexturedMesher implements Mesher {
    */
   replaceAtlas(atlas: TerrainAtlas): void {
     this.atlas = atlas;
+    atlas.enableAnimation();
     this.texture.dispose();
     this.texture = new THREE.CanvasTexture(atlas.imageSource());
     this.texture.magFilter = THREE.NearestFilter;
@@ -707,6 +752,11 @@ export class TexturedMesher implements Mesher {
       atlas.width,
       atlas.height,
     );
+  }
+
+  /** Advance texture frames while retaining all terrain geometry. */
+  updateAnimations(tick: number): void {
+    if (this.atlas.updateAnimation(tick)) this.texture.needsUpdate = true;
   }
 
   /** Release GPU resources. */
@@ -805,8 +855,55 @@ function shouldDrawFace(
 
 /** Bedrock liquid_depth 0 = full; 1..7 = lower. */
 export function liquidHeight(depth: number): number {
-  if (depth <= 0) return 14 / 16;
+  if (depth <= 0 || depth >= 8) return 14 / 16;
   return Math.max(2 / 16, (8 - depth) / 8) * (14 / 16);
+}
+
+/** Fluid identity ignores the flowing/source block-name distinction. */
+function liquidKind(block: Block): "water" | "lava" | null {
+  if (/^minecraft:(?:flowing_)?water$/.test(block.name)) return "water";
+  if (/^minecraft:(?:flowing_)?lava$/.test(block.name)) return "lava";
+  return null;
+}
+
+/** Shared corner averages give neighbouring liquid cells identical seam heights. */
+export function liquidCornerHeights(
+  block: Block,
+  x: number,
+  y: number,
+  z: number,
+  blockAt: (
+    x: number,
+    y: number,
+    z: number,
+  ) => Block | undefined | typeof UNLOADED_NEIGHBOUR,
+  solid: (block: Block) => boolean,
+): [number, number, number, number] {
+  const kind = liquidKind(block);
+  const corner = (cx: number, cz: number): number => {
+    let sum = 0,
+      weight = 0;
+    for (const dx of [cx - 1, cx])
+      for (const dz of [cz - 1, cz]) {
+        const above = blockAt(x + dx, y + 1, z + dz);
+        if (above && above !== UNLOADED_NEIGHBOUR && liquidKind(above) === kind)
+          return 1;
+        const b = blockAt(x + dx, y, z + dz);
+        if (b === UNLOADED_NEIGHBOUR) continue;
+        if (b && liquidKind(b) === kind) {
+          const depth = Number(b.states.liquid_depth ?? b.states.level ?? 0);
+          const w = depth === 0 || depth >= 8 ? 10 : 1;
+          sum += liquidHeight(depth) * w;
+          weight += w;
+        } else if (!b || !solid(b)) {
+          weight++;
+        }
+      }
+    return weight
+      ? sum / weight
+      : liquidHeight(Number(block.states.liquid_depth ?? 0));
+  };
+  return [corner(0, 0), corner(0, 1), corner(1, 1), corner(1, 0)];
 }
 
 function yawToRot(yaw: number): 0 | 1 | 2 | 3 {
@@ -814,6 +911,8 @@ function yawToRot(yaw: number): 0 | 1 | 2 | 3 {
 }
 
 interface MergeQuad {
+  /** Surface heights at NW, SW, SE, NE corners; never greedily merged. */
+  liquidHeights?: [number, number, number, number];
   key: string;
   pass: "opaque" | "transparent";
   dir: Dir;
@@ -825,12 +924,16 @@ interface MergeQuad {
   uv: AtlasUv;
   rotation: 0 | 1 | 2 | 3;
   color: THREE.Color;
+  bounds?: [number, number, number, number, number, number];
+  mirrorU?: boolean;
   yTop: number;
   yBot: number;
   /** When true, skip FACE_SHADE (material face_dimming: false). */
   skipFaceShade?: boolean;
   /** When true, skip AO bake (material ambient_occlusion: false). */
   skipAo?: boolean;
+  /** Self-lit surface brightness (lava). */
+  emission?: number;
   /** Outward offset in blocks (grass-side overlay sits just off the dirt). */
   bias?: number;
 }
@@ -863,8 +966,10 @@ function emptyBuffers(): MeshBuffers {
  */
 export function greedyMerge(emits: MergeQuad[]): MergeQuad[] {
   // Group by dir + key + yTop/yBot (liquids).
+  const unmerged = emits.filter((e) => e.bounds);
   const groups = new Map<string, MergeQuad[]>();
   for (const e of emits) {
+    if (e.bounds) continue;
     const gk = `${e.pass}|${e.dir}|${e.key}|${e.yTop}|${e.yBot}`;
     let g = groups.get(gk);
     if (!g) {
@@ -874,7 +979,7 @@ export function greedyMerge(emits: MergeQuad[]): MergeQuad[] {
     g.push({ ...e });
   }
 
-  const out: MergeQuad[] = [];
+  const out: MergeQuad[] = [...unmerged];
   for (const group of groups.values()) {
     if (group.length === 0) continue;
     const dir = group[0]!.dir;
@@ -963,6 +1068,25 @@ function pushMergedQuad(
   const { du, dv, uv, color, yTop, yBot, rotation } = q;
 
   const corners = faceCorners(d.dir, x0, y0, z0, du, dv, yBot, yTop);
+  if (q.liquidHeights) {
+    for (const c of corners) {
+      if (c[1] <= y0) continue;
+      const east = c[0] > x0;
+      const south = c[2] > z0;
+      c[1] = y0 + q.liquidHeights[east ? (south ? 2 : 3) : south ? 1 : 0];
+    }
+  }
+  if (q.bounds) {
+    for (const c of corners) {
+      for (let axis = 0; axis < 3; axis++) {
+        const origin = [x0, y0, z0][axis]!;
+        c[axis] =
+          origin +
+          q.bounds[axis]! +
+          (c[axis]! - origin) * (q.bounds[axis + 3]! - q.bounds[axis]!);
+      }
+    }
+  }
   if (q.bias) {
     for (const c of corners) {
       c[0] += d.dx * q.bias;
@@ -972,7 +1096,9 @@ function pushMergedQuad(
   }
   // Tile-space UVs matched to faceCorners order (CCW outward).
   // +Y uses v along +Z first in the corner list — see faceCorners(dir=2).
-  const tileCorners = tileCornersForDir(d.dir, du, dv);
+  const tileCorners = q.bounds
+    ? partialTileCorners(d.dir, q.bounds, q.mirrorU)
+    : tileCornersForDir(d.dir, du, dv);
   const rect: [number, number, number, number] = [
     Math.min(uv.u0, uv.u1),
     Math.min(uv.v0, uv.v1),
@@ -1014,6 +1140,7 @@ function vertexLightMultipliers(
   light: LightCtx,
   shade: number,
 ): [number, number, number, number] {
+  if (q.emission === 1) return [1, 1, 1, 1];
   const nx = q.x + d.dx;
   const ny = q.y + d.dy;
   const nz = q.z + d.dz;
@@ -1050,7 +1177,26 @@ function vertexLightMultipliers(
     const ao = q.skipAo ? 1 : aoFactor(o1, o2, o3);
     out[i] = lightBrightness(avg) * ao * shade;
   }
-  return out;
+  return q.bounds ? interpolateBoundLight(out, d.dir, q.bounds) : out;
+}
+
+/** Sample one continuous block-face light field on partial component corners. */
+export function interpolateBoundLight(
+  full: [number, number, number, number],
+  dir: Dir,
+  bounds: number[],
+): [number, number, number, number] {
+  const d = DIRS[dir]!;
+  const signs = cornerUvSigns(dir, 1, 1);
+  return signs.map(([su, sv]) => {
+    const u = bounds[d.uAxis + (su > 0 ? 3 : 0)]!;
+    const v = bounds[d.vAxis + (sv > 0 ? 3 : 0)]!;
+    return signs.reduce(
+      (sum, [cu, cv], i) =>
+        sum + full[i]! * (cu > 0 ? u : 1 - u) * (cv > 0 ? v : 1 - v),
+      0,
+    );
+  }) as [number, number, number, number];
 }
 
 /**
@@ -1136,7 +1282,7 @@ function pushCustomTri(
  * @param dv - Merged size along V.
  * @returns four `[su,sv]` pairs.
  */
-function cornerUvSigns(
+export function cornerUvSigns(
   dir: Dir,
   du: number,
   dv: number,
@@ -1163,6 +1309,15 @@ function cornerUvSigns(
       [1, -1],
       [1, 1],
       [-1, 1],
+    ];
+  }
+  // West and north reverse U in faceCorners to keep outward winding.
+  if (dir === 1 || dir === 5) {
+    return [
+      [1, -1],
+      [-1, -1],
+      [-1, 1],
+      [1, 1],
     ];
   }
   // Sides: (u0,v0),(u1,v0),(u1,v1),(u0,v1)
@@ -1412,4 +1567,43 @@ function makeMesh(
   mesh.frustumCulled = false;
   mesh.userData.pass = pass;
   return mesh;
+}
+
+/** Surface of a component box covered by an adjacent component in the same block. */
+export function boxFaceCovered(
+  bounds: number[],
+  dir: Dir,
+  boxes: number[][],
+): boolean {
+  const axis = dir < 2 ? 0 : dir < 4 ? 1 : 2;
+  const positive = dir % 2 === 0;
+  const edge = bounds[axis + (positive ? 3 : 0)];
+  return boxes.some(
+    (other) =>
+      other !== bounds &&
+      other[axis + (positive ? 0 : 3)] === edge &&
+      [0, 1, 2].every(
+        (a) =>
+          a === axis ||
+          (other[a]! <= bounds[a]! && other[a + 3]! >= bounds[a + 3]!),
+      ),
+  );
+}
+
+/** Preserve the block's pixel scale on thin edges and partial stair/slab faces. */
+export function partialTileCorners(
+  dir: Dir,
+  bounds: number[],
+  mirrorU = false,
+): Array<[number, number]> {
+  const d = DIRS[dir]!;
+  const reverseU = dir === 1 || dir === 5;
+  const u0 = reverseU ? 1 - bounds[d.uAxis + 3]! : bounds[d.uAxis]!;
+  const u1 = reverseU ? 1 - bounds[d.uAxis]! : bounds[d.uAxis + 3]!;
+  const v0 = bounds[d.vAxis]!,
+    v1 = bounds[d.vAxis + 3]!;
+  return tileCornersForDir(dir, 1, 1).map(([u, v]) => {
+    const tu = u0 + u * (u1 - u0);
+    return [mirrorU ? 1 - tu : tu, v0 + v * (v1 - v0)];
+  });
 }

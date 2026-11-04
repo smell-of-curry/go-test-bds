@@ -91,19 +91,31 @@ export function sampleAnimation(
     if (anim.overridePrevious) pose.override = true;
 
     if (channels.position) {
-      const v = sampleChannel(channels.position, t, host, [0, 0, 0]);
+      const v = sampleChannel(
+        channels.position,
+        t,
+        host,
+        [0, 0, 0],
+        pose.position,
+      );
       pose.position[0] += v[0] * weight;
       pose.position[1] += v[1] * weight;
       pose.position[2] += v[2] * weight;
     }
     if (channels.rotation) {
-      const v = sampleChannel(channels.rotation, t, host, [0, 0, 0]);
+      const v = sampleChannel(
+        channels.rotation,
+        t,
+        host,
+        [0, 0, 0],
+        pose.rotation,
+      );
       pose.rotation[0] += v[0] * weight;
       pose.rotation[1] += v[1] * weight;
       pose.rotation[2] += v[2] * weight;
     }
     if (channels.scale) {
-      const v = sampleChannel(channels.scale, t, host, [1, 1, 1]);
+      const v = sampleChannel(channels.scale, t, host, [1, 1, 1], pose.scale);
       // Blend scale toward identity: s' = lerp(1, s, weight) then multiply.
       pose.scale[0] *= 1 + (v[0] - 1) * weight;
       pose.scale[1] *= 1 + (v[1] - 1) * weight;
@@ -221,23 +233,24 @@ export function sampleChannel(
   t: number,
   host: MolangHost,
   identity: [number, number, number],
+  current: [number, number, number] = identity,
 ): [number, number, number] {
   if (channel.constant) {
-    return evalTriple(channel.constant, host);
+    return evalTriple(channel.constant, host, current);
   }
   const kfs = channel.keyframes;
   if (kfs.length === 0) return identity;
   if (kfs.length === 1) {
     // Single key: hold its post (or pre if at exact stamp from the left).
-    return evalTriple(kfs[0]!.post, host);
+    return evalTriple(kfs[0]!.post, host, current);
   }
 
   if (t <= kfs[0]!.time) {
-    return evalTriple(kfs[0]!.pre, host);
+    return evalTriple(kfs[0]!.pre, host, current);
   }
   const last = kfs[kfs.length - 1]!;
   if (t >= last.time) {
-    return evalTriple(last.post, host);
+    return evalTriple(last.post, host, current);
   }
 
   // Find segment kfs[i] → kfs[i+1] where t in (kfs[i].time, kfs[i+1].time].
@@ -250,14 +263,14 @@ export function sampleChannel(
   const span = b.time - a.time;
   const u = span > 0 ? (t - a.time) / span : 1;
 
-  const from = evalTriple(a.post, host);
-  const to = evalTriple(b.pre, host);
+  const from = evalTriple(a.post, host, current);
+  const to = evalTriple(b.pre, host, current);
 
   if (b.lerpMode === "catmullrom") {
-    const p0 = evalTriple((kfs[i - 1] ?? a).post, host);
+    const p0 = evalTriple((kfs[i - 1] ?? a).post, host, current);
     const p1 = from;
     const p2 = to;
-    const p3 = evalTriple((kfs[i + 2] ?? b).post, host);
+    const p3 = evalTriple((kfs[i + 2] ?? b).post, host, current);
     return [
       catmullRom(p0[0], p1[0], p2[0], p3[0], u),
       catmullRom(p0[1], p1[1], p2[1], p3[1], u),
@@ -408,12 +421,19 @@ export function ensureRestMatrix(group: THREE.Group): void {
 function evalTriple(
   triple: [ChannelExpr, ChannelExpr, ChannelExpr],
   host: MolangHost,
+  current: [number, number, number],
 ): [number, number, number] {
-  return [
-    evalExpr(triple[0], host),
-    evalExpr(triple[1], host),
-    evalExpr(triple[2], host),
-  ];
+  // Molang `this` is the accumulated value of this channel's axis, before
+  // this animation is added (vanilla riding uses -81 - this to replace gait).
+  return triple.map((expr, axis) => {
+    if (typeof expr === "number") return expr;
+    const channelHost = Object.create(host) as MolangHost;
+    channelHost.getContext = (name) =>
+      name === "animation_this"
+        ? current[axis]!
+        : (host.getContext?.(name) ?? 0);
+    return evalExpr(expr, channelHost);
+  }) as [number, number, number];
 }
 
 /**

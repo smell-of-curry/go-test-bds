@@ -576,9 +576,19 @@ test.describe("terrain atlas + mesher (browser)", () => {
         const big = atlas.rectOf("big_tile");
         const missingHas = atlas.has("missing_only");
         const fallback = atlas.rectOf(FALLBACK_TEXTURE);
-        const uv0 = atlas.uvRect("water_still", 0);
-        const uv2 = atlas.uvRect("water_still", 2);
-        const fb = atlas.flipbook("water_still");
+        const waterRect = atlas.rectOf("still_water_grey");
+        const ctx = atlas.canvas.getContext("2d")!;
+        bundle.mesher.updateAnimations(0);
+        const pixel0 = [
+          ...ctx.getImageData(waterRect.x, waterRect.y, 1, 1).data,
+        ];
+        bundle.mesher.updateAnimations(2);
+        const pixel2 = [
+          ...ctx.getImageData(waterRect.x, waterRect.y, 1, 1).data,
+        ];
+        const uv0 = atlas.uvRect("still_water_grey", 0);
+        const uv2 = atlas.uvRect("still_water_grey", 2);
+        const fb = atlas.flipbook("still_water_grey");
         const frame0 = fb ? flipbookFrameAt(fb, 0, 4) : -1;
         const frame2 = fb ? flipbookFrameAt(fb, 2, 4) : -1;
 
@@ -594,6 +604,8 @@ test.describe("terrain atlas + mesher (browser)", () => {
           big,
           missingHas,
           fallback,
+          pixel0,
+          pixel2,
           uv0,
           uv2,
           frame0,
@@ -611,7 +623,8 @@ test.describe("terrain atlas + mesher (browser)", () => {
       expect(result.fallback.w).toBe(16);
       expect(result.frame0).toBe(0);
       expect(result.frame2).toBe(1);
-      expect(result.uv0.v0).not.toBe(result.uv2.v0);
+      expect(result.uv0).toEqual(result.uv2);
+      expect(result.pixel0).not.toEqual(result.pixel2);
       expect(result.v0).toEqual(result.v1);
       expect(result.fallbackId).toBe(FALLBACK_TEXTURE);
     } finally {

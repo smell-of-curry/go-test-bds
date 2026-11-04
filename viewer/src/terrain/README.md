@@ -122,3 +122,22 @@ vanilla pack is absent (CI without the cache).
 - Biome tint wiring from column `biomePalette`/`biomes` into `biomeAt` (decode
   landed; finish the lookup hook).
 - `blocks1` decode in `store.ts` (mesher already reads it when present).
+
+### Film fidelity fixes (2026-11-04)
+
+Terrain sampling clamps to texel centers at atlas boundaries without shrinking
+UV spans; border texels retain the same width as interior texels. The terrain
+and entity-view goldens changed for this reason (the latter also shows terrain).
+North/west AO corners follow the geometry's reversed winding.
+
+Fluids use vanilla grayscale water and lava flipbook keys. Replay ticks update
+atlas pixels without rebuilding geometry; water preserves alpha and biome tint,
+lava is opaque/self-lit, and neighboring fluid levels share sloped corners.
+Doors combine both halves' states, select material indices rather than random
+variants, and use thin bounds with cropped edge UVs. Slabs and stairs use partial
+geometry. Nested vanilla player animation controllers now evaluate recursively.
+
+These repairs are not certification of complete Bedrock pixel parity. Other
+vanilla special shapes (including fences, walls and panes), client graphics
+settings, biome/light matching, and additional state combinations still need
+reference-client comparisons. Regression fixtures alone cannot prove parity.

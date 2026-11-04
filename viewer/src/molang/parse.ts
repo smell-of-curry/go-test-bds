@@ -210,6 +210,15 @@ class Parser {
       return this.parseBlock();
     }
     if (t.type === "ident") {
+      if (t.value === "this") {
+        this.advance();
+        return {
+          kind: "access",
+          scope: "context",
+          name: "animation_this",
+          pos: t.pos,
+        };
+      }
       if (t.value === "loop") return this.parseLoop();
       if (t.value === "for_each") return this.parseForEach();
       return this.parseAccess();

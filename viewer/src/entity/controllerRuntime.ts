@@ -50,6 +50,7 @@ export interface AnimationBindings {
 export interface AnimEntityState {
   type: string;
   player: boolean;
+  vehicle?: number;
   pos: [number, number, number];
   rot: [number, number] | [number, number, number];
   vel: [number, number, number];
@@ -138,6 +139,8 @@ export class EntityAnimator {
    */
   private readonly bornSec: number;
   private caughtUp = false;
+  private activeControllers = new Set<string>();
+  private activeControllerRoots = new Map<string, number>();
   /** Last controller-state names (for tests). */
   readonly stateLog: string[] = [];
 
@@ -326,6 +329,12 @@ export class EntityAnimator {
       else play.weight = w;
     }
 
+    this.activeControllerRoots.clear();
+    for (const [name, weight] of activeRoot) {
+      const id = this.bindings.shortNames[name] ?? name;
+      if (this.bindings.controllers.has(id))
+        this.activeControllerRoots.set(id, weight);
+    }
     this.tickControllers(delta);
     this.advancePlayheads(delta);
 
@@ -401,6 +410,7 @@ export class EntityAnimator {
    */
   private refreshFlagQueries(ent: AnimEntityState): void {
     const flags = ent.flags;
+    this.host.setQuery("is_riding", ent.vehicle ? 1 : 0);
     this.host.setQuery(
       "is_sneaking",
       flags.sneaking || flags.is_sneaking ? 1 : 0,
@@ -613,8 +623,7 @@ export class EntityAnimator {
    * @param shortName - Entity animations short name.
    */
   private tryBootController(shortName: string): void {
-    const full = this.bindings.shortNames[shortName];
-    if (!full) return;
+    const full = this.bindings.shortNames[shortName] ?? shortName;
     const def = this.bindings.controllers.get(full);
     if (!def || this.controllers.has(full)) return;
     this.controllers.set(full, {
@@ -665,7 +674,15 @@ export class EntityAnimator {
    * @param delta - dt.
    */
   private tickControllers(delta: number): void {
-    for (const [id, inst] of this.controllers) {
+    this.activeControllers.clear();
+    const queue = [...this.activeControllerRoots.keys()];
+    for (let i = 0; i < queue.length; i++) {
+      const id = queue[i]!;
+      if (this.activeControllers.has(id)) continue;
+      this.tryBootController(id);
+      const inst = this.controllers.get(id);
+      if (!inst) continue;
+      this.activeControllers.add(id);
       // Blend clock.
       if (inst.blendFrom && inst.blendDuration > 0) {
         inst.blendT += delta;
@@ -724,6 +741,16 @@ export class EntityAnimator {
         this.stateLog.push(`${id}:${tr.target}`);
         break;
       }
+      // Controllers can reference other controllers (vanilla player root →
+      // base → look). Visit parents first and tick each reachable child once.
+      for (const name of [inst.state, inst.blendFrom]) {
+        if (!name) continue;
+        for (const ref of inst.def.states.get(name)?.animations ?? []) {
+          if (ref.weight && !isTruthy(this.evalNumber(ref.weight))) continue;
+          const child = this.bindings.shortNames[ref.name] ?? ref.name;
+          if (this.bindings.controllers.has(child)) queue.push(child);
+        }
+      }
     }
   }
 
@@ -740,7 +767,8 @@ export class EntityAnimator {
       this.advanceOne(play, delta);
     }
 
-    for (const inst of this.controllers.values()) {
+    for (const [id, inst] of this.controllers) {
+      if (!this.activeControllers.has(id)) continue;
       const states: string[] = [inst.state];
       if (inst.blendFrom) states.push(inst.blendFrom);
       for (const stateName of states) {
@@ -799,27 +827,37 @@ export class EntityAnimator {
     }
 
     const now = performance.now() / 1000;
-    for (const [id, inst] of this.controllers) {
-      const keep = 1 - this.controllerReplaceWeight(id, now);
-      if (keep <= 0) continue;
-      const blendAlpha =
-        inst.blendFrom && inst.blendDuration > 0
-          ? Math.min(1, inst.blendT / inst.blendDuration)
-          : 1;
-      if (!inst.blendFrom) {
-        this.sampleControllerState(inst, inst.state, keep, poses);
-        continue;
-      }
-      // Cross-fade the two states' finished poses. Weighting each state into
-      // one accumulator multiplies scales (two scale-0 states gave a(1-a)).
-      const into = new Map<string, BoneAnimPose>();
-      const from = new Map<string, BoneAnimPose>();
-      this.sampleControllerState(inst, inst.state, 1, into);
-      this.sampleControllerState(inst, inst.blendFrom, 1, from);
-      mixBonePoses(from, into, blendAlpha, keep, poses);
+    for (const [id, weight] of this.activeControllerRoots) {
+      this.sampleController(id, weight, poses, new Set());
     }
     this.sampleServerPlays(poses, now);
     this.pruneServerPlays(now);
+  }
+
+  /** Sample a nested controller exactly where its parent references it. */
+  private sampleController(
+    id: string,
+    weight: number,
+    poses: Map<string, BoneAnimPose>,
+    path: Set<string>,
+  ): void {
+    if (path.has(id)) return; // Malformed cyclic packs must not recurse forever.
+    const inst = this.controllers.get(id);
+    if (!inst || !this.activeControllers.has(id)) return;
+    const keep =
+      weight * (1 - this.controllerReplaceWeight(id, performance.now() / 1000));
+    if (keep <= 0) return;
+    const nextPath = new Set(path).add(id);
+    if (!inst.blendFrom) {
+      this.sampleControllerState(inst, inst.state, keep, poses, nextPath);
+      return;
+    }
+    const alpha = Math.min(1, inst.blendT / inst.blendDuration);
+    const into = new Map<string, BoneAnimPose>();
+    const from = new Map<string, BoneAnimPose>();
+    this.sampleControllerState(inst, inst.state, 1, into, nextPath);
+    this.sampleControllerState(inst, inst.blendFrom, 1, from, nextPath);
+    mixBonePoses(from, into, alpha, keep, poses);
   }
 
   /**
@@ -833,11 +871,20 @@ export class EntityAnimator {
     stateName: string,
     stateWeight: number,
     poses: Map<string, BoneAnimPose>,
+    path: Set<string>,
   ): void {
     if (stateWeight <= 0) return;
     const state = inst.def.states.get(stateName);
     if (!state) return;
     for (const ref of state.animations) {
+      const child = this.bindings.shortNames[ref.name] ?? ref.name;
+      if (this.bindings.controllers.has(child)) {
+        const w =
+          stateWeight *
+          (ref.weight ? asNumber(this.evalNumber(ref.weight)) : 1);
+        this.sampleController(child, w, poses, path);
+        continue;
+      }
       const anim = this.resolveAnim(ref.name);
       if (!anim) continue;
       const head = inst.playheads.get(ref.name);

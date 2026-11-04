@@ -119,6 +119,36 @@ export class TerrainAtlas {
   private readonly terrain: Record<string, TerrainTextureEntry>;
   private readonly flipbooksByTile: Map<string, FlipbookEntry>;
   private readonly flipbookFrameH = new Map<string, number>();
+  private readonly animatedTiles: PackedTile[] = [];
+  private readonly displayedFrames = new Map<string, number>();
+  private liveAnimation = false;
+
+  /** Keep mesh UVs stable and update only the displayed atlas frame. */
+  enableAnimation(): void {
+    this.liveAnimation = true;
+  }
+
+  /** Advance on the replay tick, including backwards seeks, without remeshing. */
+  updateAnimation(tick: number): boolean {
+    if (!this.liveAnimation) return false;
+    const ctx = this.canvas.getContext("2d");
+    if (!ctx) return false;
+    let changed = false;
+    for (const t of this.animatedTiles) {
+      const fb = this.flipbooksByTile.get(t.id)!;
+      const count = Math.max(1, Math.floor(t.h / t.w));
+      const frame = Math.max(
+        0,
+        Math.min(count - 1, flipbookFrameAt(fb, tick, count)),
+      );
+      if (this.displayedFrames.get(t.id) === frame) continue;
+      ctx.clearRect(t.x, t.y, t.w, t.w);
+      ctx.drawImage(t.bitmap, 0, frame * t.w, t.w, t.w, t.x, t.y, t.w, t.w);
+      this.displayedFrames.set(t.id, frame);
+      changed = true;
+    }
+    return changed;
+  }
 
   /**
    * @param canvas - Blitted atlas.
@@ -145,6 +175,7 @@ export class TerrainAtlas {
       this.rects.set(t.id, { x: t.x, y: t.y, w: t.w, h: t.h });
       if (this.flipbooksByTile.has(t.id)) {
         this.flipbookFrameH.set(t.id, t.w);
+        this.animatedTiles.push(t);
       }
     }
   }
@@ -186,10 +217,11 @@ export class TerrainAtlas {
     x: number,
     y: number,
     z: number,
+    textureIndex?: number,
   ): AtlasUv {
     const entry = this.terrain[shortName];
     if (entry && entry.paths.length > 1) {
-      const idx = pickVariationIndex(entry.paths, x, y, z);
+      const idx = textureIndex ?? pickVariationIndex(entry.paths, x, y, z);
       const alt = `${shortName}#${idx}`;
       if (this.rects.has(alt)) return this.uvRect(alt, tick);
     }
@@ -211,7 +243,9 @@ export class TerrainAtlas {
 
     const frameH = this.flipbookFrameH.get(key) ?? px.w;
     const frameCount = Math.max(1, Math.floor(px.h / frameH));
-    const frame = flipbookFrameAt(fb, tick, frameCount);
+    const frame = this.liveAnimation
+      ? 0
+      : flipbookFrameAt(fb, tick, frameCount);
     const clamped = Math.max(0, Math.min(frameCount - 1, frame));
     const sub: AtlasRect = {
       x: px.x,

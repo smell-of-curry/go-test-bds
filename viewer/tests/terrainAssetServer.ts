@@ -225,6 +225,8 @@ export function buildFixturePack(): Map<string, Uint8Array> {
             { path: "textures/blocks/varied_b", weight: 1 },
           ],
         },
+        still_water_grey: { textures: "textures/blocks/water_still_grey" },
+        flowing_water_grey: { textures: "textures/blocks/water_flow_grey" },
         water_still: { textures: "textures/blocks/water_still" },
         water_flow: { textures: "textures/blocks/water_flow" },
         log_oak: { textures: "textures/blocks/log_oak" },
@@ -243,6 +245,11 @@ export function buildFixturePack(): Map<string, Uint8Array> {
   set(
     "textures/flipbook_textures.json",
     json([
+      {
+        flipbook_texture: "textures/blocks/water_still_grey",
+        atlas_tile: "still_water_grey",
+        ticks_per_frame: 2,
+      },
       {
         flipbook_texture: "textures/blocks/water_still",
         atlas_tile: "water_still",
@@ -283,6 +290,19 @@ export function buildFixturePack(): Map<string, Uint8Array> {
     ]),
   );
   set("textures/blocks/water_flow.png", solidPng(16, 16, 0, 60, 200));
+  set(
+    "textures/blocks/water_still_grey.png",
+    flipbookPng(16, [
+      [160, 160, 160],
+      [180, 180, 180],
+      [200, 200, 200],
+      [220, 220, 220],
+    ]),
+  );
+  set(
+    "textures/blocks/water_flow_grey.png",
+    solidPng(16, 16, 180, 180, 180, 160),
+  );
 
   return files;
 }

@@ -51,6 +51,7 @@ precision highp int;
 uniform sampler2D map;
 uniform vec2 atlasSize;
 uniform float alphaCutoff;
+uniform float preserveAlpha;
 uniform vec3 fogColor;
 uniform float fogNear;
 uniform float fogFar;
@@ -81,9 +82,8 @@ vec2 rotateFrac(vec2 f, float rot) {
 void main() {
   vec2 f = rotateFrac(vec2(wrapTile(vTileUv.x), wrapTile(vTileUv.y)), vTileRot);
   vec2 halfTexel = 0.5 / atlasSize;
-  vec2 origin = vAtlasRect.xy + halfTexel;
-  vec2 size = max(vAtlasRect.zw - 2.0 * halfTexel, vec2(0.0));
-  vec2 uv = origin + f * size;
+  vec2 uv = clamp(vAtlasRect.xy + f * vAtlasRect.zw,
+    vAtlasRect.xy + halfTexel, vAtlasRect.xy + vAtlasRect.zw - halfTexel);
   vec4 tex = texture(map, uv);
   if (tex.a < alphaCutoff) discard;
   // Vertex colour carries biome tint × face shade × light brightness × AO.
@@ -92,7 +92,7 @@ void main() {
     float t = clamp((vFogDepth - fogNear) / max(fogFar - fogNear, 1e-3), 0.0, 1.0);
     rgb = mix(rgb, fogColor, t);
   }
-  fragColor = vec4(rgb, 1.0);
+  fragColor = vec4(rgb, mix(1.0, tex.a, preserveAlpha));
 }
 `;
 
@@ -123,6 +123,7 @@ export function createTerrainMaterial(
         value: new THREE.Vector2(opts.atlasWidth, opts.atlasHeight),
       },
       alphaCutoff: { value: transparent ? 0.1 : 0.01 },
+      preserveAlpha: { value: transparent ? 1 : 0 },
       fogColor: { value: new THREE.Vector3(0.66, 0.83, 0.94) },
       fogNear: { value: 0 },
       fogFar: { value: 1 },

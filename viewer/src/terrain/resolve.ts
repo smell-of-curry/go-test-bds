@@ -218,6 +218,8 @@ export class BlockModelResolver {
       "water_flow",
       "lava_still",
       "lava_flow",
+      "still_water_grey",
+      "flowing_water_grey",
       "still_water",
       "flowing_water",
       "still_lava",
@@ -270,7 +272,8 @@ export class BlockModelResolver {
     if (TRANSLUCENT_NAMES.has(n) || n.includes("stained_glass"))
       return "translucent";
     // Plants are alpha-tested and must not hide neighbour faces.
-    if (this.isCrossBlock(block)) return "cutout";
+    if (this.isCrossBlock(block) || isDoor(block) || isTrapdoor(block))
+      return "cutout";
     if (CUTOUT_NAMES.has(n) || n.endsWith("_leaves")) return "cutout";
     // Dedicated block-entity geometry is never a full occluding cube.
     if (blockEntityKind(n)) return "cutout";
@@ -302,7 +305,14 @@ export class BlockModelResolver {
     // Custom geometry / block entities are not full cubes — never occlude.
     if (this.usesCustomGeometry(block)) return false;
     if (blockEntityKind(block.name)) return false;
-    if (partialExtents(block.name)) return false;
+    if (
+      partialExtents(block.name) ||
+      isDoor(block) ||
+      isTrapdoor(block) ||
+      isSlab(block) ||
+      isStair(block)
+    )
+      return false;
     const rc = this.renderClassOf(block);
     return rc === "opaque";
   }
@@ -337,7 +347,13 @@ export class BlockModelResolver {
     if (this.renderClassOf(block) === "liquid") return null;
 
     const shaped = (model: CubeModel): CubeModel =>
-      this.asCross(block, applyPartialExtents(block, model));
+      this.asCross(
+        block,
+        applyStairSlabShape(
+          block,
+          applyDoorShape(block, applyPartialExtents(block, model)),
+        ),
+      );
 
     // Unnamed rid → magenta (bug marker).
     if (block.name === "" && block.rid !== 0) {
@@ -426,8 +442,8 @@ export class BlockModelResolver {
     const depth = liquidDepth(block);
     const flowYaw = liquidFlowYaw(block);
     return {
-      textureStill: lava ? "lava_still" : "water_still",
-      textureFlow: lava ? "lava_flow" : "water_flow",
+      textureStill: lava ? "still_lava" : "still_water_grey",
+      textureFlow: lava ? "flowing_lava" : "flowing_water_grey",
       tint: lava ? "none" : "water",
       depth,
       flowYaw,
@@ -492,7 +508,13 @@ export class BlockModelResolver {
     }
 
     // facing — directional blocks. blocks.json puts the front on `north`.
-    const facing = String(s.facing ?? s.direction ?? "");
+    const facing = String(
+      s["minecraft:cardinal_direction"] ??
+        s.facing_direction ??
+        s.facing ??
+        s.direction ??
+        "",
+    );
     if (
       facing &&
       (block.name.includes("furnace") ||
@@ -517,16 +539,6 @@ export class BlockModelResolver {
           faces[f] = f === frontFace ? { ...frontApp } : { ...sideApp };
         }
       }
-    }
-
-    // open / upper-lower — doors / trapdoors: keep textures, flag via rotation.
-    if (s.open === true || s.open === 1 || s.open === "true") {
-      for (const f of CARDINALS) faces[f] = { ...faces[f]!, rotation: 1 };
-    }
-    const half = s.half ?? s.upper_block_bit;
-    if (half === "upper" || half === true || half === 1) {
-      // Upper door half often shares textures; no UV change required for cubes.
-      void half;
     }
 
     // age — crops / fire: still one cube; atlas variation left to short-name.
@@ -721,8 +733,8 @@ export function liquidFlowYaw(block: Block): number | null {
   if (depth === 0) return null;
   const facing = block.states.facing ?? block.states.direction;
   if (facing != null) return facingToYaw(String(facing));
-  // Deterministic fallback from depth so frames stay reproducible.
-  return (depth % 4) * 90;
+  // Real flow direction is derived from neighbouring surface heights by the mesher.
+  return null;
 }
 
 function facingToYaw(facing: string): number {
@@ -793,4 +805,169 @@ export function facingToFrontFace(facing: string): Cardinal {
     default:
       return "north";
   }
+}
+
+/** Vanilla door halves store orientation below and hinge above. */
+export function pairedDoorBlock(
+  block: Block,
+  above?: Block | symbol,
+  below?: Block | symbol,
+): Block {
+  if (!isDoor(block)) return block;
+  const upper = isUpperHalf(block.states);
+  const other = upper ? below : above;
+  if (
+    !other ||
+    typeof other === "symbol" ||
+    other.name !== block.name ||
+    isUpperHalf(other.states) === upper
+  )
+    return block;
+  const lowerStates = upper ? other.states : block.states;
+  const upperStates = upper ? block.states : other.states;
+  return {
+    ...block,
+    states: {
+      ...block.states,
+      direction: lowerStates.direction,
+      "minecraft:cardinal_direction":
+        lowerStates["minecraft:cardinal_direction"],
+      open_bit: lowerStates.open_bit,
+      door_hinge_bit: upperStates.door_hinge_bit,
+    },
+  };
+}
+
+function isDoor(block: Block): boolean {
+  return block.name.startsWith("minecraft:") && block.name.endsWith("_door");
+}
+function isTrapdoor(block: Block): boolean {
+  return block.name.startsWith("minecraft:") && block.name.endsWith("trapdoor");
+}
+function bit(value: unknown): boolean {
+  return value === true || value === 1 || value === "true";
+}
+
+function applyDoorShape(block: Block, model: CubeModel): CubeModel {
+  if (model.customGeometryKey || (!isDoor(block) && !isTrapdoor(block)))
+    return model;
+  const t = 3 / 16;
+  const s = block.states;
+  const open = bit(s.open_bit ?? s.open);
+  const cardinal = s["minecraft:cardinal_direction"];
+  const direction =
+    isDoor(block) && typeof cardinal === "string"
+      ? ({ south: 0, west: 1, north: 2, east: 3 }[cardinal] ?? 0)
+      : Number(s.direction ?? 0) & 3;
+  let bounds: CubeModel["bounds"];
+  const faces = { ...model.faces };
+  if (isDoor(block)) {
+    // blocks.json uses up/down for the lower image and side for the upper image.
+    const texture = isUpperHalf(s) ? faces.north.texture : faces.up.texture;
+    const index = [
+      "wooden_door",
+      "spruce_door",
+      "birch_door",
+      "jungle_door",
+      "acacia_door",
+      "dark_oak_door",
+      "iron_door",
+    ].indexOf(bareName(block.name));
+    for (const face of CARDINALS)
+      faces[face] = {
+        texture,
+        tint: "none",
+        rotation: 0,
+        mirrorU: bit(s.door_hinge_bit),
+        ...((texture === "door_upper" || texture === "door_lower") && index >= 0
+          ? { textureIndex: index }
+          : {}),
+      };
+    // Bedrock door direction: 0 east, 1 south, 2 west, 3 north.
+    const d = (direction + (open ? (bit(s.door_hinge_bit) ? 3 : 1) : 0)) & 3;
+    bounds = [
+      [0, 0, 0, t, 1, 1],
+      [0, 0, 0, 1, 1, t],
+      [1 - t, 0, 0, 1, 1, 1],
+      [0, 0, 1 - t, 1, 1, 1],
+    ][d] as CubeModel["bounds"];
+  } else if (!open) {
+    bounds = bit(s.upside_down_bit)
+      ? [0, 1 - t, 0, 1, 1, 1]
+      : [0, 0, 0, 1, t, 1];
+  } else {
+    bounds = [
+      [0, 0, 0, t, 1, 1],
+      [1 - t, 0, 0, 1, 1, 1],
+      [0, 0, 0, 1, 1, t],
+      [0, 0, 1 - t, 1, 1, 1],
+    ][direction] as CubeModel["bounds"];
+  }
+  return {
+    ...model,
+    faces,
+    bounds,
+    renderClass: "cutout",
+    ambientOcclusion: false,
+  };
+}
+
+function isSlab(block: Block): boolean {
+  return (
+    block.name.startsWith("minecraft:") &&
+    block.name.endsWith("_slab") &&
+    !block.name.includes("double")
+  );
+}
+function isStair(block: Block): boolean {
+  return block.name.startsWith("minecraft:") && block.name.endsWith("_stairs");
+}
+function applyStairSlabShape(block: Block, model: CubeModel): CubeModel {
+  if (model.customGeometryKey) return model;
+  if (isSlab(block)) {
+    const top =
+      bit(block.states.top_slot_bit) ||
+      block.states["minecraft:vertical_half"] === "top";
+    return {
+      ...model,
+      bounds: top ? [0, 0.5, 0, 1, 1, 1] : [0, 0, 0, 1, 0.5, 1],
+    };
+  }
+  if (!isStair(block)) return model;
+  // Bedrock weirdo_direction: east, west, south, north (full-height side).
+  const d = Number(block.states.weirdo_direction ?? 0) & 3;
+  const vectors = [
+    [1, 0],
+    [-1, 0],
+    [0, 1],
+    [0, -1],
+  ];
+  const [dx, dz] = vectors[d]!;
+  const upside = bit(block.states.upside_down_bit);
+  const corner = String(block.states["minecraft:corner"] ?? "none");
+  const left = corner.endsWith("left");
+  const sideX = left ? dz! : -dz!;
+  const sideZ = left ? -dx! : dx!;
+  const boxes: NonNullable<CubeModel["boxes"]> = [];
+  for (let y = 0; y < 2; y++)
+    for (let z = 0; z < 2; z++)
+      for (let x = 0; x < 2; x++) {
+        const front = (x - 0.5) * dx! + (z - 0.5) * dz! > 0;
+        const side = (x - 0.5) * sideX + (z - 0.5) * sideZ > 0;
+        const filled = corner.startsWith("inner")
+          ? front || side
+          : corner.startsWith("outer")
+            ? front && side
+            : front;
+        if (y === (upside ? 1 : 0) || filled)
+          boxes.push([
+            x / 2,
+            y / 2,
+            z / 2,
+            (x + 1) / 2,
+            (y + 1) / 2,
+            (z + 1) / 2,
+          ]);
+      }
+  return { ...model, boxes };
 }
