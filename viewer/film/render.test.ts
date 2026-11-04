@@ -1,5 +1,12 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import {
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -7,7 +14,7 @@ import { PNG } from "pngjs";
 import { build } from "vite";
 import { fileURLToPath } from "node:url";
 import { writeGoldenMotionTake } from "./fixture-take";
-import { renderFilm } from "./render";
+import { encodeMp4, filmFrameDirectory, renderFilm } from "./render";
 import { boundToMs, outputTimes, parseBound } from "./time";
 import { sampleFilmCamera } from "../src/camera";
 
@@ -112,3 +119,67 @@ test(
     }
   },
 );
+
+test("film encoder caps a reused 222-frame directory to the 150 freshly rendered frames", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "film-encode-count-"));
+  try {
+    const png = new PNG({ width: 16, height: 16 });
+    png.data.fill(255);
+    const image = PNG.sync.write(png);
+    for (let i = 0; i < 222; i++) {
+      writeFileSync(
+        join(dir, `frame_${String(i).padStart(5, "0")}.png`),
+        image,
+      );
+    }
+    const out = join(dir, "clip.mp4");
+    const count = () =>
+      Number(
+        execFileSync(
+          process.env.FFPROBE ?? "ffprobe",
+          [
+            "-v",
+            "error",
+            "-count_frames",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream=nb_read_frames",
+            "-of",
+            "csv=p=0",
+            out,
+          ],
+          { encoding: "utf8" },
+        ).trim(),
+      );
+    await encodeMp4(dir, out, 60, 16, 16, 222);
+    assert.equal(count(), 222);
+    // A shorter re-render overwrites its first 150 PNGs but leaves the old tail.
+    for (let i = 0; i < 150; i++) {
+      writeFileSync(
+        join(dir, `frame_${String(i).padStart(5, "0")}.png`),
+        image,
+      );
+    }
+    await encodeMp4(dir, out, 60, 16, 16, 150);
+    assert.equal(count(), 150);
+    assert.equal(
+      readdirSync(dir).filter((name) => name.endsWith(".png")).length,
+      222,
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("film segment PNG directories are named after their output", () => {
+  assert.equal(
+    filmFrameDirectory("/takes/clips/catch-seg0.mp4"),
+    "/takes/clips/catch-seg0-frames",
+  );
+  assert.equal(
+    filmFrameDirectory("/takes/clips/catch-seg1.mp4"),
+    "/takes/clips/catch-seg1-frames",
+  );
+  assert.equal(filmFrameDirectory("/takes/raw-frames"), "/takes/raw-frames");
+});

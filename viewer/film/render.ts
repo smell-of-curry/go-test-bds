@@ -1,6 +1,6 @@
 import { execFileSync, spawn } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { pathToFileURL, fileURLToPath } from "node:url";
 import { chromium, type Browser, type Page } from "playwright";
 import { sampleTrackPoints } from "./lookahead";
@@ -15,7 +15,7 @@ export interface RenderFilmOptions {
   width: number;
   height: number;
   fps: number;
-  /** Directory of PNGs, or an `.mp4` path (PNGs land in a sibling `frames/`). */
+  /** Directory of PNGs, or an `.mp4` path (PNGs land in a sibling `<output>-frames/`). */
   out: string;
   cameraPath?: string;
   /** ANGLE Metal instead of SwiftShader. */
@@ -75,7 +75,7 @@ export async function renderFilm(
     packsFrom: opts.packsFrom,
   });
   const mp4 = opts.out.endsWith(".mp4") ? opts.out : null;
-  const frameDir = mp4 ? join(dirname(mp4), "frames") : opts.out;
+  const frameDir = filmFrameDirectory(opts.out);
   mkdirSync(frameDir, { recursive: true });
   if (mp4) mkdirSync(dirname(mp4), { recursive: true });
 
@@ -212,7 +212,15 @@ export async function renderFilm(
       writeFileSync(join(frameDir, name), Buffer.from(png, "base64"));
     }
     const seconds = (performance.now() - t0) / 1000;
-    if (mp4) await encodeMp4(frameDir, mp4, opts.fps, opts.width, opts.height);
+    if (mp4)
+      await encodeMp4(
+        frameDir,
+        mp4,
+        opts.fps,
+        opts.width,
+        opts.height,
+        times.length,
+      );
     console.error(
       `film: ${times.length} frames in ${seconds.toFixed(2)}s (${(times.length / seconds).toFixed(2)} fps) renderer=${renderer}`,
     );
@@ -288,20 +296,32 @@ function chromiumArgs(gpu: boolean): string[] {
   ];
 }
 
+/** Keep neighbouring segment renders from overwriting each other's PNGs. */
+export function filmFrameDirectory(out: string): string {
+  return out.endsWith(".mp4")
+    ? join(dirname(out), `${basename(out, ".mp4")}-frames`)
+    : out;
+}
+
 /**
  * @param frameDir - Directory of `frame_%05d.png` starting at 0.
  * @param mp4 - Output file.
  * @param fps - Constant playback rate.
  * @param width - Frame width (logged if padded for yuv420p).
  * @param height - Frame height.
+ * @param frameCount - Exact number captured this run; ignore any stale PNG tail.
  */
-async function encodeMp4(
+export async function encodeMp4(
   frameDir: string,
   mp4: string,
   fps: number,
   width: number,
   height: number,
+  frameCount: number,
 ): Promise<void> {
+  if (!Number.isSafeInteger(frameCount) || frameCount < 1) {
+    throw new Error(`invalid film frame count: ${frameCount}`);
+  }
   const bin = ffmpegBin();
   const args = [
     "-y",
@@ -311,6 +331,8 @@ async function encodeMp4(
     "0",
     "-i",
     join(frameDir, "frame_%05d.png"),
+    "-frames:v",
+    String(frameCount),
   ];
   if (width % 2 !== 0 || height % 2 !== 0) {
     console.error(
