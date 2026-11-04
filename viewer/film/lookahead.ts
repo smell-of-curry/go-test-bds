@@ -37,6 +37,8 @@ interface Generation {
   frames: TimedFilmFrame[];
   /** Seed payload for each `x,z` in this dimension (see {@link betterSeed}). */
   first: Map<string, Column>;
+  /** Latest complete pre-window snapshot already represented by the seed. */
+  seedThrough: Map<string, number>;
 }
 
 /**
@@ -143,7 +145,7 @@ export function rewriteTimelineForLookahead(
       frame.type === "keyframe" ||
       (frame.type === "delta" && frame.world != null);
     if (boundary) {
-      current = { frames: [], first: new Map() };
+      current = { frames: [], first: new Map(), seedThrough: new Map() };
       gens.push(current);
     }
     if (!current) {
@@ -155,6 +157,9 @@ export function rewriteTimelineForLookahead(
     if (!cols) continue;
     for (const col of cols) {
       const key = columnId(col.x, col.z);
+      if (col.state === "complete" && item.tMs < opts.fromMs) {
+        current.seedThrough.set(key, current.frames.length - 1);
+      }
       const have = current.first.get(key);
       if (!have || betterSeed(have, col, item.tMs, opts.fromMs)) {
         current.first.set(key, col);
@@ -168,8 +173,12 @@ export function rewriteTimelineForLookahead(
     for (const [key, col] of gen.first) {
       if (columnNearPoints(col.x, col.z, points, radius)) keep.set(key, col);
     }
+    // Compare refreshes with the state most recently replayed, not the seed:
+    // a real edit followed by a return to the seed is still a real edit.
+    const replayed = new Map(keep);
+    const incrementalEdits = new Set<string>();
     let seeded = false;
-    for (const item of gen.frames) {
+    for (const [frameIndex, item] of gen.frames.entries()) {
       let frame = item.frame;
       if (
         !seeded &&
@@ -182,14 +191,39 @@ export function rewriteTimelineForLookahead(
         // A seeded column only takes a later payload that changes its blocks;
         // shells and light refreshes would void it or re-mesh it mid-shot.
         const added = frame.columnsAdded.filter((c) => {
-          const seed = keep.get(columnId(c.x, c.z));
-          return !seed || (c.state === "complete" && !sameBlocks(seed, c));
+          const key = columnId(c.x, c.z);
+          if (!keep.has(key)) return true;
+          if (frameIndex <= (gen.seedThrough.get(key) ?? -1)) return false;
+          if (c.state !== "complete") return false;
+          const previous = replayed.get(key);
+          const changed =
+            !previous || incrementalEdits.has(key) || !sameBlocks(previous, c);
+          replayed.set(key, c);
+          incrementalEdits.delete(key);
+          return changed;
         });
         if (added.length !== frame.columnsAdded.length) {
           frame = {
             ...frame,
             columnsAdded: added.length > 0 ? added : undefined,
           };
+        }
+      }
+      if (frame.type === "delta" && frame.blocks) {
+        const blocks = frame.blocks.filter((change) => {
+          const key = columnId(
+            Math.floor(change.pos[0] / 16),
+            Math.floor(change.pos[2] / 16),
+          );
+          if (!keep.has(key)) return true;
+          // A full column snapshot supersedes older incremental writes. Writes
+          // on the snapshot frame occur after columnsAdded and must still run.
+          if (frameIndex < (gen.seedThrough.get(key) ?? -1)) return false;
+          incrementalEdits.add(key);
+          return true;
+        });
+        if (blocks.length !== frame.blocks.length) {
+          frame = { ...frame, blocks: blocks.length ? blocks : undefined };
         }
       }
       if (

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { Store } from "../src/store";
 import { cameraClearance } from "./clearance";
 import { takeMap } from "./map";
 import { parseSse, timelineFromSse, timelineFromSseStream } from "./client";
@@ -416,4 +417,84 @@ test("fog disc follows what loaded, not the granted radius", () => {
     Math.abs(loadedDiscRadiusChunks(disc(10, "1,0"), 0, 0, 16) - 10) < 0.3,
   );
   assert.ok(Math.abs(loadedDiscRadiusChunks(disc(16), 0, 0, 14) - 14) < 0.3);
+});
+
+test("lookahead does not resurrect cleared pre-window geometry or old incremental writes", () => {
+  const air = { name: "minecraft:air", states: {}, rid: 0 };
+  const stone = { name: "minecraft:stone", states: {}, rid: 1 };
+  const snapshot = (filled: boolean): Column => ({
+    ...col(0, 0),
+    sections: [
+      {
+        y: 4,
+        palette: [air, stone],
+        blocks: Buffer.from(
+          new Uint16Array(4096).fill(filled ? 1 : 0).buffer,
+        ).toString("base64"),
+      },
+    ],
+  });
+  const roof = snapshot(true),
+    cleared = snapshot(false);
+  const frames = [
+    kf([]),
+    delta(500, { columnsAdded: [roof] }),
+    delta(750, { blocks: [{ pos: [0, 64, 0], layer: 0, block: stone }] }),
+    delta(1000, { columnsAdded: [cleared] }),
+    // This later incremental edit is not in the full cleared snapshot.
+    delta(1500, { blocks: [{ pos: [1, 64, 0], layer: 0, block: stone }] }),
+  ];
+  const rewritten = rewriteTimelineForLookahead(frames, {
+    fromMs: 2000,
+    toMs: 5000,
+    points: cam,
+  });
+  const replay = (timeline: TimedFilmFrame[]) => {
+    const store = new Store();
+    for (const f of timeline) store.apply(f.frame);
+    return [...store.getState().columns.get("0,0")!.sections.get(4)!.indices];
+  };
+  assert.deepEqual(replay(rewritten), replay(frames));
+  assert.equal(replay(rewritten).filter((i) => i === 1).length, 1);
+  assert.equal(
+    rewritten[1]!.frame.type === "delta" && rewritten[1]!.frame.columnsAdded,
+    undefined,
+  );
+  assert.equal(
+    rewritten[2]!.frame.type === "delta" && rewritten[2]!.frame.blocks,
+    undefined,
+  );
+});
+
+test("lookahead retains in-window edits returning to the seed, including incremental writes", () => {
+  const initial = edited(0, 0);
+  const changed = edited(0, 0, undefined, "AQAB");
+  const restored = edited(0, 0);
+  const frames = [
+    kf([initial]),
+    delta(2500, { columnsAdded: [changed] }),
+    delta(3000, { columnsAdded: [restored] }),
+    delta(3500, {
+      blocks: [
+        {
+          pos: [0, 64, 0],
+          layer: 0,
+          block: { name: "minecraft:air", rid: 0, states: {} },
+        },
+      ],
+    }),
+    delta(4000, { columnsAdded: [restored] }),
+  ];
+  const out = rewriteTimelineForLookahead(frames, {
+    fromMs: 2000,
+    toMs: 5000,
+    points: cam,
+  });
+  for (const i of [1, 2, 4]) {
+    const f = out[i]!.frame;
+    assert.equal(
+      f.type === "delta" && f.columnsAdded?.[0],
+      i === 1 ? changed : restored,
+    );
+  }
 });
