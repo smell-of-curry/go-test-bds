@@ -342,6 +342,8 @@ func (b *Bot) registerHandlers() {
 		packet.IDCommandOutput:               &CommandOutputHandler{},
 		packet.IDPlayerList:                  &PlayerListHandler{},
 		packet.IDPlayerSkin:                  &PlayerSkinHandler{},
+		packet.IDSetPlayerGameType:           &SetPlayerGameTypeHandler{},
+		packet.IDUpdatePlayerGameType:        &UpdatePlayerGameTypeHandler{},
 		packet.IDEmote:                       &EmoteHandler{},
 		packet.IDItemRegistry:                &ItemRegistryHandler{},
 		packet.IDSyncActorProperty:           &SyncActorPropertyHandler{},

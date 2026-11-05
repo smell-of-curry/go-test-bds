@@ -27,13 +27,19 @@ func (c Config) New() (actor *Actor) {
 
 	identity := c.Conn.IdentityData()
 	gameData := c.Conn.GameData()
+	gameType := gameData.PlayerGameMode
+	if gameType == packet.GameTypeDefault {
+		// StartGame uses Default to inherit the world's mode; it is not
+		// spectator (which has its own GameTypeSpectator value).
+		gameType = gameData.WorldGameMode
+	}
 
 	pl := entity.CreateFromPacket(&packet.AddPlayer{
 		UUID:            uuid.MustParse(identity.Identity),
 		Username:        identity.DisplayName,
 		EntityRuntimeID: gameData.EntityRuntimeID,
 		Position:        gameData.PlayerPosition,
-		GameType:        gameData.PlayerGameMode,
+		GameType:        gameType,
 		AbilityData:     protocol.AbilityData{EntityUniqueID: gameData.EntityUniqueID},
 	})
 

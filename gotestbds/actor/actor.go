@@ -382,7 +382,11 @@ func (a *Actor) LookAt(point mgl64.Vec3) {
 		yaw += 360.0
 	}
 
-	a.Move(a.Position(), cube.Rotation{yaw, pitch})
+	if a.move(a.Position(), cube.Rotation{yaw, pitch}) {
+		// A local look turns the head too. Use the accepted rotation because
+		// HandleMove may adjust it; a cancelled look must change neither.
+		a.SetHeadYaw(a.Rotation().Yaw())
+	}
 }
 
 // LookAtBlock makes Actor look at the block position passed.

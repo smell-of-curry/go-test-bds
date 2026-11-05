@@ -267,6 +267,9 @@ func (a *Actor) SendMovement() {
 	var moveVector mgl32.Vec2
 	pitch := float32(a.Rotation().Pitch())
 	yaw := float32(a.Rotation().Yaw())
+	// This actor sends its head facing along its look yaw. Keep the local
+	// observation identical to that input, including the wire's precision.
+	a.SetHeadYaw(float64(yaw))
 
 	if a.moving {
 		// Prefer this-tick walk delta. Velocity alone is usually friction-
@@ -508,9 +511,15 @@ func (a *Actor) AbortBreaking() {
 
 // Move directly moves Actor.
 func (a *Actor) Move(pos mgl64.Vec3, rot cube.Rotation) {
+	a.move(pos, rot)
+}
+
+// move reports whether HandleMove accepted the move. LookAt uses the result
+// to update the local head only when its rotation was accepted.
+func (a *Actor) move(pos mgl64.Vec3, rot cube.Rotation) bool {
 	ctx := event.C(a)
 	if a.Handler().HandleMove(ctx, &rot, &pos); ctx.Cancelled() {
-		return
+		return false
 	}
 
 	// Accumulate delta BEFORE updating position. Doing it after made
@@ -519,6 +528,7 @@ func (a *Actor) Move(pos mgl64.Vec3, rot cube.Rotation) {
 	before := a.Position()
 	a.Player.Move(pos, rot)
 	a.delta = a.delta.Add(pos.Sub(before))
+	return true
 }
 
 // MoveRawInput moves Actor according to Input
