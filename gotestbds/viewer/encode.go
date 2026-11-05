@@ -1027,7 +1027,7 @@ func (e *encoder) encodeUI(a *actor.Actor) UI {
 		ui.Form = &UIForm{
 			Type:         formTypeName(f.Type()),
 			Title:        resolveLangLines(flattenRawtext(f.Title())),
-			Content:      resolveLangLines(flattenRawtext(f.ContentText())),
+			Content:      formContent(f),
 			Buttons:      formButtons(f),
 			ButtonImages: formButtonImages(f),
 		}

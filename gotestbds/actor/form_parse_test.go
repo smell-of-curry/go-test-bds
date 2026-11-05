@@ -37,6 +37,9 @@ func TestMenuFormParsesButtons(t *testing.T) {
 			if buttons[0].Text() != "Confirm" {
 				t.Fatalf("button 0 = %q", buttons[0].Text())
 			}
+			if name == "buttonImage" && buttons[0].Image().Data != "textures/ui/confirm" {
+				t.Fatalf("button image was lost: %#v", buttons[0].Image())
+			}
 		})
 	}
 }
@@ -48,6 +51,8 @@ func TestModalFormParsesButtons(t *testing.T) {
 		"stringButtons": `{"type":"modal","title":"GoTestBDS Modal","content":"body","button1":"Yes","button2":"No"}`,
 		"objectButtons": `{"type":"modal","title":"GoTestBDS Modal","content":"body",` +
 			`"button1":{"text":"Yes"},"button2":{"text":"No"}}`,
+		"directRawtextButtons": `{"type":"modal","title":"GoTestBDS Modal","content":"body",` +
+			`"button1":{"rawtext":[{"text":"Yes"}]},"button2":{"rawtext":[{"text":"No"}]}}`,
 		"rawtextTitle": `{"type":"modal","title":{"rawtext":[{"text":"GoTestBDS Modal"}]},"content":"body",` +
 			`"button1":"Yes","button2":"No"}`,
 	} {
@@ -70,5 +75,18 @@ func TestModalFormParsesButtons(t *testing.T) {
 				t.Fatalf("button2 = %q", no.Text())
 			}
 		})
+	}
+}
+
+func TestModalFormRetainsTranslatedButtonLabels(t *testing.T) {
+	const first = `{"rawtext":[{"translate":"ui.continue"}]}`
+	const second = `{"translate":"ui.dismiss","with":["result"]}`
+	f, err := NewForm([]byte(`{"type":"modal","title":"Result","content":"Done","button1":`+first+`,"button2":`+second+`}`), 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	yes, no, ok := f.ModalFormButtons()
+	if !ok || yes.Text() != first || no.Text() != second {
+		t.Fatalf("translated labels must survive for later localization: %q, %q", yes.Text(), no.Text())
 	}
 }
