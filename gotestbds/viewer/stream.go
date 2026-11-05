@@ -377,6 +377,10 @@ func newStream(h *Hub, name string, radius, sectionRadius, columnBudget int) *St
 // a paced slice of columns based on what it has already been sent. A slow
 // subscriber never blocks this call.
 func (s *Stream) Tick(a *actor.Actor) {
+	// Recording and cached HUD state must resolve translations even when no
+	// browser requests /stream or /asset. Packs may finish ingesting after
+	// Register, so refresh before either world projection or HUD cursor reads.
+	s.hub.refreshLang()
 	s.reportHealth(time.Now())
 	s.lastTick.Store(a.CurrentTick())
 	s.lastDim.Store(a.Dimension())
