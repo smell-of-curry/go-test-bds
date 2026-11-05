@@ -63,12 +63,18 @@ func main() {
 	defer stop()
 	go watchStackDump(logger)
 
-	if config.Skin.Path != "" {
-		if _, _, _, err := skinfile.Decode(config.Skin.Path); err != nil {
-			slog.Error("skin", "path", config.Skin.Path, "error", err)
+	checkedSkins := map[string]bool{}
+	for i := 0; i < config.Bots.Count; i++ {
+		path := config.SkinPath(config.BotName(i))
+		if path == "" || checkedSkins[path] {
+			continue
+		}
+		if _, _, _, err := skinfile.Decode(path); err != nil {
+			slog.Error("skin", "path", path, "error", err)
 			exitCode = 1
 			return
 		}
+		checkedSkins[path] = true
 	}
 
 	var hub *viewer.Hub
@@ -223,10 +229,8 @@ func runBot(ctx context.Context, config Config, name string, logger *slog.Logger
 		// answers in one batch that overruns the 16 MiB default.
 		MaxDecompressedLen: 256 << 20,
 	}
-	if config.Skin.Path != "" {
-		if err := skinfile.Apply(&dialer.ClientData, config.Skin.Path, config.Skin.Slim, name); err != nil {
-			return err
-		}
+	if err := applyBotSkin(&dialer.ClientData, config, name); err != nil {
+		return err
 	}
 	// Pack download is gated on the asset manager: nil manager (viewer off)
 	// refuses every pack so a normal test run never pulls hundreds of MB.
@@ -249,4 +253,12 @@ func runBot(ctx context.Context, config Config, name string, logger *slog.Logger
 		return nil
 	}
 	return err
+}
+
+// applyBotSkin is shared by every login; distinct actors retain distinct skins.
+func applyBotSkin(data *login.ClientData, config Config, name string) error {
+	if path := config.SkinPath(name); path != "" {
+		return skinfile.Apply(data, path, config.Skin.Slim, name)
+	}
+	return nil
 }

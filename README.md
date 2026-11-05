@@ -84,6 +84,11 @@ An external program can drive the same bots without the addon in the loop.
 `POST /bots/{name}/instruction`. Set `GOTESTBDS_CONTROL_TOKEN` if that port is
 reachable past loopback. The header is the raw token, no `Bearer` prefix.
 
+Use `--skin trainer.png` for a shared login skin and repeat
+`--bot-skin TestBot2=opponent.png` to give an exact bot name its own PNG.
+The equivalent config entry is `Skin.ByBot`; other bots keep `Skin.Path`.
+Skins use the global `--skin-slim` arm model and are validated before connecting.
+
 ## Write a test
 
 ```typescript

@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -83,6 +84,8 @@ type Config struct {
 	Skin struct {
 		Path string
 		Slim bool
+		// ByBot overrides Path for an exact bot display name.
+		ByBot map[string]string
 	}
 	// Record is a directory for an offline SSE take. Empty disables it. The
 	// viewer must also be enabled.
@@ -340,6 +343,11 @@ func applyFlags(c *Config) error {
 	controlAddr := set.String("control", c.Control.Address, "host:port for the external instruction HTTP API (empty disables; loopback by default)")
 	skinPath := set.String("skin", c.Skin.Path, "PNG skin applied at login (64x32, 64x64, or 128x128)")
 	skinSlim := set.Bool("skin-slim", c.Skin.Slim, "use the slim arm model for --skin")
+	botSkins := skinOverrides{}
+	for name, path := range c.Skin.ByBot {
+		botSkins[name] = path
+	}
+	set.Var(&botSkins, "bot-skin", "override one bot's login skin: name=PNG path (repeatable)")
 	recordDir := set.String("record", c.Record, "directory for an offline SSE recording (requires --viewer)")
 	shadowListen := set.String("shadow-listen", c.Shadow.Listen, "host:port for shadow proxy mode (empty: spawn bots)")
 	var shadowPacks packList
@@ -376,6 +384,7 @@ func applyFlags(c *Config) error {
 	c.Control.Address = normalizeControl(*controlAddr)
 	c.Skin.Path = *skinPath
 	c.Skin.Slim = *skinSlim
+	c.Skin.ByBot = botSkins
 	c.Record = *recordDir
 	c.Shadow.Listen = *shadowListen
 	set.Visit(func(f *flag.Flag) {
@@ -384,6 +393,37 @@ func applyFlags(c *Config) error {
 		}
 	})
 	return nil
+}
+
+// SkinPath selects the exact-name override, otherwise the shared login skin.
+func (c Config) SkinPath(name string) string {
+	if path, ok := c.Skin.ByBot[name]; ok {
+		return path
+	}
+	return c.Skin.Path
+}
+
+type skinOverrides map[string]string
+
+func (s *skinOverrides) Set(value string) error {
+	name, path, ok := strings.Cut(value, "=")
+	if !ok || strings.TrimSpace(name) == "" || strings.TrimSpace(path) == "" {
+		return fmt.Errorf("bot-skin requires name=PNG path")
+	}
+	if *s == nil {
+		*s = skinOverrides{}
+	}
+	(*s)[name] = path
+	return nil
+}
+
+func (s *skinOverrides) String() string {
+	var values []string
+	for name, path := range *s {
+		values = append(values, name+"="+path)
+	}
+	sort.Strings(values)
+	return strings.Join(values, ", ")
 }
 
 // defaultControlAddr is the loopback bind used when control is enabled without a host.
