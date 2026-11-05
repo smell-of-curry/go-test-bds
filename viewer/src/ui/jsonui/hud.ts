@@ -475,7 +475,7 @@ function walkBoundProps(el: ResolvedElement, parts: string[]): void {
  * @param screens - Extra root children / fallback screens from an extension.
  * @returns root element.
  */
-function buildHudRoot(
+export function buildHudRoot(
   resolver: UiResolver,
   screens?: readonly HudScreenMount[],
 ): ResolvedElement {
@@ -487,9 +487,17 @@ function buildHudRoot(
   ]);
 
   const controls: ResolvedChild[] = [];
+  // Keep the ancestor's siblings too: stack padding and native visibility
+  // bindings affect the mount's position even when only one leaf is custom.
+  const wanted = (child: ResolvedChild): boolean =>
+    want.has(child.id) || child.element.controls.some(wanted);
+  const contains = (children: ResolvedChild[], id: string): boolean =>
+    children.some(
+      (child) => child.id === id || contains(child.element.controls, id),
+    );
   if (root) {
     for (const c of root.controls) {
-      if (!want.has(c.id)) continue;
+      if (!wanted(c)) continue;
       controls.push({
         id: c.id,
         element: applyPathKeyOverrides(
@@ -513,7 +521,7 @@ function buildHudRoot(
   // Fallback mounts for screens the pack did not insert on root_panel.
   for (const screen of screens ?? []) {
     if (!screen.namespace || !screen.name) continue;
-    if (controls.some((c) => c.id === screen.id)) continue;
+    if (contains(controls, screen.id)) continue;
     const resolved = resolver.resolve(screen.namespace, screen.name);
     if (!resolved) continue;
     const el = applyPathKeyOverrides(
@@ -551,8 +559,8 @@ function buildHudRoot(
     type: "panel",
     name: "root_panel",
     namespace: "hud",
-    props: { size: ["100%", "100%"] },
-    bindings: [],
+    props: { ...root?.props, size: ["100%", "100%"] },
+    bindings: root?.bindings ?? [],
     controls,
   };
 }

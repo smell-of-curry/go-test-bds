@@ -95,7 +95,7 @@ between `install` and `pauseAt` (about 1 ms) and that is enough to make two
 runs disagree. Cinematic frames use `canvas.toDataURL` in the same turn as the
 draw (`preserveDrawingBuffer` is already on). `--hud` captures the complete
 viewport, including the game HUD and pack JSON UI forms, after fonts, textures
-and pixels settle at that virtual instant. It requires a real Mojangles font;
+and pixels settle at that virtual instant. It requires installed-client font assets;
 missing fonts or visible UI textures fail the render instead of filming fallback
 text or blank chrome. Diagnostic UI and crosshair stay hidden; `--nametags`
 restores player name tags. View bobbing stays off. The default
@@ -103,7 +103,8 @@ camera is the actor (first person), including server camera instructions.
 `--camera camera.json` replaces that with an authored track.
 
 Offline UI resources can live in `<take>/extensions` (with `manifest.json`) and
-`<take>/fonts/Mojangles.ttf`, or be selected with `--extensions <dir>` and
+`<take>/fonts/` (Mojangles.ttf, default8.png and its default8.json when present),
+or be selected with `--extensions <dir>` and
 `--font-dir <dir>`. The font is supplied from a local Minecraft installation and
 is never bundled. `--packs-from <hub>` also mirrors `/viewer.json`, extension
 modules and fonts as requested, so a warmed take can replay after the hub is

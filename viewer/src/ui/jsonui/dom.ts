@@ -27,6 +27,8 @@ export interface TextureInfo {
    * `[left,top,right,bottom]`). Applied when the UI element omits its own.
    */
   nineslice?: unknown;
+  /** Authored design dimensions; PNGs may be higher resolution. */
+  baseSize?: [number, number];
 }
 
 /** Natural pixel size of a texture, keyed by pack path (no extension). */
@@ -175,6 +177,9 @@ export function lookupTextureInfo(
     w: fromAssets?.w ?? fromMap?.w ?? sizeOnly?.w ?? 0,
     h: fromAssets?.h ?? fromMap?.h ?? sizeOnly?.h ?? 0,
     nineslice: fromAssets?.nineslice ?? fromMap?.nineslice,
+    ...(fromAssets?.baseSize || fromMap?.baseSize
+      ? { baseSize: fromAssets?.baseSize ?? fromMap?.baseSize }
+      : {}),
   };
 }
 
@@ -481,7 +486,10 @@ function applyImage(
       face.style.backgroundSize = "100% 100%";
       face.style.backgroundPosition = "0 0";
     } else if (nine !== undefined && nine !== null) {
-      applyNineslice(face, url, nine, opts.guiScale);
+      applyNineslice(face, url, nine, opts.guiScale, info, {
+        w: node.box.w * opts.guiScale,
+        h: node.box.h * opts.guiScale,
+      });
     } else {
       face.style.backgroundImage = `url("${cssUrl(url)}")`;
       const uvSize = asIntPair(node.element.props.uv_size);
@@ -581,16 +589,52 @@ function applyNineslice(
   url: string,
   nine: unknown,
   guiScale: number,
+  info: TextureInfo | undefined,
+  box: { w: number; h: number },
 ): void {
-  const [left, top, right, bottom] = parseNineslice(nine);
+  const css = ninesliceCss(nine, guiScale, info, box);
   el.style.borderImageSource = `url("${cssUrl(url)}")`;
-  el.style.borderImageSlice = `${top} ${right} ${bottom} ${left} fill`;
-  el.style.borderImageWidth = `${top * guiScale}px ${right * guiScale}px ${bottom * guiScale}px ${left * guiScale}px`;
+  el.style.borderImageSlice = css.slice;
+  el.style.borderImageWidth = css.width;
   el.style.borderStyle = "solid";
   el.style.borderWidth = "0";
   // Keep a background fallback empty; border-image paints the face.
   el.style.backgroundImage = "none";
   el.style.imageRendering = "pixelated";
+}
+
+/**
+ * Convert design-space slice widths to source texels and screen pixels.
+ * A horizontal-only slice scales its end caps with the unsliced height
+ * (and vice versa), otherwise a square icon slot turns an arrow into a
+ * tall, needle-shaped head. Full nine-slices keep fixed GUI-sized corners.
+ */
+export function ninesliceCss(
+  nine: unknown,
+  guiScale: number,
+  info: TextureInfo | undefined,
+  box: { w: number; h: number },
+): { slice: string; width: string } {
+  const [left, top, right, bottom] = parseNineslice(nine);
+  const bw = info?.baseSize?.[0] || info?.w || 0;
+  const bh = info?.baseSize?.[1] || info?.h || 0;
+  const texelX = bw > 0 ? (info?.w || bw) / bw : 1;
+  const texelY = bh > 0 ? (info?.h || bh) / bh : 1;
+  let sx = guiScale;
+  let sy = guiScale;
+  if (top === 0 && bottom === 0 && bh > 0) sx = box.h / bh;
+  if (left === 0 && right === 0 && bw > 0) sy = box.w / bw;
+  // CSS itself proportionally contracts opposing borders when they exceed
+  // the box. Match that contraction here so the authored ratios survive.
+  const cap = Math.min(
+    1,
+    left + right > 0 ? box.w / ((left + right) * sx) : 1,
+    top + bottom > 0 ? box.h / ((top + bottom) * sy) : 1,
+  );
+  return {
+    slice: `${top * texelY} ${right * texelX} ${bottom * texelY} ${left * texelX} fill`,
+    width: `${cssPx(top * sy * cap)} ${cssPx(right * sx * cap)} ${cssPx(bottom * sy * cap)} ${cssPx(left * sx * cap)}`,
+  };
 }
 
 function parseNineslice(nine: unknown): [number, number, number, number] {

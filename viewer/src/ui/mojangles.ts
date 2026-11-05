@@ -1,10 +1,12 @@
 /**
- * Mojangles pixel font. Bedrock draws this TTF on a 100-unit grid
+ * Bedrock default bitmap font, with an optional Mojangles outline fallback.
+ * Native JSON UI text uses font/default8.png; the TTF is visibly heavier.
+ * The fallback draws the TTF on a 100-unit grid
  * (unitsPerEm 1000 → 10px em, cap height 7, one descender row → 8px cell).
  * OS rasterizers anti-alias that grid, so labels are filled from the glyf
  * outlines (coverage ≥ 0.5) and scaled with nearest-neighbor by guiScale.
  *
- * The font bytes are fetched from the hub (`GET /font/Mojangles.ttf`). They
+ * Font assets come from the pack stack or the configured /font directory. They
  * are Mojang content and are never vendored in this repo.
  */
 
@@ -76,6 +78,11 @@ export class MojanglesFont {
     return built;
   }
 
+  /** Install a resource-pack bitmap glyph ahead of the outline fallback. */
+  setGlyph(cp: number, glyph: GlyphMask): void {
+    this.glyphs.set(cp, glyph);
+  }
+
   /**
    * @param cp - Unicode code point.
    * @returns freshly rasterized mask.
@@ -112,6 +119,74 @@ export class MojanglesFont {
       }
     }
     return { adv, alpha, on, touch };
+  }
+}
+
+/**
+ * Install the native default8 ASCII atlas. JSON UI's default font uses these
+ * bitmap strokes; Mojangles.ttf is a distinct, heavier outline face. A pack
+ * may replace the atlas at any integer multiple of its 128×128 design size.
+ * Recent clients specify a taller row pitch and vertical offset in JSON.
+ * Non-ASCII characters retain the outline/custom Unicode-page fallback.
+ */
+export function installDefaultBitmap(
+  font: MojanglesFont,
+  rgba: Uint8Array | Uint8ClampedArray,
+  width: number,
+  height: number,
+  metadata: {
+    ascii_character_height?: number;
+    ascii_character_y_offset?: number;
+  } = {},
+): void {
+  if (
+    width !== height ||
+    width < 128 ||
+    width % 128 !== 0 ||
+    rgba.length !== width * height * 4
+  ) {
+    throw new Error("default8 font must be a square 16×16 atlas of 8px cells");
+  }
+  const scale = width / 128;
+  const rowHeight = metadata.ascii_character_height ?? 8;
+  const yOffset = metadata.ascii_character_y_offset ?? 0;
+  if (
+    !(rowHeight >= 8 && rowHeight <= 16) ||
+    !Number.isInteger(rowHeight) ||
+    !Number.isInteger(yOffset)
+  ) {
+    throw new Error("invalid default8 glyph metrics");
+  }
+  if (
+    2 * rowHeight - yOffset < 0 ||
+    7 * rowHeight - yOffset + 8 > height / scale
+  ) {
+    throw new Error("default8 glyph metrics point outside the atlas");
+  }
+  for (let cp = 32; cp < 127; cp++) {
+    const x0 = (cp % 16) * 8 * scale;
+    const y0 = (Math.floor(cp / 16) * rowHeight - yOffset) * scale;
+    const cell = new Uint8Array(64);
+    let last = -1;
+    for (let y = 0; y < 8; y++) {
+      for (let x = 0; x < 8; x++) {
+        const sx = x0 + Math.floor((x + 0.5) * scale);
+        const sy = y0 + Math.floor((y + 0.5) * scale);
+        const alpha = rgba[(sy * width + sx) * 4 + 3]!;
+        if (alpha >= 128) {
+          cell[y * 8 + x] = 1;
+          last = Math.max(last, x);
+        }
+      }
+    }
+    const adv = cp === 32 ? 4 : Math.max(0, last + 1);
+    const on = new Uint8Array(adv * CELL_PX);
+    for (let y = 0; y < 8; y++) {
+      for (let x = 0; x < adv; x++) on[y * adv + x] = cell[y * 8 + x]!;
+    }
+    const glyph = { adv, on, alpha: on.map((v) => v * 255), touch: last >= 0 };
+    font.setGlyph(cp, glyph);
+    if (cp === 32) font.setGlyph(160, glyph);
   }
 }
 
@@ -849,6 +924,7 @@ async function loadFace(base: string): Promise<boolean> {
   const win = globalThis as {
     __mojanglesReady?: boolean;
     __mojanglesLoaded?: boolean;
+    __bedrockBitmapFontLoaded?: boolean;
   };
   try {
     const url = mojanglesFontUrl(base);
@@ -856,6 +932,7 @@ async function loadFace(base: string): Promise<boolean> {
     const res = await fetch(url);
     if (!res.ok) throw new Error(`GET /font/Mojangles.ttf → ${res.status}`);
     parsed = parseMojangles(await res.arrayBuffer());
+    win.__bedrockBitmapFontLoaded = await loadDefaultBitmap(base, parsed);
     if (typeof document !== "undefined" && document.fonts?.load) {
       await document.fonts.load(`10px "${MOJANGLES_FAMILY}"`);
     }
@@ -875,6 +952,47 @@ async function loadFace(base: string): Promise<boolean> {
   } finally {
     win.__mojanglesReady = true;
   }
+}
+
+/** Pack override wins; otherwise use the installed-client atlas in FontDir. */
+async function loadDefaultBitmap(
+  base: string,
+  font: MojanglesFont,
+): Promise<boolean> {
+  const root = base.replace(/\/$/, "");
+  for (const path of ["/asset/font/default8.png", "/font/default8.png"]) {
+    try {
+      const response = await fetch(root + path);
+      if (!response.ok) continue;
+      const bitmap = await createImageBitmap(await response.blob());
+      try {
+        const canvas = document.createElement("canvas");
+        canvas.width = bitmap.width;
+        canvas.height = bitmap.height;
+        const context = canvas.getContext("2d");
+        if (!context) continue;
+        context.drawImage(bitmap, 0, 0);
+        const info = await fetch(root + path.replace(/\.png$/, ".json"));
+        const metadata = info.ok ? await info.json() : {};
+        installDefaultBitmap(
+          font,
+          context.getImageData(0, 0, bitmap.width, bitmap.height).data,
+          bitmap.width,
+          bitmap.height,
+          metadata,
+        );
+        return true;
+      } finally {
+        bitmap.close();
+      }
+    } catch {
+      // A missing/invalid atlas leaves the known outline fallback available.
+    }
+  }
+  console.warn(
+    "[mojangles] native default8.png unavailable; using outline fallback",
+  );
+  return false;
 }
 
 /**

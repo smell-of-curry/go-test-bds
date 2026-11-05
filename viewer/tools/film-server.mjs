@@ -137,7 +137,8 @@ export async function startFilmServer(opts) {
     }
     if (path.startsWith("/font/")) {
       const name = path.slice("/font/".length);
-      if (!/^[^/\\]+\.ttf$/i.test(name)) return end(res, 400, "bad font name");
+      if (!/^[^/\\]+\.(ttf|png)$/i.test(name) && name !== "default8.json")
+        return end(res, 400, "bad font name");
       const file = safeLocalFile(fontDir, name);
       if (file) return sendFile(res, file);
       if (!opts.fontDir && (await mirrorSend(res, path))) return;

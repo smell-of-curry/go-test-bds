@@ -4,6 +4,30 @@ import { createContext, runInContext } from "node:vm";
 import type { Page } from "playwright";
 import { presentFilmFrame } from "./frame";
 
+test("HUD capture rejects the heavier outline fallback when the native bitmap is missing", async () => {
+  const realm = createContext({
+    window: {
+      __viewer: { pendingModelLoads: 0, jsonUiReady: true },
+      __film: { present: () => "canvas" },
+      __mojanglesReady: true,
+      __mojanglesLoaded: true,
+      __bedrockBitmapFontLoaded: false,
+    },
+    document: { querySelector: () => null },
+  });
+  const page = {
+    evaluate: async (fn: Function) =>
+      runInContext(`(${fn.toString()})()`, realm),
+    screenshot: async () => {
+      throw new Error("must not capture fallback text");
+    },
+  } as unknown as Page;
+  await assert.rejects(
+    presentFilmFrame(page, true, 1_000),
+    /Native default8.png unavailable/,
+  );
+});
+
 test("HUD readiness serializes into an independent browser realm", async () => {
   class LoadedImage {
     complete = true;

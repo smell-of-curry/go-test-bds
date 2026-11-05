@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import { PNG } from "pngjs";
 import { createServer, type ViteDevServer } from "vite";
 import { fileURLToPath } from "node:url";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { presentFilmFrame } from "../film/frame";
 
@@ -29,6 +29,22 @@ test.beforeEach(async ({ page }) => {
   );
   const fontDir = process.env.GOTESTBDS_VIEWER_FONT_DIR;
   if (fontDir) {
+    if (existsSync(join(fontDir, "default8.png"))) {
+      await page.route("**/font/default8.png", (route) =>
+        route.fulfill({
+          contentType: "image/png",
+          body: readFileSync(join(fontDir, "default8.png")),
+        }),
+      );
+      await page.route("**/font/default8.json", (route) =>
+        existsSync(join(fontDir, "default8.json"))
+          ? route.fulfill({
+              contentType: "application/json",
+              body: readFileSync(join(fontDir, "default8.json")),
+            })
+          : route.fulfill({ status: 404, body: "missing" }),
+      );
+    }
     await page.route("**/font/Mojangles.ttf", (route) =>
       route.fulfill({
         contentType: "font/ttf",
@@ -45,6 +61,121 @@ test.beforeEach(async ({ page }) => {
       }),
     ).toBe(true);
   }
+});
+
+test("native bitmap font keeps regular strokes thin and bold explicitly heavier", async ({
+  page,
+}) => {
+  const fontDir = process.env.GOTESTBDS_VIEWER_FONT_DIR;
+  test.skip(
+    !fontDir || !existsSync(join(fontDir, "default8.png")),
+    "requires installed native bitmap font",
+  );
+  const result = await page.evaluate(async () => {
+    const { renderMojanglesCanvas } = await import("/src/ui/mojangles.ts");
+    const regular = renderMojanglesCanvas([{ text: "W" }], { guiScale: 1 });
+    const bold = renderMojanglesCanvas([{ text: "W", bold: true }], {
+      guiScale: 1,
+    });
+    const row = (canvas: HTMLCanvasElement | null) => {
+      if (!canvas) return "missing";
+      const data = canvas
+        .getContext("2d")!
+        .getImageData(0, 0, canvas.width, 1).data;
+      return Array.from({ length: canvas.width }, (_, x) =>
+        data[x * 4 + 3] ? "#" : ".",
+      )
+        .join("")
+        .replace(/\.+$/, "");
+    };
+    return { regular: row(regular), bold: row(bold) };
+  });
+  expect(result).toEqual({ regular: "#...#", bold: "##..##" });
+});
+
+test("a nested HUD mount obeys native ancestor visibility and stack padding", async ({
+  page,
+}) => {
+  const result = await page.evaluate(async () => {
+    const { buildResolver } = await import("/src/ui/jsonui/resolve.ts");
+    const { parseUiRawFile } = await import("/src/ui/jsonui/load.ts");
+    const { createHudRenderer } = await import("/src/ui/jsonui/hud.ts");
+    const { Store } = await import("/src/store.ts");
+    const resolver = buildResolver([
+      {
+        packId: "probe",
+        path: "ui/hud.json",
+        raw: parseUiRawFile({
+          namespace: "hud",
+          root_panel: {
+            type: "panel",
+            bindings: [
+              {
+                binding_name: "#hud_visible",
+                binding_name_override: "#visible",
+              },
+            ],
+            controls: [
+              {
+                chat_stack: {
+                  type: "stack_panel",
+                  orientation: "vertical",
+                  size: [100, 100],
+                  anchor_from: "top_left",
+                  anchor_to: "top_left",
+                  offset: [4, 12],
+                  controls: [
+                    { padding: { type: "panel", size: [1, 6] } },
+                    {
+                      position: {
+                        type: "label",
+                        text: "position",
+                        size: [80, 10],
+                      },
+                    },
+                  ],
+                },
+              },
+            ],
+          },
+          "root_panel/chat_stack": {
+            modifications: [
+              {
+                control_name: "position",
+                operation: "insert_after",
+                value: [
+                  { status: { type: "label", text: "status", size: [80, 10] } },
+                ],
+              },
+            ],
+          },
+        })!,
+      },
+    ]);
+    const host = document.createElement("div");
+    host.style.cssText = "position:absolute;inset:0";
+    document.body.append(host);
+    let visible = false;
+    const hud = createHudRenderer(resolver, host, {
+      assets: { textureUrl: (path) => path },
+      guiScale: 2,
+      extension: {
+        hudScreens: [
+          { id: "status", namespace: "hud", name: "status", wrapStack: true },
+        ],
+        seedGlobals: (_, set) => set("#hud_visible", visible),
+      },
+    });
+    const store = new Store();
+    hud.onFrame(store.getState());
+    const hidden = host.querySelectorAll('[data-ui-name="status"]').length;
+    visible = true;
+    hud.onFrame(store.getState());
+    const labels = host.querySelectorAll('[data-ui-name="status"]');
+    const box = labels[0]?.getBoundingClientRect();
+    return { hidden, count: labels.length, x: box?.x, y: box?.y };
+  });
+  expect(result).toEqual({ hidden: 0, count: 1, x: 8, y: 56 });
 });
 
 test("extension forms render their registered screen, not vanilla long_form", async ({

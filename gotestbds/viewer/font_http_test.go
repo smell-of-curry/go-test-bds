@@ -52,6 +52,11 @@ func TestFontServesBasename(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "Mojangles.ttf"), body, 0o644); err != nil {
 		t.Fatal(err)
 	}
+	for name, contents := range map[string]string{"default8.png": "atlas", "default8.json": `{"ascii_character_height":12}`} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(contents), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
 	// A sibling outside the directory must not be readable via the route.
 	outside := filepath.Join(filepath.Dir(dir), "secret-font-probe.txt")
 	if err := os.WriteFile(outside, []byte("secret"), 0o644); err != nil {
@@ -72,6 +77,16 @@ func TestFontServesBasename(t *testing.T) {
 	}
 	defer hub.Close()
 	base := "http://" + hub.Addr()
+	for name, mime := range map[string]string{"default8.png": "image/png", "default8.json": "application/json"} {
+		resp, err := http.Get(base + "/font/" + name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK || resp.Header.Get("Content-Type") != mime {
+			t.Fatalf("%s: status=%d type=%s", name, resp.StatusCode, resp.Header.Get("Content-Type"))
+		}
+	}
 	for _, name := range []string{"outside.ttf", "secret.txt"} {
 		resp, err := http.Get(base + "/font/" + name)
 		if err != nil {

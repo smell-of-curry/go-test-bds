@@ -306,7 +306,8 @@ directories instead. Environment equivalents are `GOTESTBDS_SHADOW_LISTEN` and
 `GOTESTBDS_SHADOW_PACKS` (comma-separated paths).
 
 For pixel-font UI rendering, set `GOTESTBDS_VIEWER_FONT_DIR` to a directory
-containing `Mojangles.ttf` from your installed client before starting the viewer
+containing `Mojangles.ttf`, `default8.png`, and `default8.json` (when present)
+from your installed client before starting the viewer
 host. No Minecraft font is bundled. Without it, labels use the system fallback.
 The same variable enables the optional font raster tests in `viewer/`.
 

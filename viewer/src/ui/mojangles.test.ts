@@ -1,20 +1,23 @@
 /**
- * Mojangles outline raster vs the Bedrock GUI-scale-2 capture.
+ * Native default8 bitmap and the optional Mojangles outline fallback.
  * Run: `cd viewer ; npx tsx --test src/ui/mojangles.test.ts`
  * Skips when the TTF is not on disk (Mojang content, not in the repo).
  */
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { describe, it } from "node:test";
+import { PNG } from "pngjs";
 import {
   ellipsizePlain,
   layoutRuns,
   parseMojangles,
   rasterPlainLine,
   shadowOf,
+  installDefaultBitmap,
+  MojanglesFont,
 } from "./mojangles.js";
 
-/** First line of the chat capture, text pixels only (gui scale 2 → 1 design px). */
+/** Historical outline mask. This is NOT the native default8 bitmap face. */
 const WELCOME = [
   "##..##........##....................................##..............#####.........##...........#####.............##......................##....##",
   "##..##........##....................................##..............##..##........##...........##..##............##......................##....##",
@@ -56,7 +59,7 @@ describe("Mojangles raster", () => {
     : null;
 
   it(
-    "matches Welcome to PokeBedrock! ink and the W/e columns",
+    "retains the heavier outline fallback when no native bitmap is installed",
     { skip: !font },
     () => {
       const got = rasterPlainLine(font!, "Welcome to PokeBedrock!");
@@ -110,6 +113,67 @@ describe("Mojangles raster", () => {
       });
       assert.equal(laid.h, 9);
       assert.equal(laid.w, width);
+    },
+  );
+});
+
+describe("native default8 bitmap", () => {
+  it("uses the atlas row pitch and vertical offset instead of outline coverage", () => {
+    const pixels = new Uint8Array(128 * 128 * 4);
+    // Synthetic W, deliberately unlike any bundled font. Recent atlas format
+    // starts each 12px row with three pixels above the normal glyph origin.
+    const cp = 87;
+    const x = (cp % 16) * 8;
+    const y = Math.floor(cp / 16) * 12 + 3;
+    for (const dx of [0, 4]) pixels[(y * 128 + x + dx) * 4 + 3] = 255;
+    const font = new MojanglesFont(
+      () => 0,
+      () => null,
+    );
+    installDefaultBitmap(font, pixels, 128, 128, {
+      ascii_character_height: 12,
+      ascii_character_y_offset: -3,
+    });
+    assert.equal(rasterPlainLine(font, "W").rows[0], "#...#");
+    assert.equal(font.glyph(32).adv, 4);
+    assert.equal(font.glyph(160).adv, 4);
+    assert.throws(
+      () =>
+        installDefaultBitmap(font, pixels, 128, 128, {
+          ascii_character_height: 12,
+          ascii_character_y_offset: 100,
+        }),
+      /outside the atlas/,
+    );
+  });
+  const dir = process.env.GOTESTBDS_VIEWER_FONT_DIR;
+  const available = dir && existsSync(`${dir}/default8.png`) && fontPath();
+  it(
+    "matches native single-pixel W/e strokes and explicit bold",
+    { skip: !available },
+    () => {
+      const bytes = readFileSync(fontPath()!);
+      const font = parseMojangles(
+        bytes.buffer.slice(
+          bytes.byteOffset,
+          bytes.byteOffset + bytes.byteLength,
+        ),
+      );
+      const atlas = PNG.sync.read(readFileSync(`${dir}/default8.png`));
+      const meta = existsSync(`${dir}/default8.json`)
+        ? JSON.parse(readFileSync(`${dir}/default8.json`, "utf8"))
+        : {};
+      installDefaultBitmap(font, atlas.data, atlas.width, atlas.height, meta);
+      assert.equal(rasterPlainLine(font, "W").rows[0], "#...#");
+      assert.equal(rasterPlainLine(font, "e").rows[2], ".###.");
+      const bold = layoutRuns(font, [{ text: "W", bold: true }], {
+        guiScale: 1,
+      });
+      const row = Array.from({ length: bold.w }, (_, x) =>
+        bold.rgba[x * 4 + 3] ? "#" : ".",
+      ).join("");
+      assert.equal(row.replace(/\.+$/, ""), "##..##");
+      assert.equal(rasterPlainLine(font, "W W").width, 15);
     },
   );
 });

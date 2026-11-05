@@ -34,6 +34,8 @@ test("offline film serves take-local extensions and fonts with MIME and containm
   writeFileSync(join(ext, "manifest.json"), '{"modules":["hud.mjs"]}');
   writeFileSync(join(ext, "hud.mjs"), "export default {};");
   writeFileSync(join(fonts, "Mojangles.ttf"), "test-font");
+  writeFileSync(join(fonts, "default8.png"), "test-atlas");
+  writeFileSync(join(fonts, "default8.json"), '{"ascii_character_height":12}');
   writeFileSync(join(f.root, "outside.ttf"), "private-outside-root");
   symlinkSync(join(f.root, "outside.ttf"), join(fonts, "escape.ttf"));
   symlinkSync(f.root, join(ext, "escape"));
@@ -49,6 +51,13 @@ test("offline film serves take-local extensions and fonts with MIME and containm
     const font = await fetch(`${server.url}/font/Mojangles.ttf`);
     assert.equal(font.headers.get("content-type"), "font/ttf");
     assert.equal(await font.text(), "test-font");
+    const atlas = await fetch(`${server.url}/font/default8.png`);
+    assert.equal(atlas.headers.get("content-type"), "image/png");
+    assert.equal(await atlas.text(), "test-atlas");
+    assert.deepEqual(
+      await (await fetch(`${server.url}/font/default8.json`)).json(),
+      { ascii_character_height: 12 },
+    );
     for (const path of ["/font/escape.ttf", "/extensions/escape/outside.ttf"]) {
       assert.equal((await fetch(server.url + path)).status, 404, path);
     }

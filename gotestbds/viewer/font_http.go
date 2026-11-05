@@ -10,7 +10,7 @@ import (
 // handleFont serves one font file from Options.FontDir.
 //
 // Only a single path segment is accepted. `..`, slashes and empty names are
-// rejected. An unset directory is a 404 — the TTF is Mojang content and is
+// rejected. An unset directory is a 404 — fonts/atlases are Mojang content and are
 // configured on the host, not shipped in the repo.
 func (h *Hub) handleFont(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
@@ -40,7 +40,13 @@ func (h *Hub) handleFont(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	w.Header().Set("Content-Type", "font/ttf")
+	if strings.EqualFold(filepath.Ext(name), ".png") {
+		w.Header().Set("Content-Type", "image/png")
+	} else if strings.EqualFold(name, "default8.json") {
+		w.Header().Set("Content-Type", "application/json")
+	} else {
+		w.Header().Set("Content-Type", "font/ttf")
+	}
 	http.ServeContent(w, r, name, info.ModTime(), font)
 }
 
@@ -49,7 +55,8 @@ func (h *Hub) handleFont(w http.ResponseWriter, r *http.Request) {
 // @param name - URL path segment.
 // @returns false when the name could escape FontDir.
 func safeFontName(name string) bool {
-	if name == "" || name != filepath.Base(name) || !strings.EqualFold(filepath.Ext(name), ".ttf") {
+	ext := strings.ToLower(filepath.Ext(name))
+	if name == "" || name != filepath.Base(name) || (ext != ".ttf" && ext != ".png" && !strings.EqualFold(name, "default8.json")) {
 		return false
 	}
 	if strings.Contains(name, "..") || strings.ContainsAny(name, `/\`) {

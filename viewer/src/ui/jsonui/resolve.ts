@@ -74,6 +74,7 @@ export function buildResolver(
 
   /** namespace → element name → merged def */
   const defs = new Map<string, Map<string, StoredDef>>();
+  const pathLayers: StoredDef[] = [];
 
   for (const file of files) {
     const ns = file.raw.namespace;
@@ -84,6 +85,14 @@ export function buildResolver(
     }
     for (const [key, props] of Object.entries(file.raw.elements)) {
       const parsed = parseElementName(key);
+      if (parsed.name.includes("/")) {
+        pathLayers.push({
+          namespace: ns,
+          name: parsed.name,
+          base: parsed.base,
+          props: cloneJson(props),
+        });
+      }
       const existing = nsMap.get(parsed.name);
       if (!existing) {
         nsMap.set(parsed.name, {
@@ -96,6 +105,59 @@ export function buildResolver(
       }
       mergePackLayer(existing, parsed.base, props);
     }
+  }
+
+  // Path-key modifications target an existing control, not a new standalone
+  // empty definition. Apply them before resolving children, while the raw
+  // controls array still exists (insert_after needs its named sibling).
+  for (const layer of pathLayers) {
+    const segments = layer.name.split("/");
+    const rootDef = defs.get(layer.namespace)?.get(segments.shift()!);
+    if (!rootDef) continue;
+    const rootProps: PropertyBag = {};
+    for (const part of collectBaseChain(rootDef, defs))
+      shallowAssign(rootProps, part.props);
+    let target = rootProps;
+    let namespace = layer.namespace;
+    let found = true;
+    for (const segment of segments) {
+      const children = Array.isArray(target.controls) ? target.controls : [];
+      const entry = children.find(
+        (child) =>
+          child &&
+          typeof child === "object" &&
+          Object.keys(child).some(
+            (key) => parseElementName(key).name === segment,
+          ),
+      ) as PropertyBag | undefined;
+      if (!entry) {
+        found = false;
+        break;
+      }
+      const key = Object.keys(entry).find(
+        (key) => parseElementName(key).name === segment,
+      )!;
+      const parsed = parseElementName(key);
+      const instance = entry[key] as PropertyBag;
+      const merged: PropertyBag = {};
+      if (parsed.base) {
+        namespace = parsed.base.namespace ?? namespace;
+        const base = defs.get(namespace)?.get(parsed.base.name);
+        if (base)
+          for (const part of collectBaseChain(base, defs))
+            shallowAssign(merged, part.props);
+      }
+      shallowAssign(merged, instance ?? {});
+      entry[key] = merged;
+      target = merged;
+    }
+    if (!found) continue;
+    mergePackLayer(
+      { namespace, name: layer.name, props: target },
+      layer.base,
+      layer.props,
+    );
+    rootDef.props = rootProps;
   }
 
   const memo = new Map<string, ResolvedElement>();

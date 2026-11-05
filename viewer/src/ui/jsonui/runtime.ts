@@ -208,6 +208,14 @@ export function createJsonUiRuntime(opts: JsonUiRuntimeOptions): JsonUiRuntime {
           w: w || Number(base?.[0]) || 0,
           h: h || Number(base?.[1]) || 0,
           nineslice: meta?.nineslice_size,
+          ...(base && Number(base[0]) > 0 && Number(base[1]) > 0
+            ? {
+                baseSize: [Number(base[0]), Number(base[1])] as [
+                  number,
+                  number,
+                ],
+              }
+            : {}),
         });
         try {
           bmp?.close();

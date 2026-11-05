@@ -21,6 +21,15 @@ a fixed 640×360.
 
 ## Text
 
+**November correction:** the historical TTF calibration below reproduced a
+heavier outline fallback, not the native default bitmap font. Installed-client
+`font/default8.png` has one-pixel regular ASCII strokes. The renderer now uses
+that atlas (pack overrides first), including the 1.26.60 metadata's 12-pixel row
+pitch and −3 vertical offset; explicit `§l` adds the bold stroke separately.
+The old outline mask is retained only as a fallback test. Matched current-client
+captures are still required for extended Unicode, smooth-font labels, and
+complete pixel parity.
+
 - Font: `assets/fonts/Mojangles.ttf` from the client install (not in
   bedrock-samples; never vendored). 100 font units = 1 design pixel, cap 7,
   cell 8. Glyphs are fully crisp: exactly text + shadow colours.
@@ -67,3 +76,25 @@ a fixed 640×360.
   three plain images; cell K contradicts it when clipping is off).
 - `font_scale_factor` and `font_size` rendering (probe cell I).
 - `propagate_alpha`.
+
+## Current-client comparison protocol
+
+Use the same 1.26.60.4 client assets and pack versions on both sides, English,
+classic UI, a 1280×720 framebuffer, and GUI scale 2. Record safe-zone and font
+settings. Keep the native PNG at original size; do not resize a video frame to
+make it align. Save the shadow-recorded packet/tick with each native screenshot.
+
+Capture an ordinary form with a plain label, explicit `§l` label, accented
+text, and the Back icon in default/hover states. Capture a battle move form
+with enabled and disabled Bag/Party/Run actions, then the party switch and
+result forms. Capture the same HUD with no form and with a form open so menu
+visibility is observed instead of inferred. For isolated pixel comparisons,
+use an identical solid background; translucent UI over different world frames
+cannot be judged by raw RGB equality.
+
+Compare glyph ink/spacing/baselines, sliced-image boundaries, action-tab count,
+control bounds, and visible HUD separately. Preserve native/viewer PNGs and
+pixel-difference images with source hashes. The ordinary ASCII atlas and nested
+rawtext decoder fixes have direct source evidence; sliced-arrow dimensions and
+HUD visibility still need this matched native check. OreUI uses a separate
+runtime and is not covered by the JSON UI renderer.

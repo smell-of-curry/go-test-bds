@@ -6,6 +6,7 @@ import { test } from "node:test";
 
 import { parseLooseJson, parseUiRawFile } from "./load";
 import { buildResolver, parseElementName } from "./resolve";
+import { buildHudRoot } from "./hud";
 import type { UiFileSource } from "./types";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -33,6 +34,86 @@ test("parseElementName: same-namespace base", () => {
 
 test("parseElementName: no base", () => {
   assert.deepEqual(parseElementName("foo"), { name: "foo" });
+});
+
+test("path-key modifications insert controls inside the authored ancestor", () => {
+  const r = buildResolver([
+    src("vanilla", "ui/hud.json", {
+      namespace: "hud",
+      root_panel: {
+        type: "panel",
+        controls: [
+          {
+            chat_stack: {
+              type: "stack_panel",
+              offset: [4, 12],
+              controls: [
+                { player_position: { type: "label", text: "position" } },
+                { chat: { type: "label", text: "chat" } },
+              ],
+            },
+          },
+        ],
+      },
+    }),
+    src("addon", "ui/hud.json", {
+      namespace: "hud",
+      "root_panel/chat_stack": {
+        modifications: [
+          {
+            control_name: "player_position",
+            operation: "insert_after",
+            value: [{ status: { type: "label", text: "status" } }],
+          },
+        ],
+      },
+    }),
+  ]);
+  const chat = r.resolve("hud", "root_panel")!.controls[0]!.element;
+  assert.deepEqual(
+    chat.controls.map((c) => c.id),
+    ["player_position", "status", "chat"],
+  );
+  assert.deepEqual(chat.props.offset, [4, 12]);
+});
+
+test("HUD mounts retain root visibility and their authored stack siblings", () => {
+  const r = buildResolver([
+    src("pack", "ui/hud.json", {
+      namespace: "hud",
+      root_panel: {
+        type: "panel",
+        bindings: [
+          { binding_name: "#hud_visible", binding_name_override: "#visible" },
+        ],
+        controls: [
+          {
+            chat_stack: {
+              type: "stack_panel",
+              offset: [4, 12],
+              controls: [
+                { padding: { type: "panel", size: [1, 6] } },
+                { status: { type: "label", text: "status" } },
+              ],
+            },
+          },
+        ],
+      },
+      status: { type: "label", text: "fallback" },
+    }),
+  ]);
+  const tree = buildHudRoot(r, [
+    { id: "status", namespace: "hud", name: "status", wrapStack: true },
+  ]);
+  assert.equal(tree.bindings[0]!.binding_name, "#hud_visible");
+  assert.equal(tree.controls.length, 1);
+  const stack = tree.controls[0]!.element;
+  assert.deepEqual(stack.props.offset, [4, 12]);
+  assert.deepEqual(
+    stack.controls.map((c) => c.id),
+    ["padding", "status"],
+  );
+  assert.equal(stack.controls[1]!.element.props.text, "status");
 });
 
 test("base-chain merge: derived-most wins", () => {

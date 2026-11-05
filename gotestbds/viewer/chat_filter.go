@@ -76,6 +76,7 @@ type rawtextPart struct {
 	Text      string          `json:"text"`
 	Translate string          `json:"translate"`
 	With      json.RawMessage `json:"with"`
+	RawText   []rawtextPart   `json:"rawtext"`
 }
 
 // rawtextMessage is the {"rawtext":[…]} envelope addons send through
@@ -124,27 +125,35 @@ func flattenRawtext(text string) string {
 	var b strings.Builder
 	b.WriteString(text[:idx])
 	for _, part := range msg.RawText {
-		b.WriteString(part.Text)
-		if part.Translate == "" {
-			continue
-		}
-		args := rawtextWithArgs(part.With)
-		// A pack-stack lang table renders the key the way a client would;
-		// without one the key itself plus space-joined args stays readable.
-		if resolved, ok := translateKey(part.Translate, args); ok {
-			b.WriteString(resolved)
-			continue
-		}
-		b.WriteString(part.Translate)
-		for _, arg := range args {
-			if arg == "" {
-				continue
-			}
-			b.WriteString(" ")
-			b.WriteString(arg)
-		}
+		b.WriteString(renderRawtextPart(part))
 	}
 	b.WriteString(text[idx+int(dec.InputOffset()):])
+	return b.String()
+}
+
+// renderRawtextPart keeps nested rawtext envelopes intact. RawMessage helpers
+// commonly wrap a whole translated label to prepend formatting or a lock
+// marker; dropping that envelope loses the label's UI routing prefix too.
+func renderRawtextPart(part rawtextPart) string {
+	var b strings.Builder
+	b.WriteString(part.Text)
+	for _, child := range part.RawText {
+		b.WriteString(renderRawtextPart(child))
+	}
+	if part.Translate != "" {
+		args := rawtextWithArgs(part.With)
+		if resolved, ok := translateKey(part.Translate, args); ok {
+			b.WriteString(resolved)
+		} else {
+			b.WriteString(part.Translate)
+			for _, arg := range args {
+				if arg != "" {
+					b.WriteString(" ")
+					b.WriteString(arg)
+				}
+			}
+		}
+	}
 	return b.String()
 }
 
@@ -170,6 +179,14 @@ func rawtextWithArgs(raw json.RawMessage) []string {
 				args = append(args, strconv.FormatFloat(t, 'f', -1, 64))
 			case bool:
 				args = append(args, strconv.FormatBool(t))
+			case map[string]any:
+				encoded, _ := json.Marshal(t)
+				var part rawtextPart
+				arg := ""
+				if json.Unmarshal(encoded, &part) == nil {
+					arg = renderRawtextPart(part)
+				}
+				args = append(args, arg)
 			default:
 				args = append(args, "")
 			}
@@ -182,13 +199,7 @@ func rawtextWithArgs(raw json.RawMessage) []string {
 	}
 	args := make([]string, 0, len(nested.RawText))
 	for _, p := range nested.RawText {
-		if p.Translate != "" {
-			if resolved, ok := translateKey(p.Translate, rawtextWithArgs(p.With)); ok {
-				args = append(args, p.Text+resolved)
-				continue
-			}
-		}
-		args = append(args, p.Text+p.Translate)
+		args = append(args, renderRawtextPart(p))
 	}
 	return args
 }

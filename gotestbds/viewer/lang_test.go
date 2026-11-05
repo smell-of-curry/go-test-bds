@@ -97,6 +97,26 @@ func TestFlattenRawtextResolvesThroughLangTable(t *testing.T) {
 	}
 }
 
+func TestFlattenRawtextNestedTranslationArguments(t *testing.T) {
+	installTestLang(t, map[string]string{"outer": "%1 / %2", "inner": "value %1"})
+	for _, input := range []string{
+		`{"rawtext":[{"translate":"outer","with":{"rawtext":[{"rawtext":[{"text":"nested "},{"translate":"inner","with":[2]}]},{"text":"tail"}]}}]}`,
+		`{"rawtext":[{"translate":"outer","with":[{"rawtext":[{"text":"nested "},{"translate":"inner","with":[2]}]},"tail"]}]}`,
+	} {
+		if got := flattenRawtext(input); got != "nested value 2 / tail" {
+			t.Fatalf("got %q", got)
+		}
+	}
+}
+
+func TestMalformedNestedArgumentDoesNotShiftLaterArguments(t *testing.T) {
+	installTestLang(t, map[string]string{"three": "%1/%2/%3"})
+	in := `{"rawtext":[{"translate":"three","with":["first",{"text":3},"third"]}]}`
+	if got := flattenRawtext(in); got != "first//third" {
+		t.Fatalf("got %q", got)
+	}
+}
+
 // TestInstallLangTableFromStack drives the production path end to end: a
 // built assets.Stack whose pack ships texts/en_US.lang must install a table
 // that flattenRawtext resolves through. Run 27 shipped raw keys with the

@@ -11,11 +11,43 @@ import {
   labelClipsWithEllipsis,
   lookupTextureInfo,
   ninesliceCenterIsEmpty,
+  ninesliceCss,
   paintChildOrder,
   resolveImageUv,
   uvBackgroundCss,
   type JsonUiAssets,
 } from "./dom.js";
+
+describe("ninesliceCss", () => {
+  it("scales a horizontal arrow's end caps with its height", () => {
+    const css = ninesliceCss(
+      [7, 0, 1, 0],
+      2,
+      { w: 16, h: 13, baseSize: [16, 13] },
+      { w: 64, h: 64 },
+    );
+    assert.equal(css.slice, "0 1 0 7 fill");
+    assert.equal(css.width, "0px 4.923px 0px 34.462px");
+  });
+  it("maps design slice sizes into high-resolution texture pixels", () => {
+    const css = ninesliceCss(
+      1,
+      2,
+      { w: 10, h: 10, baseSize: [5, 5] },
+      { w: 40, h: 20 },
+    );
+    assert.deepEqual(css, { slice: "2 2 2 2 fill", width: "2px 2px 2px 2px" });
+  });
+  it("scales a vertical-only slice symmetrically", () => {
+    const css = ninesliceCss(
+      [0, 7, 0, 1],
+      2,
+      { w: 13, h: 16 },
+      { w: 64, h: 64 },
+    );
+    assert.equal(css.width, "34.462px 0px 4.923px 0px");
+  });
+});
 
 describe("resolveImageUv", () => {
   it("keeps numeric uv pairs", () => {

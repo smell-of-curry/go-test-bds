@@ -102,6 +102,7 @@ function hudReadiness(): {
     __viewer?: { jsonUiReady?: boolean };
     __mojanglesReady?: boolean;
     __mojanglesLoaded?: boolean;
+    __bedrockBitmapFontLoaded?: boolean;
     __jsonUiTexturesPending?: number;
     __filmHudImages?: Map<
       string,
@@ -118,6 +119,14 @@ function hudReadiness(): {
       note: "",
       error:
         "Mojangles unavailable; supply --font-dir or a mirrored /font/Mojangles.ttf",
+    };
+  }
+  if (w.__bedrockBitmapFontLoaded === false) {
+    return {
+      ready: false,
+      note: "",
+      error:
+        "Native default8.png unavailable; supply the installed-client bitmap in --font-dir or a pack font/default8.png",
     };
   }
   if (!w.__viewer?.jsonUiReady)

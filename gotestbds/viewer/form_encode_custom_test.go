@@ -31,6 +31,26 @@ func useFormLang(t *testing.T, table map[string]string) {
 	t.Cleanup(func() { activeLang.Store(previous) })
 }
 
+// ActionForm's locked RawMessage label is rawJoin(" ", originalLabel), not a
+// flat string. Both disabled side actions must retain their authored IDs.
+func TestLockedFormButtonsPreserveNestedRawtext(t *testing.T) {
+	useFormLang(t, map[string]string{
+		"action.bag": "§rOpen the Bag.", "action.run": "§rLeave the battle.",
+	})
+	const raw = `{"type":"form","title":"Menu","content":"","buttons":[
+		{"text":{"rawtext":[{"text":" "},{"rawtext":[{"text":"battleButton:bag"},{"translate":"action.bag"}]}]},"image":{"type":"path","data":"f"}},
+		{"text":{"rawtext":[{"text":" "},{"rawtext":[{"text":"battleButton:run"},{"translate":"action.run"}]}]},"image":{"type":"path","data":"f"}}
+	]}`
+	form, original := formSnapshot(t, raw)
+	want := []string{" battleButton:bag§rOpen the Bag.", " battleButton:run§rLeave the battle."}
+	if !reflect.DeepEqual(form.Buttons, want) {
+		t.Fatalf("buttons=%q, want %q", form.Buttons, want)
+	}
+	if !reflect.DeepEqual(form.ButtonImages, []string{"f", "f"}) || original.Raw() != raw {
+		t.Fatal("disabled image state or original packet changed")
+	}
+}
+
 // Reduced from the real v6 request: flattening the entire array used to emit
 // `"text":Format` and leave the subsequent toggles as rawtext objects.
 func TestCustomFormSnapshotLocalizesEachControlAndKeepsValidJSON(t *testing.T) {
