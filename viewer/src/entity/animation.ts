@@ -84,7 +84,7 @@ export function sampleAnimation(
 
   for (const [bone, channels] of anim.bones) {
     let pose = out.get(bone);
-    if (!pose) {
+    if (!pose || anim.overridePrevious) {
       pose = emptyBonePose();
       out.set(bone, pose);
     }
@@ -140,15 +140,17 @@ export function mixBonePoses(
   weight: number,
   out: Map<string, BoneAnimPose>,
 ): void {
+  if (weight === 0 || !Number.isFinite(weight)) return;
   for (const bone of new Set([...from.keys(), ...into.keys()])) {
     const a = from.get(bone) ?? emptyBonePose();
     const b = into.get(bone) ?? emptyBonePose();
     let pose = out.get(bone);
-    if (!pose) {
+    const overrides = (alpha < 1 && a.override) || (alpha > 0 && b.override);
+    if (!pose || overrides) {
       pose = emptyBonePose();
       out.set(bone, pose);
     }
-    if (a.override || b.override) pose.override = true;
+    if (overrides) pose.override = true;
     for (let i = 0; i < 3; i++) {
       pose.position[i] +=
         (a.position[i]! + (b.position[i]! - a.position[i]!) * alpha) * weight;

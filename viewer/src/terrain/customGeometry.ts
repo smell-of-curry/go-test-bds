@@ -278,6 +278,10 @@ export interface CustomBlockTri {
   /** Six floats: 3 verts × uv (0..1 within the tile). */
   uvs: number[];
   texture: string;
+  /** Explicit state selection for packed native model texture arrays. */
+  textureIndex?: number;
+  /** Native partial models also receive light from the exposed face cell. */
+  adjacentLight?: boolean;
   pass: "opaque" | "transparent";
   faceDimming: boolean;
   ambientOcclusion: boolean;

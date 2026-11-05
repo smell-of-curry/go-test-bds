@@ -23,6 +23,8 @@ import type {
 } from "./types";
 import type { Block, Registries, RegistryBlock } from "../protocol";
 import { blockEntityKind } from "./blockEntities";
+import { isSpecialBlock, specialBlockProperties } from "./specialBlocks";
+import { applyThinBlockShape, isGroundCover } from "./thinBlocks";
 
 type Cardinal = "up" | "down" | "north" | "south" | "east" | "west";
 
@@ -268,11 +270,17 @@ export class BlockModelResolver {
   renderClassOf(block: Block): RenderClass {
     if (isInvisible(block)) return "air";
     const n = block.name;
+    if (isGroundCover(n)) return "cutout";
     if (LIQUID_NAMES.has(n)) return "liquid";
     if (TRANSLUCENT_NAMES.has(n) || n.includes("stained_glass"))
       return "translucent";
     // Plants are alpha-tested and must not hide neighbour faces.
-    if (this.isCrossBlock(block) || isDoor(block) || isTrapdoor(block))
+    if (
+      this.isCrossBlock(block) ||
+      isDoor(block) ||
+      isTrapdoor(block) ||
+      isSpecialBlock(n)
+    )
       return "cutout";
     if (CUTOUT_NAMES.has(n) || n.endsWith("_leaves")) return "cutout";
     // Dedicated block-entity geometry is never a full occluding cube.
@@ -304,7 +312,7 @@ export class BlockModelResolver {
     if (!block) return false;
     // Custom geometry / block entities are not full cubes — never occlude.
     if (this.usesCustomGeometry(block)) return false;
-    if (blockEntityKind(block.name)) return false;
+    if (blockEntityKind(block.name) || isSpecialBlock(block.name)) return false;
     if (
       partialExtents(block.name) ||
       isDoor(block) ||
@@ -347,11 +355,17 @@ export class BlockModelResolver {
     if (this.renderClassOf(block) === "liquid") return null;
 
     const shaped = (model: CubeModel): CubeModel =>
-      this.asCross(
+      applyThinBlockShape(
         block,
-        applyStairSlabShape(
+        specialBlockProperties(
           block,
-          applyDoorShape(block, applyPartialExtents(block, model)),
+          this.asCross(
+            block,
+            applyStairSlabShape(
+              block,
+              applyDoorShape(block, applyPartialExtents(block, model)),
+            ),
+          ),
         ),
       );
 
@@ -700,6 +714,7 @@ function grassSideOverlay(block: Block, face: Cardinal): boolean {
 
 function tintFor(block: Block, face: Cardinal): FaceAppearance["tint"] {
   const b = bareName(block.name);
+  if (isGroundCover(block.name)) return "dry";
   if (b === "birch_leaves") return "birch";
   if (b === "spruce_leaves") return "spruce";
   if (b === "mangrove_leaves") return "mangrove";

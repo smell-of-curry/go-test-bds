@@ -19,6 +19,8 @@ import {
 import { aoFactor, combinedLight, FACE_SHADE, lightBrightness } from "./light";
 import { createTerrainMaterial } from "./material";
 import { terrainPassForClass } from "./palette";
+import { emitSpecialBlockTris } from "./specialBlocks";
+import { groundCoverQuads } from "./thinBlocks";
 import {
   isAir,
   isInvisible,
@@ -253,6 +255,7 @@ export class TexturedMesher implements Mesher {
       resolver: this.resolver,
       skyDarken: this.skyDarken,
       smooth: this.smoothLighting,
+      occlusion: new WeakMap(),
     };
 
     for (let x = 0; x < 16; x++) {
@@ -327,7 +330,7 @@ export class TexturedMesher implements Mesher {
           if (!cube) continue;
 
           // Flower X: two diagonal quads. Not a cube, so no face culling and no AO.
-          if (cube.shape === "cross") {
+          if (cube.shape === "cross" || cube.shape === "ground") {
             const app = cube.faces.up;
             const tint = tintAt(biomeAt, app.tint, wx, wz);
             const uv = this.atlas.uvFor(
@@ -337,8 +340,19 @@ export class TexturedMesher implements Mesher {
               wy,
               wz,
             );
-            const bright = lightBrightness(sampleCombined(lightCtx, x, y, z));
-            for (const q of crossQuadsAt(wx, wy, wz)) {
+            const cellLight = sampleCombined(lightCtx, x, y, z);
+            // Ground cover receives the light above its visible top, like a
+            // partial cube. Retained takes may mark its interior as opaque.
+            const bright = lightBrightness(
+              cube.shape === "ground"
+                ? Math.max(cellLight, sampleCombined(lightCtx, x, y + 1, z))
+                : cellLight,
+            );
+            const quads =
+              cube.shape === "ground"
+                ? groundCoverQuads(block, wx, wy, wz)
+                : crossQuadsAt(wx, wy, wz);
+            for (const q of quads) {
               quadsBefore++;
               crossDraws.push({
                 corners: q.corners,
@@ -347,6 +361,39 @@ export class TexturedMesher implements Mesher {
                 color: new THREE.Color(tint.r, tint.g, tint.b),
                 bright,
               });
+            }
+            instanceCount++;
+            this.emitLayer1(
+              terrainSec,
+              x,
+              y,
+              z,
+              originX,
+              originY,
+              originZ,
+              tick,
+              blockAt,
+              biomeAt,
+              emits,
+              () => {
+                quadsBefore++;
+              },
+            );
+            continue;
+          }
+
+          const nativeTris = emitSpecialBlockTris(block, cube, wx, wy, wz);
+          if (nativeTris) {
+            for (const tri of nativeTris) {
+              customTris.push({
+                tri,
+                lx: x,
+                ly: y,
+                lz: z,
+                emission: cube.lightEmission ?? 0,
+                tick,
+              });
+              quadsBefore++;
             }
             instanceCount++;
             this.emitLayer1(
@@ -425,7 +472,9 @@ export class TexturedMesher implements Mesher {
           const skipAo = cube.ambientOcclusion === false;
           const emission = cube.lightEmission ?? 0;
 
-          for (const bounds of cube.boxes ?? [cube.bounds]) {
+          for (const [boxIndex, bounds] of (
+            cube.boxes ?? [cube.bounds]
+          ).entries()) {
             for (const d of DIRS) {
               if (
                 bounds &&
@@ -438,7 +487,7 @@ export class TexturedMesher implements Mesher {
                 continue;
               exposed = true;
               quadsBefore++;
-              const app = cube.faces[d.face];
+              const app = (cube.boxFaces?.[boxIndex] ?? cube.faces)[d.face];
               const texName = app.texture || FALLBACK_TEXTURE;
               const overlayId = `${texName}#overlay`;
               const splitOverlay =
@@ -1051,6 +1100,8 @@ interface LightCtx {
   resolver: BlockModelResolver;
   skyDarken: number;
   smooth: boolean;
+  /** Palette objects repeat across thousands of AO probes in one mesh build. */
+  occlusion: WeakMap<Block, boolean>;
 }
 
 function pushMergedQuad(
@@ -1246,7 +1297,7 @@ function pushCustomTri(
   atlas: TerrainAtlas,
   light: LightCtx,
 ): void {
-  const uv = atlas.uvFor(tri.texture, tick, lx, ly, lz);
+  const uv = atlas.uvFor(tri.texture, tick, lx, ly, lz, tri.textureIndex);
   const rect: [number, number, number, number] = [
     Math.min(uv.u0, uv.u1),
     Math.min(uv.v0, uv.v1),
@@ -1254,7 +1305,14 @@ function pushCustomTri(
     Math.abs(uv.v1 - uv.v0),
   ];
   const shade = tri.faceDimming ? (FACE_SHADE[tri.dir] ?? 1) : 1;
-  const level = sampleCombined(light, lx, ly, lz);
+  let level = sampleCombined(light, lx, ly, lz);
+  if (tri.adjacentLight) {
+    const d = DIRS[tri.dir]!;
+    level = Math.max(
+      level,
+      sampleCombined(light, lx + d.dx, ly + d.dy, lz + d.dz),
+    );
+  }
   let bright = lightBrightness(level) * shade;
   if (emission > 0) bright = Math.max(bright, Math.min(1, emission));
   for (let i = 0; i < 3; i++) {
@@ -1381,7 +1439,11 @@ function cellOccludes(
     lz,
   );
   if (b === UNLOADED_NEIGHBOUR || !b || isAir(b)) return false;
-  return light.resolver.occludes(b);
+  const cached = light.occlusion.get(b);
+  if (cached !== undefined) return cached;
+  const occludes = light.resolver.occludes(b);
+  light.occlusion.set(b, occludes);
+  return occludes;
 }
 
 /**

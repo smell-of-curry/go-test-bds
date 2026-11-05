@@ -90,7 +90,7 @@ export interface CubeModel {
    * `cross` is vanilla's flower X (two 45° quads). Omitted = unit cube.
    * Crosses do not occlude neighbours.
    */
-  shape?: "cube" | "cross";
+  shape?: "cube" | "cross" | "ground";
   /**
    * Vertical extent inside the cell, in blocks. Omitted = full cube (0..1),
    * which occludes neighbours. A partial box (carpet) does not.
@@ -98,6 +98,8 @@ export interface CubeModel {
   /** Partial box bounds [minX,minY,minZ,maxX,maxY,maxZ]; never greedy merged. */
   bounds?: [number, number, number, number, number, number];
   boxes?: Array<[number, number, number, number, number, number]>;
+  /** Optional appearance per box, e.g. pane sheet versus exposed edge. */
+  boxFaces?: Array<CubeModel["faces"]>;
   yBot?: number;
   yTop?: number;
   /**
