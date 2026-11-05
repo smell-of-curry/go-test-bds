@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { airBubblesVisible, bindingSourceFromState, heartIcons } from "./hud";
+import { applyBindings } from "./bindings";
 import type { WorldState } from "../../store";
 
 function emptyState(over: Partial<WorldState> = {}): WorldState {
@@ -46,6 +47,52 @@ describe("bindingSourceFromState", () => {
     const state = emptyState({ ui: { title: "Level Up!" } });
     const src = bindingSourceFromState(state, "Level Up!");
     assert.equal(src.global("#hud_title_text_string"), "Level Up!");
+  });
+
+  it("binds the native HUD text background preference over the authored alpha", () => {
+    // Vanilla position/day labels and addon labels use this exact binding.
+    const props = { alpha: 0.7 };
+    applyBindings(
+      {
+        type: "image",
+        namespace: "test",
+        name: "hud_text_background",
+        props,
+        controls: [],
+        bindings: [
+          {
+            binding_name: "#hud_text_background_alpha",
+            binding_name_override: "#alpha",
+          },
+        ],
+      },
+      bindingSourceFromState(emptyState(), ""),
+      props,
+    );
+    assert.equal(props.alpha, 0.6);
+  });
+
+  it("uses explicit client preferences, including fully transparent backgrounds", () => {
+    const source = bindingSourceFromState(emptyState(), "", {
+      clientSettings: {
+        hudTextBackgroundOpacity: 0,
+        hudOpacity: 0.4,
+        hudVisible: false,
+      },
+    });
+    assert.equal(source.global("#hud_text_background_alpha"), 0);
+    assert.equal(source.global("#hud_alpha"), 0.4);
+    assert.equal(source.global("#hud_visible"), false);
+    assert.equal(source.global("#editor_chat_layout_active"), false);
+  });
+
+  it("bounds invalid opacity preferences without altering ordinary HUD visibility", () => {
+    const source = bindingSourceFromState(emptyState(), "", {
+      clientSettings: { hudTextBackgroundOpacity: Number.NaN, hudOpacity: 2 },
+    });
+    assert.equal(source.global("#hud_text_background_alpha"), 0.6);
+    assert.equal(source.global("#hud_alpha"), 1);
+    assert.equal(source.global("#hud_visible"), true);
   });
 });
 

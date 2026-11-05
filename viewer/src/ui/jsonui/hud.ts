@@ -45,6 +45,32 @@ const HOTBAR_H = 22;
 
 const warnedRenderers = new Set<string>();
 
+/** Client preferences are not present in the server's HUD packets. */
+export interface HudClientSettings {
+  /** `gfx_hud_text_background_opacity`, applied to authored image bindings. */
+  hudTextBackgroundOpacity: number;
+  /** `gfx_interface_opacity`; packs decide whether/how to propagate it. */
+  hudOpacity: number;
+  /** Inverse of `gfx_hidehud`. Does not depend on the current form. */
+  hudVisible: boolean;
+}
+
+/** Desktop capture profile, matched to the installed Bedrock 1.26.60.4 client. */
+export const DEFAULT_HUD_CLIENT_SETTINGS: Readonly<HudClientSettings> = {
+  hudTextBackgroundOpacity: 0.6,
+  hudOpacity: 1,
+  hudVisible: true,
+};
+
+function opacityPreference(
+  value: number | undefined,
+  fallback: number,
+): number {
+  return typeof value === "number" && Number.isFinite(value)
+    ? Math.max(0, Math.min(1, value))
+    : fallback;
+}
+
 /** Options for {@link createHudRenderer}. */
 export interface HudRendererOptions {
   assets: JsonUiAssets;
@@ -55,6 +81,8 @@ export interface HudRendererOptions {
   lang?: Readonly<Record<string, string>>;
   /** Consumer HUD hooks. Absent keeps the generic survival HUD only. */
   extension?: ViewerHudExtension | null;
+  /** Explicit capture/client preferences; omitted uses the desktop profile. */
+  clientSettings?: Partial<HudClientSettings>;
 }
 
 /** Per-frame values threaded through bind for extension hooks. */
@@ -95,10 +123,12 @@ export function bindingSourceFromState(
   title: string,
   options?: {
     seedGlobals?: ViewerHudExtension["seedGlobals"];
+    clientSettings?: Partial<HudClientSettings>;
   },
 ): BindingSource {
   const subtitle = state.ui?.subtitle ?? "";
   const vitals = state.vitals;
+  const settings = options?.clientSettings;
   const globals: Record<string, BindingValue> = {
     "#hud_title_text_string": title,
     "#hud_subtitle_text_string": subtitle,
@@ -111,7 +141,19 @@ export function bindingSourceFromState(
     "#status_effects_visible": false,
     "#hotbar_visible_not_centered": false,
     "#hotbar_visible_not_centered_resizable": false,
-    "#hud_visible": true,
+    "#hud_visible":
+      settings?.hudVisible ?? DEFAULT_HUD_CLIENT_SETTINGS.hudVisible,
+    "#hud_alpha": opacityPreference(
+      settings?.hudOpacity,
+      DEFAULT_HUD_CLIENT_SETTINGS.hudOpacity,
+    ),
+    "#hud_text_background_alpha": opacityPreference(
+      settings?.hudTextBackgroundOpacity,
+      DEFAULT_HUD_CLIENT_SETTINGS.hudTextBackgroundOpacity,
+    ),
+    // Viewer captures are outside the client's HUD layout editor. Preserve
+    // native chat-stack padding conditions rather than removing the stack.
+    "#editor_chat_layout_active": false,
     "#hud_visible_centered": true,
     "#hud_visible_centered_gui_elements": true,
     "#hud_visible_centered_touch": false,
@@ -327,6 +369,7 @@ export function createHudRenderer(
         }) ?? plainTitle;
       const source = bindingSourceFromState(state, title, {
         seedGlobals: ext?.seedGlobals,
+        clientSettings: opts.clientSettings,
       });
       const idIndex = new Map<string, PropertyBag>();
       const pass: BindPass = {

@@ -14,6 +14,7 @@ import {
   ninesliceCss,
   paintChildOrder,
   resolveImageUv,
+  texturePixelsAreUniform,
   uvBackgroundCss,
   type JsonUiAssets,
 } from "./dom.js";
@@ -242,6 +243,36 @@ describe("ninesliceCenterIsEmpty", () => {
 
   it("keeps real borders with a center", () => {
     assert.equal(ninesliceCenterIsEmpty({ w: 32, h: 32 }, 4), false);
+  });
+
+  it("checks authored base dimensions for higher-resolution textures", () => {
+    assert.equal(
+      ninesliceCenterIsEmpty({ w: 16, h: 16, baseSize: [2, 2] }, 1),
+      true,
+    );
+    assert.equal(ninesliceCenterIsEmpty({ w: 0, h: 0 }, 1), false);
+  });
+});
+
+describe("texturePixelsAreUniform", () => {
+  it("recognizes solid native plates without relying on their filename", () => {
+    for (const rgba of [
+      [0, 0, 0, 255],
+      [9, 9, 9, 255],
+      [70, 130, 200, 100],
+    ]) {
+      assert.equal(texturePixelsAreUniform(Array(4).fill(rgba).flat()), true);
+    }
+  });
+
+  it("preserves patterned borders and nonuniform alpha", () => {
+    assert.equal(
+      texturePixelsAreUniform([0, 0, 0, 255, 255, 0, 0, 255]),
+      false,
+    );
+    assert.equal(texturePixelsAreUniform([0, 0, 0, 255, 0, 0, 0, 0]), false);
+    assert.equal(texturePixelsAreUniform([]), false);
+    assert.equal(texturePixelsAreUniform([0, 0, 0]), false);
   });
 });
 

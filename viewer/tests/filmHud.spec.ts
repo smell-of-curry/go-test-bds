@@ -805,6 +805,98 @@ test("filled image faces cover their box and named black labels remain legible",
   }
 });
 
+test("uniform exhausted nineslices fill HUD backgrounds while patterned overrides keep borders", async ({
+  page,
+}) => {
+  const solid = new PNG({ width: 2, height: 2 });
+  const pattern = new PNG({ width: 2, height: 2 });
+  for (let i = 0; i < 4; i++) {
+    solid.data.set([0, 0, 0, 255], i * 4);
+    pattern.data.set(i % 2 ? [255, 0, 0, 255] : [0, 0, 255, 255], i * 4);
+  }
+  await page.route("**/asset/**", async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (
+      !path.startsWith("/asset/textures/test/solid.") &&
+      !path.startsWith("/asset/textures/ui/control.")
+    ) {
+      await route.fulfill({ status: 404, body: "missing fixture asset" });
+      return;
+    }
+    if (path.endsWith(".json")) {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({ nineslice_size: 1, base_size: [2, 2] }),
+      });
+    } else {
+      await route.fulfill({
+        contentType: "image/png",
+        body: PNG.sync.write(path.includes("/control.") ? pattern : solid),
+      });
+    }
+  });
+  await page.setViewportSize({ width: 320, height: 180 });
+  await page.evaluate(async () => {
+    const { createJsonUiRuntime } = await import("/src/ui/jsonui/runtime.ts");
+    const { Store } = await import("/src/store.ts");
+    document.body.style.cssText = "margin:0;background:white";
+    const plate = (texture: string, x: number) => ({
+      type: "image",
+      size: [100, 40],
+      offset: [x, 10],
+      anchor_from: "top_left",
+      anchor_to: "top_left",
+      texture,
+      alpha: 0.7,
+      bindings: [
+        {
+          binding_name: "#hud_text_background_alpha",
+          binding_name_override: "#alpha",
+        },
+      ],
+    });
+    const doc = {
+      namespace: "hud",
+      root_panel: {
+        type: "panel",
+        controls: [
+          { solid: plate("textures/test/solid", 10) },
+          { patterned: plate("textures/ui/control", 130) },
+        ],
+      },
+    };
+    const runtime = createJsonUiRuntime({
+      assetBaseUrl: location.origin,
+      guiScale: 1,
+      extension: { hudScreens: [{ id: "solid" }, { id: "patterned" }] },
+      client: {
+        getPacks: async () => [{ id: "fixture" }],
+        fetchPackJson: async (_id: string, path: string) =>
+          path.endsWith("_ui_defs.json")
+            ? { ui_defs: ["ui/hud.json"] }
+            : path.endsWith("hud.json")
+              ? doc
+              : null,
+        fetchPackText: async () => null,
+      },
+    });
+    await runtime.ready;
+    runtime.onFrame(new Store().getState());
+  });
+  const solidFace = page.locator('[data-ui-name="solid"] .jsonui-image-face');
+  await expect(solidFace).toHaveCSS("background-size", "100% 100%");
+  await expect(solidFace).toHaveCSS("opacity", "0.6");
+  await expect(
+    page.locator('[data-ui-name="patterned"] .jsonui-image-face'),
+  ).toHaveCSS("background-image", "none");
+  const png = PNG.sync.read(await page.screenshot());
+  const pixel = (x: number, y: number) => [
+    ...png.data.subarray((y * png.width + x) * 4, (y * png.width + x) * 4 + 4),
+  ];
+  expect(pixel(60, 30)).toEqual([102, 102, 102, 255]);
+  expect(pixel(180, 30)).toEqual([255, 255, 255, 255]);
+});
+
 test("Mojangles body labels wrap the pixel canvas within the authored width", async ({
   page,
 }) => {

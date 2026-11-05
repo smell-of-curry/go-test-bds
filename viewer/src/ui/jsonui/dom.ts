@@ -29,6 +29,8 @@ export interface TextureInfo {
   nineslice?: unknown;
   /** Authored design dimensions; PNGs may be higher resolution. */
   baseSize?: [number, number];
+  /** True only after verifying every decoded RGBA texel is identical. */
+  uniform?: boolean;
 }
 
 /** Natural pixel size of a texture, keyed by pack path (no extension). */
@@ -179,6 +181,9 @@ export function lookupTextureInfo(
     nineslice: fromAssets?.nineslice ?? fromMap?.nineslice,
     ...(fromAssets?.baseSize || fromMap?.baseSize
       ? { baseSize: fromAssets?.baseSize ?? fromMap?.baseSize }
+      : {}),
+    ...(fromAssets?.uniform !== undefined || fromMap?.uniform !== undefined
+      ? { uniform: fromAssets?.uniform ?? fromMap?.uniform }
       : {}),
   };
 }
@@ -469,17 +474,15 @@ function applyImage(
       node.element.props.nineslice_size !== null
         ? node.element.props.nineslice_size
         : info?.nineslice;
-    // 2×2 `textures/ui/control` + nineslice_size:1 has a 0×0 source center —
-    // CSS border-image `fill` paints nothing in the middle. Real Bedrock
-    // stretches that texel as the dialog hollow dim fill (alpha 0.8). Scope
-    // to `control` only — other empty-center nineslices must keep borders.
+    // CSS border-image cannot fill a center consumed by opposing slices.
+    // Native solid-color plates still fill their box. Stretching a verified
+    // uniform texture preserves every texel (including its alpha); patterned
+    // borders keep their authored slicing. This also supports pack overrides.
     if (
       nine !== undefined &&
       nine !== null &&
       info &&
-      info.w > 0 &&
-      info.h > 0 &&
-      /(?:^|\/)control$/i.test(texture.replace(/\\/g, "/")) &&
+      info.uniform === true &&
       ninesliceCenterIsEmpty(info, nine)
     ) {
       face.style.backgroundImage = `url("${cssUrl(url)}")`;
@@ -577,11 +580,22 @@ function svgMultiplyTintFilter(tint: [number, number, number]): string {
  * @returns whether border-image fill would paint an empty center.
  */
 export function ninesliceCenterIsEmpty(
-  info: { w: number; h: number },
+  info: Pick<TextureInfo, "w" | "h" | "baseSize">,
   nine: unknown,
 ): boolean {
   const [left, top, right, bottom] = parseNineslice(nine);
-  return info.w <= left + right || info.h <= top + bottom;
+  const w = info.baseSize?.[0] || info.w;
+  const h = info.baseSize?.[1] || info.h;
+  return w > 0 && h > 0 && (w <= left + right || h <= top + bottom);
+}
+
+/** Detect a genuinely uniform decoded texture; unknown/empty data is not proof. */
+export function texturePixelsAreUniform(pixels: ArrayLike<number>): boolean {
+  if (pixels.length < 4 || pixels.length % 4 !== 0) return false;
+  for (let i = 4; i < pixels.length; i++) {
+    if (pixels[i] !== pixels[i % 4]) return false;
+  }
+  return true;
 }
 
 function applyNineslice(

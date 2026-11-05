@@ -49,6 +49,43 @@ complete pixel parity.
   gradient); it does not replace RGB.
 - `uv` / `uv_size` crop as expected.
 
+**November solid-plate correction:** the baseline `textures/ui/Black.png` is
+2×2 with four identical opaque black texels, and its metadata specifies a
+one-pixel nineslice. The opposing borders consume the source center, so CSS
+`border-image: ... fill` leaves the middle empty. The renderer now stretches
+only decoded textures verified to have identical RGBA texels when their slice
+center is exhausted. This replaces the old filename-specific `control` rule;
+patterned pack overrides retain their slices. The one-axis Back-arrow handling
+is unchanged.
+
+## HUD client preferences
+
+Server packets do not carry client graphics preferences. `clientSettings` on
+the JSON UI runtime/HUD renderer explicitly supplies HUD visibility, interface
+opacity, and HUD text-background opacity. The default desktop capture profile
+uses 1.0 interface opacity, visible HUD, and 0.6 text-background opacity, matching
+the installed 1.26.60.4 client's `options.txt` observed on November 5. These are
+profile values, not a claim that every Bedrock client uses the same settings.
+The corresponding native bindings are `#hud_visible`, `#hud_alpha`, and
+`#hud_text_background_alpha`. Pack bindings and ancestor visibility determine
+what appears; opening a form does not itself hide a HUD control.
+
+The active ping plate binds the last value over its authored 0.7 alpha. Before
+this change, the absent binding left 0.7 intact; the empty slice center, rather
+than opacity alone, caused its missing background. Native paper-doll padding
+depends on runtime visibility, not just the hide-paper-doll preference, so it
+has not been inferred from that preference. `propagate_alpha` and matched
+native HUD placement/visibility remain open comparison items.
+
+The battle HP label explicitly requests `font_type: "smooth"` and scale 0.8.
+Other battle labels use the default font. Installed 1.26.60.4 font metadata maps
+smooth aliases to `OldSmoothFont`, an MSDF atlas (`font/smooth/smooth_*.png` plus
+width tables), not the default bitmap atlas. Its native shader uses RGB median
+distance and runtime edge/shadow uniforms. Those uniform values and GUI metrics
+have not yet been calibrated against a matched native capture. Smooth-font
+labels still use the default-font fallback; native smooth rendering remains
+unsupported. No CSS weight substitution is used to claim a match.
+
 ## Layout
 
 - `offset` percentages without a suffix are of the **parent** size; `%x` is of

@@ -13,10 +13,20 @@ import type {
 import { ensureMojangles } from "../mojangles";
 import { AssetClient } from "../../terrain/assetClient";
 import type { WorldState } from "../../store";
-import { type JsonUiAssets, type TextureInfo } from "./dom";
+import {
+  ninesliceCenterIsEmpty,
+  texturePixelsAreUniform,
+  type JsonUiAssets,
+  type TextureInfo,
+} from "./dom";
 import { loadUiFileSet, type UiLoadClient, type UiPackInfo } from "./load";
 import { buildResolver } from "./resolve";
-import { createHudRenderer, DEFAULT_GUI_SCALE, type HudRenderer } from "./hud";
+import {
+  createHudRenderer,
+  DEFAULT_GUI_SCALE,
+  type HudClientSettings,
+  type HudRenderer,
+} from "./hud";
 import { createFormRenderer, type FormRenderer } from "./forms";
 import type { UiResolver } from "./types";
 
@@ -41,6 +51,8 @@ export interface JsonUiRuntimeOptions {
   assetBaseUrl: string;
   /** Gui scale (default 2 → half the host CSS size in gui px). */
   guiScale?: number;
+  /** Native client preferences absent from server packets. */
+  clientSettings?: Partial<HudClientSettings>;
   /**
    * Injectable pack client (tests / fixtures). Defaults to fetch over
    * {@link assetBaseUrl}.
@@ -204,7 +216,7 @@ export function createJsonUiRuntime(opts: JsonUiRuntimeOptions): JsonUiRuntime {
         const w = bmp?.width || pngSize?.w || (base && Number(base[0])) || 0;
         const h = bmp?.height || pngSize?.h || (base && Number(base[1])) || 0;
         if (w <= 0 && h <= 0 && meta?.nineslice_size === undefined) return;
-        textureInfoCache.set(path, {
+        const info: TextureInfo = {
           w: w || Number(base?.[0]) || 0,
           h: h || Number(base?.[1]) || 0,
           nineslice: meta?.nineslice_size,
@@ -216,7 +228,35 @@ export function createJsonUiRuntime(opts: JsonUiRuntimeOptions): JsonUiRuntime {
                 ],
               }
             : {}),
-        });
+        };
+        // Check tiny plates (also used with element-level nineslices) and
+        // larger textures whose metadata exhausts the center. A patterned
+        // border must not become a stretched solid-color plate.
+        if (
+          bmp &&
+          ((bmp.width <= 16 && bmp.height <= 16) ||
+            (info.nineslice !== undefined &&
+              ninesliceCenterIsEmpty(info, info.nineslice)))
+        ) {
+          try {
+            const canvas = document.createElement("canvas");
+            canvas.width = bmp.width;
+            canvas.height = bmp.height;
+            const context = canvas.getContext("2d", {
+              willReadFrequently: true,
+            });
+            if (context) {
+              context.drawImage(bmp, 0, 0);
+              info.uniform = texturePixelsAreUniform(
+                context.getImageData(0, 0, bmp.width, bmp.height).data,
+              );
+            }
+          } catch {
+            // Keep dimensions/slices when a browser cannot inspect pixels.
+            // Unknown uniformity must not opt into the solid-plate path.
+          }
+        }
+        textureInfoCache.set(path, info);
         try {
           bmp?.close();
         } catch {
@@ -322,6 +362,7 @@ export function createJsonUiRuntime(opts: JsonUiRuntimeOptions): JsonUiRuntime {
     // `222.22%y x 192` dock ate most of the still — live run-43 black slab.
     hud = createHudRenderer(resolver, hudLayer, {
       guiScale,
+      clientSettings: opts.clientSettings,
       assets,
       lang,
       extension,
