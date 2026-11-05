@@ -28,6 +28,19 @@ func TestParseLang(t *testing.T) {
 	}
 }
 
+func TestLangNewlinesReachRecordedModalWithoutRewritingArguments(t *testing.T) {
+	table := map[string]string{}
+	parseLang([]byte("summary=§aBattle Victory!§r\\n\\nWinner: %1~LINEBREAK~Done\r\npath=literal\\q\n"), table)
+	useFormLang(t, table)
+	form, _ := formSnapshot(t, `{"type":"modal","title":"Result","content":{"rawtext":[{"translate":"summary","with":["Player\\nName"]}]},"button1":"Continue","button2":"Dismiss"}`)
+	if want := "§aBattle Victory!§r\n\nWinner: Player\\nName\nDone"; form.Content != want {
+		t.Fatalf("recorded modal content=%q; want %q", form.Content, want)
+	}
+	if table["path"] != `literal\q` {
+		t.Fatalf("unrelated escape was rewritten: %q", table["path"])
+	}
+}
+
 func TestSubstituteLang(t *testing.T) {
 	cases := []struct {
 		tmpl string

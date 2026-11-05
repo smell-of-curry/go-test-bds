@@ -17,6 +17,10 @@ import (
 
 var activeLang atomic.Pointer[map[string]string]
 
+// These are language-file markers, not general rawtext escapes. Decode them
+// before substitution so literal backslashes in player-supplied arguments stay.
+var langLineBreaks = strings.NewReplacer(`\n`, "\n", "~LINEBREAK~", "\n")
+
 // installLangTable builds and installs the translate table from a pack
 // stack. A nil stack or a stack without lang files installs nothing (keys
 // pass through unresolved, the pre-table behaviour).
@@ -62,7 +66,7 @@ func parseLang(data []byte, into map[string]string) {
 		if i := strings.Index(val, "\t##"); i >= 0 {
 			val = val[:i]
 		}
-		into[key] = val
+		into[key] = langLineBreaks.Replace(val)
 	}
 }
 
