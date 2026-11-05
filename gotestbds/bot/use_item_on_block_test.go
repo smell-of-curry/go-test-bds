@@ -33,18 +33,20 @@ func TestUseItemOnBlockSendsAcceptedClick(t *testing.T) {
 	if err := a.UseItemOnBlock(pos, cube.FaceUp, click); err != nil {
 		t.Fatal(err)
 	}
-	var tx *packet.InventoryTransaction
-	for _, pk := range conn.written {
-		if got, ok := pk.(*packet.InventoryTransaction); ok {
-			tx = got
-		}
+	if len(conn.written) != 0 {
+		t.Fatal("click was sent before its auth-input tick")
 	}
-	if tx == nil {
-		t.Fatal("no InventoryTransaction")
+	a.SendMovement()
+	if len(conn.written) != 1 {
+		t.Fatalf("one click sent %d packets, want one auth input", len(conn.written))
 	}
-	data, ok := tx.TransactionData.(*protocol.UseItemTransactionData)
+	auth, ok := conn.written[0].(*packet.PlayerAuthInput)
+	if !ok || !auth.InputData.Load(packet.InputFlagPerformItemInteraction) {
+		t.Fatal("click missing from auth input")
+	}
+	data, ok := auth.ItemInteractionData.Value()
 	if !ok {
-		t.Fatalf("transaction %T", tx.TransactionData)
+		t.Fatal("auth input missing item interaction")
 	}
 	if data.ActionType != protocol.UseItemActionClickBlock {
 		t.Fatalf("action = %d", data.ActionType)
@@ -66,61 +68,46 @@ func TestUseItemOnBlockSendsAcceptedClick(t *testing.T) {
 		t.Fatalf("block position = %v", data.BlockPosition)
 	}
 
+	if data.Position != auth.Position {
+		t.Fatalf("use position %v, auth position %v", data.Position, auth.Position)
+	}
 	conn.written = nil
-	a.SendMovement()
-	var auth *packet.PlayerAuthInput
+	a.Tick()
 	for _, pk := range conn.written {
-		if got, ok := pk.(*packet.PlayerAuthInput); ok {
-			auth = got
+		if _, duplicate := pk.(*packet.InventoryTransaction); duplicate {
+			t.Fatal("click duplicated in a standalone transaction")
 		}
-	}
-	if auth == nil {
-		t.Fatal("no PlayerAuthInput for the click")
-	}
-	if !auth.InputData.Load(packet.InputFlagPerformItemInteraction) {
-		t.Fatal("missing perform-item-interaction flag")
-	}
-	use, ok := auth.ItemInteractionData.Value()
-	if !ok {
-		t.Fatal("auth input missing item interaction")
-	}
-	if use.TriggerType != protocol.TriggerTypePlayerInput || use.BlockRuntimeID != stone {
-		t.Fatalf("auth use = trigger %d block %d", use.TriggerType, use.BlockRuntimeID)
-	}
-	if use.Position != auth.Position {
-		t.Fatalf("use position %v, auth position %v", use.Position, auth.Position)
+		if input, ok := pk.(*packet.PlayerAuthInput); ok && input.InputData.Load(packet.InputFlagPerformItemInteraction) {
+			t.Fatal("click repeated on the next tick")
+		}
 	}
 }
 
 // TestUseItemSendsAcceptedThrow covers the click-air path (throwables such as
 // snowballs and projectile items): BDS drops it with an unknown trigger and
-// only launches when the next PlayerAuthInput carries the same use.
+// the next PlayerAuthInput must carry the use without a standalone duplicate.
 func TestUseItemSendsAcceptedThrow(t *testing.T) {
 	a, conn := newRecordingActor(t)
 	conn.written = nil
 	if err := a.UseItem(); err != nil {
 		t.Fatal(err)
 	}
-	var data *protocol.UseItemTransactionData
-	for _, pk := range conn.written {
-		if tx, ok := pk.(*packet.InventoryTransaction); ok {
-			data, _ = tx.TransactionData.(*protocol.UseItemTransactionData)
-		}
+	if len(conn.written) != 0 {
+		t.Fatal("click-air sent a standalone transaction before auth input")
 	}
-	if data == nil || data.ActionType != protocol.UseItemActionClickAir {
+	a.SendMovement()
+	if len(conn.written) != 1 {
+		t.Fatalf("click-air sent %d packets, want one", len(conn.written))
+	}
+	auth, ok := conn.written[0].(*packet.PlayerAuthInput)
+	if !ok || !auth.InputData.Load(packet.InputFlagPerformItemInteraction) {
+		t.Fatal("throw did not ride the next PlayerAuthInput")
+	}
+	data, ok := auth.ItemInteractionData.Value()
+	if !ok || data.ActionType != protocol.UseItemActionClickAir {
 		t.Fatalf("no click-air transaction: %+v", data)
 	}
 	if data.TriggerType != protocol.TriggerTypePlayerInput || data.ClientPrediction != protocol.ClientPredictionSuccess {
 		t.Fatalf("trigger %d prediction %d", data.TriggerType, data.ClientPrediction)
 	}
-	conn.written = nil
-	a.SendMovement()
-	for _, pk := range conn.written {
-		if auth, ok := pk.(*packet.PlayerAuthInput); ok && auth.InputData.Load(packet.InputFlagPerformItemInteraction) {
-			if use, ok := auth.ItemInteractionData.Value(); ok && use.ActionType == protocol.UseItemActionClickAir {
-				return
-			}
-		}
-	}
-	t.Fatal("throw did not ride the next PlayerAuthInput")
 }

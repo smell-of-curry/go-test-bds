@@ -194,6 +194,12 @@ func (b *Bot) SetPassive(passive bool) {
 	b.a.SetPassive(passive)
 }
 
+// SetItemInteractionTransport selects the session's item-click packet format.
+// Call before StartTickLoop; after that, use Execute with the actor setter.
+func (b *Bot) SetItemInteractionTransport(transport actor.ItemInteractionTransport) error {
+	return b.a.SetItemInteractionTransport(transport)
+}
+
 // SetHandler sets the actor handler before the tick loop starts.
 //
 // Safe only before StartTickLoop: after that, use Execute so the write happens

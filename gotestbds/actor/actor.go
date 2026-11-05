@@ -603,8 +603,8 @@ func (a *Actor) UseItem() error {
 	}
 
 	heldItem, _ := a.Inventory().ItemInstance(a.heldSlot)
-	// Same fields as UseItemOnBlock. BDS 1.26.60 still drops bot click-air
-	// throws (snowball, pokeb:masterball) with these set; cause unknown.
+	// Queue on the same input tick path as a block click. The selected
+	// transport sends it once; sending both packet forms uses the item twice.
 	action := &protocol.UseItemTransactionData{
 		ActionType:       protocol.UseItemActionClickAir,
 		TriggerType:      protocol.TriggerTypePlayerInput,
@@ -614,8 +614,8 @@ func (a *Actor) UseItem() error {
 		Position:         mcmath.Vec64To32(a.EyePos()),
 		ClientPrediction: protocol.ClientPredictionSuccess,
 	}
-	a.pendingItemUse = action
-	return a.useItem(action)
+	a.pendingItemInteractions = append(a.pendingItemInteractions, action)
+	return nil
 }
 
 // clampClick keeps a face coordinate strictly inside the block.
@@ -667,11 +667,12 @@ func (a *Actor) UseItemOnBlock(pos cube.Pos, face cube.Face, clickPos mgl64.Vec3
 		BlockRuntimeID:   blockRuntimeID,
 		ClientPrediction: protocol.ClientPredictionSuccess,
 	}
-	// The click goes out on the next PlayerAuthInput (PerformItemInteraction).
+	// By default the click rides PlayerAuthInput (PerformItemInteraction);
+	// legacy sessions send one InventoryTransaction paired with that tick.
 	// A separate StartItemUseOn beforehand makes BDS treat that auth input as
 	// a hold-repeat (isFirstEvent false), and the claim handler cancels it.
-	a.pendingItemUse = action
-	return a.useItem(action)
+	a.pendingItemInteractions = append(a.pendingItemInteractions, action)
+	return nil
 }
 
 // ReleaseItem stops using held item.
@@ -724,8 +725,12 @@ func (a *Actor) UseItemOnEntity(e world.Entity) error {
 	return a.useItem(action)
 }
 
-// useItem sends InventoryTransaction packet.
+// useItem sends an InventoryTransaction, after any already queued item input.
 func (a *Actor) useItem(data protocol.InventoryTransactionData) error {
+	if len(a.pendingItemInteractions) > 0 {
+		a.pendingItemInteractions = append(a.pendingItemInteractions, data)
+		return nil
+	}
 	return a.conn.WritePacket(&packet.InventoryTransaction{
 		TransactionData: data,
 	})

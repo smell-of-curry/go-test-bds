@@ -17,7 +17,6 @@ func (*Interact) Name() string {
 // Run is the function that runs the instruction.
 func (*Interact) Run(ctx context.Context, b *bot.Bot) error {
 	return execute(b, func(a *actor.Actor) error {
-		a.UseItem()
-		return nil
+		return a.UseItem()
 	})
 }

@@ -21,6 +21,7 @@ import (
 	"github.com/sandertv/gophertunnel/minecraft"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/login"
 	"github.com/smell-of-curry/go-test-bds/gotestbds"
+	"github.com/smell-of-curry/go-test-bds/gotestbds/actor"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/assets"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/control"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/skinfile"
@@ -241,11 +242,12 @@ func runBot(ctx context.Context, config Config, name string, logger *slog.Logger
 	assets.WireDialer(&dialer, assetM)
 
 	test := &gotestbds.Test{
-		Dialer:        dialer,
-		RemoteAddress: config.Network.ServerAddress,
-		Logger:        logger.With("bot", name),
-		Viewer:        hub,
-		Fleet:         fleet,
+		Dialer:                   dialer,
+		RemoteAddress:            config.Network.ServerAddress,
+		Logger:                   logger.With("bot", name),
+		Viewer:                   hub,
+		Fleet:                    fleet,
+		ItemInteractionTransport: actor.ItemInteractionTransport(config.Network.ItemInteractionTransport),
 	}
 
 	err := test.RunCtx(ctx)

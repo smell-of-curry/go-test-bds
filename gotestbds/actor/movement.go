@@ -30,10 +30,12 @@ type movementData struct {
 
 	sneaking, sprinting, swimming, crawling, gliding, immobile, onGround bool
 	movementBitset                                                       protocol.InputFlags
-	// pendingItemUse rides the next PlayerAuthInput. BDS 1.26 ignores a
-	// standalone InventoryTransaction click unless that tick's auth input
-	// carries the same UseItem data under PerformItemInteraction.
-	pendingItemUse *protocol.UseItemTransactionData
+	// By default item clicks ride PlayerAuthInput, one per tick. Sending the
+	// same click as InventoryTransaction too dispatches two item-use events.
+	// Keep rapid consecutive SDK calls in order instead of overwriting one;
+	// subsequent release/entity transactions must not overtake those clicks.
+	pendingItemInteractions  []protocol.InventoryTransactionData
+	itemInteractionTransport ItemInteractionTransport
 
 	path             *pathfind.Path
 	navigationTarget cube.Pos
@@ -106,12 +108,20 @@ func (a *Actor) Sneaking() bool {
 
 // StartSneaking ...
 func (a *Actor) StartSneaking() {
+	if a.sneaking {
+		return
+	}
+	a.movementBitset.Unset(packet.InputFlagStopSneaking)
 	a.movementBitset.Set(packet.InputFlagStartSneaking)
 	a.sneaking = true
 }
 
 // StopSneaking ...
 func (a *Actor) StopSneaking() {
+	if !a.sneaking {
+		return
+	}
+	a.movementBitset.Unset(packet.InputFlagStartSneaking)
 	a.movementBitset.Set(packet.InputFlagStopSneaking)
 	a.sneaking = false
 }
@@ -252,6 +262,12 @@ func (a *Actor) Immobile() bool {
 func (a *Actor) fillMovementBitset() {
 	if a.Sneaking() {
 		a.movementBitset.Set(packet.InputFlagSneaking)
+		// StartSneaking is an edge, not the held input. BDS simulates sneak
+		// from SneakDown on every auth-input tick, including idle/use ticks.
+		a.movementBitset.Set(packet.InputFlagSneakDown)
+	} else {
+		a.movementBitset.Unset(packet.InputFlagSneaking)
+		a.movementBitset.Unset(packet.InputFlagSneakDown)
 	}
 	if a.Sprinting() {
 		a.movementBitset.Set(packet.InputFlagSprinting)
@@ -320,11 +336,23 @@ func (a *Actor) SendMovement() {
 		pk.ClientPredictedVehicle = protocol.Option(a.vehicleUniqueID)
 		pk.VehicleRotation = protocol.Option(mgl32.Vec2{pitch, yaw})
 	}
-	if a.pendingItemUse != nil {
-		a.pendingItemUse.Position = pk.Position
-		pk.InputData.Set(packet.InputFlagPerformItemInteraction)
-		pk.ItemInteractionData = protocol.Option(*a.pendingItemUse)
-		a.pendingItemUse = nil
+	if len(a.pendingItemInteractions) > 0 {
+		switch action := a.pendingItemInteractions[0].(type) {
+		case *protocol.UseItemTransactionData:
+			action.Position = pk.Position
+			if a.itemInteractionTransport == ItemInteractionInventoryTransaction {
+				_ = a.conn.WritePacket(&packet.InventoryTransaction{TransactionData: action})
+			} else {
+				pk.InputData.Set(packet.InputFlagPerformItemInteraction)
+				pk.ItemInteractionData = protocol.Option(*action)
+			}
+		default:
+			// Release/entity transactions have no auth-input representation.
+			// Pair them with this tick after preceding queued uses have run.
+			_ = a.conn.WritePacket(&packet.InventoryTransaction{TransactionData: action})
+		}
+		a.pendingItemInteractions[0] = nil
+		a.pendingItemInteractions = a.pendingItemInteractions[1:]
 	}
 	_ = a.conn.WritePacket(pk)
 }
@@ -626,7 +654,6 @@ func (a *Actor) fillInput(input movement.Input) {
 		if !a.Sneaking() {
 			a.StartSneaking()
 		}
-		a.movementBitset.Set(packet.InputFlagSneakDown)
 	} else if a.Sneaking() {
 		a.StopSneaking()
 	}

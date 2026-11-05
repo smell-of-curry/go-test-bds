@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/sandertv/gophertunnel/minecraft"
+	"github.com/smell-of-curry/go-test-bds/gotestbds/actor"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/bot"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/instruction"
 	"github.com/smell-of-curry/go-test-bds/gotestbds/viewer"
@@ -19,6 +20,9 @@ type Test struct {
 	Logger            *slog.Logger
 	Instructions      *instruction.Pull
 	InstructionPrefix string
+	// ItemInteractionTransport selects air/block click encoding. Empty defaults
+	// to auth-input for BDS; legacy servers may need inventory-transaction.
+	ItemInteractionTransport actor.ItemInteractionTransport
 	// DefaultInstructionTimeout overrides DefaultInstructionTimeout when non-zero.
 	DefaultInstructionTimeout time.Duration
 	// Viewer is the optional process-wide state-export hub. Nil means the
@@ -59,6 +63,9 @@ type sessionOpts struct {
 
 // RunCtx runs text with context.
 func (t *Test) RunCtx(ctx context.Context) error {
+	if _, err := actor.ParseItemInteractionTransport(string(t.ItemInteractionTransport)); err != nil {
+		return err
+	}
 	// resetting rejoin value.
 	t.rejoin = false
 	t.prepare()
@@ -131,7 +138,14 @@ func (t *Test) prepare() {
 // @param opts Passive and spawn-grace knobs. Zero value matches a normal bot.
 // @returns nil when the tick loop stops. Rejoin is handled by RunCtx.
 func (t *Test) drive(ctx context.Context, conn bot.Conn, opts sessionOpts) error {
+	transport, err := actor.ParseItemInteractionTransport(string(t.ItemInteractionTransport))
+	if err != nil {
+		_ = conn.Close()
+		return err
+	}
 	b := bot.NewBot(conn, t.Logger.With("src", "bot"))
+	// Validated before constructing the bot; no actions are queued yet.
+	_ = b.SetItemInteractionTransport(transport)
 	if opts.passive {
 		b.SetPassive(true)
 	}

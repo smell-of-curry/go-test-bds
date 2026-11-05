@@ -143,6 +143,18 @@ go run . --address 127.0.0.1:19134 --name "Test Bot" --bots 1
 Flags win, then environment (`GOTESTBDS_ADDRESS`, `GOTESTBDS_BOT_NAME`,
 `GOTESTBDS_BOTS`, `GOTESTBDS_LOG_LEVEL`), then `config.toml`.
 
+Item clicks use `auth-input` by default for BDS. For servers that accept air/block
+clicks only through the legacy inventory handler (for example Dragonfly 0.11.6),
+set `--item-interaction-transport inventory-transaction`. The equivalent environment
+variable is `GOTESTBDS_ITEM_INTERACTION_TRANSPORT`; the TOML key is
+`ItemInteractionTransport` under `[Network]`. The Go API exposes
+`Test.ItemInteractionTransport` and `Actor.SetItemInteractionTransport` with the
+`actor.ItemInteractionAuthInput` / `actor.ItemInteractionInventoryTransaction`
+constants. This is an explicit per-session setting: server addresses, resource
+packs, and authoritative-inventory flags do not select it automatically. Both
+modes send each click once and preserve queued action order. Entity interactions
+and item releases retain their standalone inventory-transaction encoding.
+
 Install the SDK in the addon:
 
 ```bash

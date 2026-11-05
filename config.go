@@ -10,6 +10,7 @@ import (
 
 	"github.com/restartfu/gophig"
 	"github.com/restartfu/gophig/codecs"
+	"github.com/smell-of-curry/go-test-bds/gotestbds/actor"
 )
 
 // Config controls how the runner connects bots to a server.
@@ -21,6 +22,9 @@ type Config struct {
 		// Bedrock server directly rather than at a proxy that terminates Xbox
 		// authentication: bots have no Xbox identity.
 		ServerAddress string
+		// ItemInteractionTransport is auth-input (BDS default) or
+		// inventory-transaction for servers using the legacy click handler.
+		ItemInteractionTransport string
 	}
 	Bots struct {
 		// Name is the display name of the first bot. Additional bots append
@@ -98,6 +102,7 @@ func DefaultConfig() Config {
 	c := Config{}
 	c.LogLevel = "info"
 	c.Network.ServerAddress = "127.0.0.1:19132"
+	c.Network.ItemInteractionTransport = string(actor.ItemInteractionAuthInput)
 	c.Bots.Name = "TestBot"
 	c.Bots.Count = 1
 	c.Viewer.Enabled = false
@@ -184,6 +189,9 @@ func ReadConfig() (Config, error) {
 //
 // @param c The configuration to modify in place.
 func applyEnv(c *Config) {
+	if v := os.Getenv("GOTESTBDS_ITEM_INTERACTION_TRANSPORT"); v != "" {
+		c.Network.ItemInteractionTransport = v
+	}
 	if v := os.Getenv("GOTESTBDS_ADDRESS"); v != "" {
 		c.Network.ServerAddress = v
 	}
@@ -323,6 +331,7 @@ func (p *packList) Set(v string) error {
 func applyFlags(c *Config) error {
 	set := flag.NewFlagSet(os.Args[0], flag.ContinueOnError)
 	address := set.String("address", c.Network.ServerAddress, "host:port of the Bedrock server to dial")
+	itemTransport := set.String("item-interaction-transport", c.Network.ItemInteractionTransport, "item-click packet: auth-input (BDS) or inventory-transaction (legacy servers)")
 	name := set.String("name", c.Bots.Name, "display name of the first bot")
 	count := set.Int("bots", c.Bots.Count, "number of bots to connect")
 	logLevel := set.String("log-level", c.LogLevel, "debug, info, warn or error")
@@ -362,8 +371,13 @@ func applyFlags(c *Config) error {
 	if *address == "" {
 		return fmt.Errorf("address must not be empty")
 	}
+	transport, err := actor.ParseItemInteractionTransport(*itemTransport)
+	if err != nil {
+		return err
+	}
 
 	c.Network.ServerAddress = *address
+	c.Network.ItemInteractionTransport = string(transport)
 	c.Bots.Name = *name
 	c.Bots.Count = *count
 	c.LogLevel = *logLevel
