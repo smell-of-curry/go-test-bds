@@ -78,6 +78,10 @@ jobs:
         working-directory: viewer
         run: npx vite build
 
+      - name: Unit regressions
+        working-directory: viewer
+        run: node tools/test-unit.mjs
+
       - name: Test
         working-directory: viewer
         env:
