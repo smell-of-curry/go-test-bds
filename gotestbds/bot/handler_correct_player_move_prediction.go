@@ -22,22 +22,22 @@ type CorrectPlayerMovePredictionHandler struct{}
 // NavigateToBlock hit context deadline with zero fruitless. MovePlayer
 // teleports still apply (different packet).
 func (*CorrectPlayerMovePredictionHandler) Handle(p packet.Packet, b *Bot, a *actor.Actor) error {
-	if a.Navigating() {
+	correct := p.(*packet.CorrectPlayerMovePrediction)
+	// Vehicle corrections describe the ridden entity, not the player's feet.
+	// They must not relocate or turn the player through this handler.
+	if correct.PredictionType != packet.PredictionTypePlayer || a.Navigating() {
 		return nil
 	}
 	if b != nil && b.logger != nil {
 		b.logger.Warn("mismatched movement", slog.String("src", "CorrectPlayerMovePrediction"))
 	}
-	correct := p.(*packet.CorrectPlayerMovePrediction)
 	pos := mcmath.Vec32To64(correct.Position)
-	rot := cube.Rotation{float64(correct.Rotation[0]), float64(correct.Rotation[1])}
-	// Corrections refer to an earlier tick. Preserve the current instructed look
-	// while input is held; applying an old yaw can reverse a forward walk.
-	if a.HoldingInput() {
-		rot = a.Rotation()
-	}
+	// Rotation is meaningful only for vehicle prediction (Mojang protocol 2225,
+	// CorrectPlayerMovePredictionPacketPayload). Player corrections commonly
+	// carry zero here. Applying it reset an idle bot's look after a walk ended.
+	// Actual server-directed player turns still arrive through MovePlayer.
 	feet := pos.Sub(mgl64.Vec3{0, eyeOffset})
-	a.Move(feet, rot)
+	a.Move(feet, a.Rotation())
 	a.SetVelocity(mgl64.Vec3{})
 	a.SetChunkLoadCenter(cube.PosFromVec3(feet))
 	return nil
