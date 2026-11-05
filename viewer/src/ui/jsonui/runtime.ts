@@ -61,6 +61,8 @@ export interface JsonUiRuntimeOptions {
    * @param loaded - Merged extension, or null when nothing loaded.
    */
   onExtensions?(loaded: ViewerHudExtension | null): void;
+  /** Publish the same merged language table used by pack labels/forms. */
+  onLanguage?(lang: Readonly<Record<string, string>>): void;
 }
 
 /** Public runtime handle (store subscriber). */
@@ -297,6 +299,7 @@ export function createJsonUiRuntime(opts: JsonUiRuntimeOptions): JsonUiRuntime {
     }
     opts.onExtensions?.(extension);
     const { files, globals, lang } = await loadUiFileSet(client);
+    opts.onLanguage?.(lang);
     // Nineslice / flipbook UV need sync size lookup on first paint.
     const preload = [
       ...PRELOAD_TEXTURES,

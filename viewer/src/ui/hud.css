@@ -29,11 +29,6 @@
   line-height: 1.35;
   white-space: pre-wrap;
   word-break: break-word;
-  transition: opacity 0.4s linear;
-}
-
-#player-hud .hud-chat-line.faded {
-  opacity: 0.22;
 }
 
 #player-hud .hud-title-wrap {

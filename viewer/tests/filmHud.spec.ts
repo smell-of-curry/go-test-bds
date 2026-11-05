@@ -774,3 +774,108 @@ test("bold authored tooltips wrap inside their painted background", async ({
   expect(result.left).toBeGreaterThanOrEqual(4);
   expect(result.right).toBeLessThanOrEqual(result.viewport - 4);
 });
+
+test("recorded tick-zero chat expires before a late film window without hiding fresh chat", async ({
+  page,
+}) => {
+  const joins = [
+    "§e%multiplayer.player.joined FilmCam",
+    "§e%multiplayer.player.joined FilmCam3",
+  ];
+  const frames = [
+    {
+      v: 1,
+      type: "hello",
+      bot: "FilmCam2",
+      schema: 1,
+      tickRate: 20,
+      radius: 8,
+    },
+    {
+      v: 1,
+      type: "keyframe",
+      bot: "FilmCam2",
+      tick: 0,
+      world: {},
+      actor: null,
+      columns: [],
+      entities: [],
+      ui: { messages: joins },
+    },
+    {
+      v: 1,
+      type: "chat",
+      bot: "FilmCam2",
+      tick: 8671,
+      text: "§aReady to battle",
+    },
+    {
+      v: 1,
+      type: "delta",
+      bot: "FilmCam2",
+      tick: 8672,
+      ui: { messages: [...joins, "§aReady to battle"] },
+    },
+  ];
+  await page.route("**/film/sse**", (route) =>
+    route.fulfill({
+      contentType: "text/event-stream",
+      body: frames
+        .map(
+          (frame) => `event: ${frame.type}\ndata: ${JSON.stringify(frame)}\n\n`,
+        )
+        .join(""),
+    }),
+  );
+  const result = await page.evaluate(async () => {
+    const { initHud } = await import("/src/ui/hud.ts");
+    const { Store } = await import("/src/store.ts");
+    const { installFilmMode } = await import("/film/client.ts");
+    let lang: Record<string, string> | undefined;
+    const hud = initHud({ particles: {} as any, getLang: () => lang });
+    const store = new Store();
+    store.subscribe((state) => hud.onFrame(state));
+    installFilmMode({
+      applyFrame: (frame) => store.apply(frame),
+      paint: () => hud.tick(performance.now()),
+      canvas: document.createElement("canvas"),
+      hideChrome: () => {},
+      glFinish: () => {},
+      setCameraTrack: () => {},
+    });
+    while (!window.__film!.loaded)
+      await new Promise((resolve) => setTimeout(resolve, 1));
+    const film = window.__film!;
+    film.applyThrough(0);
+    const initialCount = hud.chatCount;
+    lang = { "multiplayer.player.joined": "%s joined the game" };
+    film.setNow(5000);
+    hud.tick(performance.now());
+    const translated = document.querySelector(".hud-chat")!.textContent;
+    film.setNow(10_500);
+    hud.tick(performance.now());
+    const fadingAlpha = (
+      document.querySelector(".hud-chat-line") as HTMLElement
+    ).style.opacity;
+    film.setNow(11_000);
+    hud.tick(performance.now());
+    const expiredCount = hud.chatCount;
+    film.setNow(8672 * 50);
+    film.applyThrough(8672 * 50);
+    hud.tick(performance.now());
+    return {
+      initialCount,
+      translated,
+      fadingAlpha,
+      expiredCount,
+      finalCount: hud.chatCount,
+      finalText: document.querySelector(".hud-chat")!.textContent,
+    };
+  });
+  expect(result.initialCount).toBe(2);
+  expect(result.translated).toContain("FilmCam3 joined the game");
+  expect(Number(result.fadingAlpha)).toBeCloseTo(0.9375);
+  expect(result.expiredCount).toBe(0);
+  expect(result.finalCount).toBe(1);
+  expect(result.finalText).toBe("Ready to battle");
+});

@@ -4,10 +4,10 @@ import type { WorldState } from "../store";
 import { BlockBreakEffects } from "./effects";
 import { formatCodesToFragment, stripFormatCodes } from "./formatCodes";
 import { mojanglesLoaded } from "./mojangles";
+import { chatOpacity, localizeChatText } from "./chat";
 import "./hud.css";
 
 const CHAT_LIMIT = 8;
-const CHAT_FADE_MS = 10_000;
 const TICK_MS = 50; // 20 TPS
 const DEFAULT_FADE_IN = 10;
 const DEFAULT_STAY = 70;
@@ -22,6 +22,7 @@ interface ChatLine {
   el: HTMLElement;
   bornMs: number;
   text: string;
+  paintedText: string;
 }
 
 interface TimedText {
@@ -55,6 +56,8 @@ export interface HudHandle {
 export function initHud(opts: {
   particles: ParticleSystem;
   getParticleRegistry?: () => ParticleRegistry | null;
+  /** Pack languages can finish loading after a chat event arrives. */
+  getLang?: () => Readonly<Record<string, string>> | undefined;
 }): HudHandle {
   const root = document.createElement("div");
   root.id = "player-hud";
@@ -104,9 +107,12 @@ export function initHud(opts: {
     if (!plain || CHAT_NOISE_RE.test(plain)) return;
     const el = document.createElement("div");
     el.className = "hud-chat-line";
-    el.appendChild(formatCodesToFragment(text, { guiScale: 2, shadow: true }));
+    const paintedText = localizeChatText(text, opts.getLang?.());
+    el.appendChild(
+      formatCodesToFragment(paintedText, { guiScale: 2, shadow: true }),
+    );
     chatEl.appendChild(el);
-    chat.push({ el, bornMs: nowMs, text });
+    chat.push({ el, bornMs: nowMs, text, paintedText });
     while (chat.length > CHAT_LIMIT) {
       const old = chat.shift();
       old?.el.remove();
@@ -263,19 +269,26 @@ export function initHud(opts: {
       }
     },
     tick(nowMs: number): void {
-      // Chat can land before the TTF fetch finishes; swap spans for the
-      // pixel canvas once the outlines are in.
-      if (mojanglesLoaded()) {
-        for (const line of chat) {
-          if (!line.el.querySelector("canvas")) {
-            line.el.replaceChildren(
-              formatCodesToFragment(line.text, { guiScale: 2, shadow: true }),
-            );
-          }
+      for (let i = chat.length - 1; i >= 0; i--) {
+        const line = chat[i]!;
+        const opacity = chatOpacity(line.bornMs, nowMs);
+        if (opacity === 0) {
+          line.el.remove();
+          chat.splice(i, 1);
+          continue;
         }
-      }
-      for (const line of chat) {
-        line.el.classList.toggle("faded", nowMs - line.bornMs >= CHAT_FADE_MS);
+        // Repaint late language/font resources without restarting message age.
+        const paintedText = localizeChatText(line.text, opts.getLang?.());
+        if (
+          line.paintedText !== paintedText ||
+          (mojanglesLoaded() && !line.el.querySelector("canvas"))
+        ) {
+          line.paintedText = paintedText;
+          line.el.replaceChildren(
+            formatCodesToFragment(paintedText, { guiScale: 2, shadow: true }),
+          );
+        }
+        line.el.style.opacity = String(opacity);
       }
       renderTimed(titleEl, titleState, nowMs);
       renderTimed(subtitleEl, subtitleState, nowMs);

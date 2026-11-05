@@ -199,9 +199,11 @@ const particles = new ParticleSystem(
 );
 scene.particles = particles;
 let particleRegistry: ParticleRegistry | null = null;
+let chatLang: Readonly<Record<string, string>> | undefined;
 const hud = initHud({
   particles,
   getParticleRegistry: () => particleRegistry,
+  getLang: () => chatLang,
 });
 // Pack-driven JSON UI HUD (vanilla vitals + extension screens). Textures /
 // ui/*.json come from the hub's /packs + /pack/{id}/{path} + /asset routes.
@@ -214,6 +216,9 @@ try {
 void ensureMojangles(jsonUiAssetBase);
 const jsonUi = createJsonUiRuntime({
   assetBaseUrl: jsonUiAssetBase,
+  onLanguage(lang) {
+    chatLang = lang;
+  },
   onExtensions(loaded) {
     store.setTitleTokenClearDelay(loaded?.titleTokenClearDelayMs ?? {});
     const handle = window.__viewer;
