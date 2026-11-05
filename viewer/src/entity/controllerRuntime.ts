@@ -511,7 +511,12 @@ export class EntityAnimator {
       const view = this.serverPlayView(play, now);
       if (!view || view.weight <= 0) continue;
       this.host.setQuery("anim_time", view.animTime);
-      sampleAnimation(play.anim, view.animTime, view.weight, this.host, poses);
+      // Authored blend_weight multiplies the runtime controller's fade, just
+      // as it does for scripted/controller animations.
+      const weight = play.anim.blendWeight
+        ? view.weight * asNumber(this.evalNumber(play.anim.blendWeight))
+        : view.weight;
+      sampleAnimation(play.anim, view.animTime, weight, this.host, poses);
     }
   }
 
@@ -532,9 +537,9 @@ export class EntityAnimator {
   /**
    * Playhead for one server animation at `now`.
    *
-   * Length stops (`""`, `query.any_animation_finished`,
-   * `query.all_animations_finished`) end a non-looping animation at
-   * `animation_length`, then fade over `blendOutTime`. Other Molang is
+   * Completion queries stop after the first full pass, including looping
+   * animations. An empty stop expression preserves looping playback.
+   * Stopped animations fade over `blendOutTime`. Other Molang is
    * evaluated against the current host and latches the first true sample.
    *
    * @param play - Server play.
@@ -572,13 +577,18 @@ export class EntityAnimator {
    */
   private serverStopAt(play: ServerPlay, elapsed: number): number | null {
     if (isLengthStop(play.stopExpression)) {
-      if (play.anim.loop === true) return null;
       const len = play.anim.animationLength;
+      if (
+        play.anim.loop === true &&
+        (!play.stopExpression.trim() || !(len > 0))
+      ) {
+        return null;
+      }
       if (!(len > 0)) return elapsed > 0 ? 0 : null;
       return len;
     }
     if (play.stoppedAt >= 0) return play.stoppedAt;
-    const fin = isAnimationFinished(play.anim, elapsed);
+    const fin = hasAnimationPlayedOnce(play.anim, elapsed);
     this.host.setQuery("anim_time", elapsed);
     this.host.setQuery("any_animation_finished", fin ? 1 : 0);
     this.host.setQuery("all_animations_finished", fin ? 1 : 0);
@@ -706,18 +716,18 @@ export class EntityAnimator {
       // all/any_animations_finished for this state's anims.
       let allFinished = true;
       let anyFinished = false;
-      let hasNonLoop = false;
+      let hasAnimation = false;
       for (const ref of state.animations) {
         const anim = this.resolveAnim(ref.name);
-        if (!anim || anim.loop === true) continue;
-        hasNonLoop = true;
+        if (!anim) continue;
+        hasAnimation = true;
         const head = inst.playheads.get(ref.name);
         const t = head?.animTime ?? 0;
-        const fin = isAnimationFinished(anim, t);
+        const fin = hasAnimationPlayedOnce(anim, t);
         if (fin) anyFinished = true;
         else allFinished = false;
       }
-      if (!hasNonLoop) {
+      if (!hasAnimation) {
         allFinished = false;
         anyFinished = false;
       }
@@ -989,7 +999,27 @@ export function remapCurve(
 }
 
 /**
- * Stop expressions that mean "this non-looping animation has finished".
+ * Whether an animation has completed its first pass, even if it loops.
+ * Microsoft defines the any/all queries as "played through at least once":
+ * https://learn.microsoft.com/en-us/minecraft/creator/reference/content/molangreference/examples/molangconcepts/queryfunctions/query_any_animation_finished
+ * https://learn.microsoft.com/en-us/minecraft/creator/reference/content/molangreference/examples/molangconcepts/queryfunctions/query_all_animations_finished
+ * A lengthless loop has no completed pass; keep its existing open-ended life.
+ *
+ * @param anim - Animation definition.
+ * @param animTime - Unwrapped playhead time.
+ * @returns true after the first authored duration.
+ */
+function hasAnimationPlayedOnce(
+  anim: ParsedAnimation,
+  animTime: number,
+): boolean {
+  return anim.animationLength > 0
+    ? animTime >= anim.animationLength
+    : isAnimationFinished(anim, animTime);
+}
+
+/**
+ * Stop expressions that mean "this animation has played through once".
  *
  * @param expr - Molang from the packet. Empty counts.
  * @returns true when the play should end at `animation_length`.
