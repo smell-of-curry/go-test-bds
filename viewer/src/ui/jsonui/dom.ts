@@ -211,6 +211,7 @@ export function imageKeepsRatio(raw: unknown): boolean {
  * @param uvSize - Crop size, or null.
  * @param elemCss - Element box in CSS px.
  * @param keepRatio - Aspect-fit when true.
+ * @param fill - Cover the image box instead of fitting inside it.
  * @returns `background-size` and `background-position`.
  */
 export function fitImageBackgroundCss(
@@ -219,6 +220,7 @@ export function fitImageBackgroundCss(
   uvSize: [number, number] | null,
   elemCss: { w: number; h: number },
   keepRatio: boolean,
+  fill = false,
 ): { size: string; position: string } {
   const ew = Math.max(0, elemCss.w);
   const eh = Math.max(0, elemCss.h);
@@ -237,7 +239,7 @@ export function fitImageBackgroundCss(
   let ox = 0;
   let oy = 0;
   if (keepRatio && cropW > 0 && cropH > 0 && ew > 0 && eh > 0) {
-    if (ew * cropH > eh * cropW) {
+    if (ew * cropH > eh * cropW !== fill) {
       fitH = eh;
       fitW = eh * (cropW / cropH);
     } else {
@@ -507,6 +509,7 @@ function applyImage(
           canCrop ? uvSize! : null,
           elemCss,
           keep,
+          node.element.props.fill === true,
         );
         face.style.backgroundSize = css.size;
         face.style.backgroundPosition = css.position;
@@ -708,12 +711,13 @@ function applyLabel(
     return;
   }
   // Single-line boxes truncate with "...". Multi-line / max_width wrap.
-  const shown = labelClipsWithEllipsis(
+  const singleLine = labelClipsWithEllipsis(
     text,
     node.box.h,
     fontScale,
     node.element.props.max_width,
-  )
+  );
+  const shown = singleLine
     ? ellipsizeMojangles(text, node.box.w, fontScale)
     : text;
   // Bedrock clips; it does not shrink the font to fit the box.
@@ -742,6 +746,7 @@ function applyLabel(
       color: color ?? undefined,
       guiScale: opts.guiScale * fontScale,
       shadow: node.element.props.shadow === true,
+      maxWidth: singleLine ? undefined : node.box.w / fontScale,
     }),
   );
   // Block canvas ignores text-align. inline-block honors center/right
@@ -780,8 +785,19 @@ export function labelClipsWithEllipsis(
   return true;
 }
 
-function colorChannels(raw: unknown): [number, number, number] | null {
+/**
+ * Read a numeric RGB tint or the black/white names used by vanilla UI.
+ * @param raw - Authored color property.
+ * @returns Normalized RGB channels, or null for an unresolved color.
+ */
+export function colorChannels(raw: unknown): [number, number, number] | null {
+  // Named colors occur in vanilla UI too (for example persona_popups).
+  // Some packs wrap a name in a one-item array; retain the same meaning.
+  const name = Array.isArray(raw) && raw.length === 1 ? raw[0] : raw;
+  if (name === "black") return [0, 0, 0];
+  if (name === "white") return [1, 1, 1];
   if (!Array.isArray(raw) || raw.length < 3) return null;
+  if (!raw.slice(0, 3).every((v) => Number.isFinite(Number(v)))) return null;
   const r = clamp01(Number(raw[0]));
   const g = clamp01(Number(raw[1]));
   const b = clamp01(Number(raw[2]));

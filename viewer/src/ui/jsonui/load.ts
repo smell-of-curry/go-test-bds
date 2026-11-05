@@ -10,6 +10,8 @@ import type { UiFileSource, UiRawFile, PropertyBag } from "./types";
 export interface UiPackInfo {
   id: string;
   priority?: number;
+  /** Optional complete UI-file inventory; absent hubs use bounded probing. */
+  uiFiles?: string[];
 }
 
 /**
@@ -98,13 +100,29 @@ export async function loadUiFileSet(client: UiLoadClient): Promise<UiFileSet> {
 
   const files: UiFileSource[] = [];
   for (const pack of packs) {
-    for (const path of paths) {
-      const doc = await client.fetchPackJson<unknown>(pack.id, path);
-      if (doc == null) continue;
-      const raw = parseUiRawFile(doc);
-      if (!raw) continue;
-      files.push({ packId: pack.id, path, raw });
-    }
+    const inventory = Array.isArray(pack.uiFiles)
+      ? new Set(pack.uiFiles.map(normalizeUiPath))
+      : null;
+    const packPaths = inventory
+      ? paths.filter((path) => inventory.has(path))
+      : paths;
+    // A real stack can have dozens of packs and hundreds of UI definitions.
+    // Serial misses across that cross-product can outlast the first film frame.
+    // Bound concurrency while retaining authored file order and pack priority.
+    const loaded = new Array<UiFileSource | null>(packPaths.length).fill(null);
+    let next = 0;
+    await Promise.all(
+      Array.from({ length: Math.min(8, packPaths.length) }, async () => {
+        while (next < packPaths.length) {
+          const index = next++;
+          const path = packPaths[index]!;
+          const doc = await client.fetchPackJson<unknown>(pack.id, path);
+          const raw = doc == null ? null : parseUiRawFile(doc);
+          if (raw) loaded[index] = { packId: pack.id, path, raw };
+        }
+      }),
+    );
+    for (const file of loaded) if (file) files.push(file);
   }
   return { files, globals, lang };
 }
@@ -130,7 +148,9 @@ export function parseLangFile(text: string): Record<string, string> {
     let value = rawLine.slice(eq + 1);
     const tab = value.indexOf("\t");
     if (tab >= 0) value = value.slice(0, tab);
-    out[key] = value;
+    // Language-file escapes, not general display-text escapes. Vanilla uses
+    // ~LINEBREAK~; addon language tables also use the equivalent backslash-n.
+    out[key] = value.replace(/\\n|~LINEBREAK~/g, "\n");
   }
   return out;
 }

@@ -19,10 +19,20 @@
 import { once } from "node:events";
 import { createServer } from "node:http";
 import { pipeline } from "node:stream/promises";
-import { createReadStream, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import {
+  createReadStream,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  realpathSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { open } from "node:fs/promises";
 import { createInterface } from "node:readline";
-import { dirname, join, relative, sep } from "node:path";
+import { dirname, isAbsolute, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -43,6 +53,7 @@ const MIME = {
   ".ogg": "audio/ogg",
   ".txt": "text/plain; charset=utf-8",
   ".svg": "image/svg+xml",
+  ".ttf": "font/ttf",
 };
 
 /**
@@ -53,6 +64,8 @@ const MIME = {
  * @param {string} [opts.appDir]
  * @param {string} [opts.packsFrom] live hub origin, no trailing slash
  * @param {number} [opts.memoryTier]
+ * @param {string} [opts.extensionsDir] defaults to <take>/extensions
+ * @param {string} [opts.fontDir] defaults to <take>/fonts; never bundled
  * @returns {Promise<{ url: string, close: () => Promise<void> }>}
  */
 export async function startFilmServer(opts) {
@@ -60,6 +73,11 @@ export async function startFilmServer(opts) {
   const memoryTier = opts.memoryTier ?? 5;
   const packsFrom = opts.packsFrom ? opts.packsFrom.replace(/\/$/, "") : "";
   const mirrorDir = join(takeDir, "packs-mirror");
+  const extensionsDir = opts.extensionsDir ?? join(takeDir, "extensions");
+  const fontDir = opts.fontDir ?? join(takeDir, "fonts");
+  if (opts.extensionsDir && !safeLocalFile(extensionsDir, "manifest.json")) {
+    throw new Error(`extension manifest missing at ${extensionsDir}`);
+  }
   const stack = loadStack(takeDir, memoryTier);
   const dev = opts.dev
     ? await (
@@ -92,8 +110,39 @@ export async function startFilmServer(opts) {
    */
   async function handle(req, res) {
     const url = new URL(req.url ?? "/", "http://127.0.0.1");
-    const path = decodeURIComponent(url.pathname);
-    if (path.includes("..")) return end(res, 400, "bad path");
+    let path;
+    try {
+      path = decodeURIComponent(url.pathname);
+    } catch {
+      return end(res, 400, "bad path");
+    }
+    if (path.includes("..") || path.includes("\\") || path.includes("\0"))
+      return end(res, 400, "bad path");
+
+    if (path === "/viewer.json") {
+      if (safeLocalFile(extensionsDir, "manifest.json")) {
+        return json(res, { v: 1, extensions: "/extensions/" });
+      }
+      if (await mirrorSend(res, path)) return;
+      return json(res, { v: 1, extensions: "" });
+    }
+    if (path.startsWith("/extensions/")) {
+      const file = safeLocalFile(
+        extensionsDir,
+        path.slice("/extensions/".length),
+      );
+      if (file) return sendFile(res, file);
+      if (!opts.extensionsDir && (await mirrorSend(res, path))) return;
+      return end(res, 404, "missing extension");
+    }
+    if (path.startsWith("/font/")) {
+      const name = path.slice("/font/".length);
+      if (!/^[^/\\]+\.ttf$/i.test(name)) return end(res, 400, "bad font name");
+      const file = safeLocalFile(fontDir, name);
+      if (file) return sendFile(res, file);
+      if (!opts.fontDir && (await mirrorSend(res, path))) return;
+      return end(res, 404, "missing font");
+    }
 
     if (path === "/film/sse") {
       const bot = url.searchParams.get("bot") ?? "";
@@ -143,7 +192,8 @@ export async function startFilmServer(opts) {
     let rel = path;
     if (rel === "/") rel = "/index.html";
     const abs = join(appDir, rel.slice(1));
-    if (!existsSync(abs) || !statSync(abs).isFile()) return end(res, 404, "not found");
+    if (!existsSync(abs) || !statSync(abs).isFile())
+      return end(res, 404, "not found");
     sendFile(res, abs);
   }
 
@@ -155,16 +205,24 @@ export async function startFilmServer(opts) {
    * @returns {Promise<boolean>} true when the response was written
    */
   async function mirrorSend(res, reqPath) {
-    const local = join(mirrorDir, reqPath);
-    if (existsSync(local) && statSync(local).isFile()) {
-      sendFile(res, local);
+    const rel = reqPath.replace(/^\/+/, "");
+    const cached = safeLocalFile(mirrorDir, rel);
+    if (cached) {
+      sendFile(res, cached);
       return true;
     }
     if (!packsFrom) return false;
     const upstream = await fetch(`${packsFrom}${reqPath}`);
     if (!upstream.ok) return false;
     const buf = Buffer.from(await upstream.arrayBuffer());
-    mkdirSync(dirname(local), { recursive: true });
+    // Extension URLs must keep pointing at this origin when replayed offline.
+    if (reqPath === "/viewer.json") {
+      const config = JSON.parse(buf.toString("utf8"));
+      if (config.extensions && config.extensions !== "/extensions/") {
+        throw new Error("film mirror requires hub extensions at /extensions/");
+      }
+    }
+    const local = safeMirrorDestination(mirrorDir, rel);
     writeFileSync(local, buf);
     const type = upstream.headers.get("content-type") ?? contentType(local);
     res.writeHead(200, { "Content-Type": type });
@@ -172,9 +230,12 @@ export async function startFilmServer(opts) {
     return true;
   }
 
-  await new Promise((resolve) => server.listen(opts.port ?? 0, "127.0.0.1", resolve));
+  await new Promise((resolve) =>
+    server.listen(opts.port ?? 0, "127.0.0.1", resolve),
+  );
   const addr = server.address();
-  if (!addr || typeof addr === "string") throw new Error("film server has no port");
+  if (!addr || typeof addr === "string")
+    throw new Error("film server has no port");
   const url = `http://127.0.0.1:${addr.port}`;
   console.error(
     `film server ${url} packs=${stack ? stack.list.map((p) => p.id).join(",") || "none" : packsFrom || "none"}`,
@@ -187,6 +248,53 @@ export async function startFilmServer(opts) {
         void dev?.close();
       }),
   };
+}
+
+/** Return only regular files whose canonical path stays inside the root. */
+function safeLocalFile(root, rel) {
+  if (!rel || isAbsolute(rel) || rel.split(/[\\/]/).some((p) => p === ".."))
+    return "";
+  try {
+    const base = realpathSync(root);
+    const file = realpathSync(join(base, rel));
+    const fromRoot = relative(base, file);
+    if (
+      isAbsolute(fromRoot) ||
+      fromRoot === ".." ||
+      fromRoot.startsWith(`..${sep}`)
+    )
+      return "";
+    return statSync(file).isFile() ? file : "";
+  } catch {
+    return "";
+  }
+}
+
+/** A mirror miss must not write through an existing symlink to another tree. */
+function safeMirrorDestination(root, rel) {
+  if (!rel || isAbsolute(rel) || rel.split(/[\\/]/).some((p) => p === ".."))
+    throw new Error("bad mirror path");
+  mkdirSync(root, { recursive: true });
+  let dir = realpathSync(root);
+  const parts = rel.split("/");
+  for (const part of parts.slice(0, -1)) {
+    dir = join(dir, part);
+    try {
+      const info = lstatSync(dir);
+      if (!info.isDirectory() || info.isSymbolicLink())
+        throw new Error("unsafe mirror directory");
+    } catch (err) {
+      if (err.code !== "ENOENT") throw err;
+      mkdirSync(dir);
+    }
+  }
+  const file = join(dir, parts[parts.length - 1]);
+  try {
+    if (lstatSync(file).isSymbolicLink()) throw new Error("unsafe mirror file");
+  } catch (err) {
+    if (err.code !== "ENOENT") throw err;
+  }
+  return file;
 }
 
 /**
@@ -269,12 +377,15 @@ function loadStack(takeDir, memoryTier) {
   const tag = typeof take.baselineTag === "string" ? take.baselineTag : "";
   const vanilla = tag ? vanillaDir(tag) : "";
   const cacheDir =
-    typeof take.cacheDir === "string" && existsSync(take.cacheDir) ? take.cacheDir : "";
+    typeof take.cacheDir === "string" && existsSync(take.cacheDir)
+      ? take.cacheDir
+      : "";
   /** @type {{ id: string, uuid: string, version: string, name: string, priority: number, dir: string }[]} */
   const packs = [];
   if (
     vanilla &&
-    (existsSync(join(vanilla, "manifest.json")) || existsSync(join(vanilla, "blocks.json")))
+    (existsSync(join(vanilla, "manifest.json")) ||
+      existsSync(join(vanilla, "blocks.json")))
   ) {
     packs.push({
       id: "vanilla",
@@ -349,6 +460,11 @@ function loadStack(takeDir, memoryTier) {
       name: pack.name,
       priority: pack.priority,
       fileCount: map.size,
+      // Optional inventory avoids thousands of known-missing UI requests
+      // across entity-only packs while retaining every override layer.
+      uiFiles: [...map.keys()].filter(
+        (path) => path.startsWith("ui/") && path.endsWith(".json"),
+      ),
     });
   }
   return { list, index, files, byPack };
@@ -460,7 +576,10 @@ function sanitizeVersion(version) {
  * @param {unknown} body
  */
 function json(res, body) {
-  res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+  res.writeHead(200, {
+    "Content-Type": "application/json",
+    "Cache-Control": "no-store",
+  });
   res.end(JSON.stringify(body));
 }
 
@@ -489,6 +608,9 @@ function contentType(abs) {
  * @param {string} abs
  */
 function sendFile(res, abs) {
-  res.writeHead(200, { "Content-Type": contentType(abs), "Cache-Control": "no-store" });
+  res.writeHead(200, {
+    "Content-Type": contentType(abs),
+    "Cache-Control": "no-store",
+  });
   res.end(readFileSync(abs));
 }

@@ -27,6 +27,35 @@ function source(map: Record<string, string | number | boolean>): BindingSource {
 }
 
 describe("applyBindings global", () => {
+  it("resolves variable binding metadata before collection lookup", () => {
+    const out: PropertyBag = {};
+    applyBindings(
+      el(
+        [
+          {
+            binding_type: "$kind",
+            binding_collection_name: "$collection",
+            binding_name: "$binding",
+            binding_name_override: "$target",
+          },
+        ],
+        {
+          $kind: "collection",
+          $collection: "fields",
+          $binding: "#value",
+          $target: "#toggle_state",
+        },
+      ),
+      source({}),
+      out,
+      {
+        collection: (collection, binding) =>
+          collection === "fields" && binding === "#value" ? true : undefined,
+      },
+    );
+    assert.equal(out.toggle_state, true);
+  });
+
   it("copies binding_name → binding_name_override", () => {
     const out: PropertyBag = {};
     applyBindings(

@@ -122,11 +122,13 @@ export function createJsonUiRuntime(opts: JsonUiRuntimeOptions): JsonUiRuntime {
   let forms: FormRenderer | null = null;
   let lastFrameMs = 0;
   let pendingState: WorldState | null = null;
+  let latestState: WorldState | null = null;
   let lastFormKey = "";
   let lastHover: number | null = null;
 
   const textureInfoCache = new Map<string, TextureInfo>();
   const textureInfoInflight = new Map<string, Promise<void>>();
+  const textureInfoAttempted = new Set<string>();
   const assetHttp = new AssetClient(assetBase || "http://127.0.0.1");
   // Golden / capture harness polls these before screenshot.
   // pending = in-flight texture-info fetches; requested/epoch bump in paint.
@@ -153,6 +155,21 @@ export function createJsonUiRuntime(opts: JsonUiRuntimeOptions): JsonUiRuntime {
       return `${assetBase}/asset/${rel}`;
     },
     textureInfo(path: string): TextureInfo | undefined {
+      // Pack forms can bind arbitrary icons and button faces, beyond the
+      // startup chrome list. Their natural dimensions/nineslices affect paint.
+      // Repaint after loading without advancing the paused film clock.
+      if (assetBase && !textureInfoAttempted.has(path)) {
+        void preloadTextureInfo(path).then(() => {
+          // A form can request dozens of new faces together. Rebuilding its
+          // full collection tree after every response starves later responses
+          // and capture readiness; the last response publishes the batch.
+          if (!hud || !latestState || pendingWin.__jsonUiTexturesPending !== 0)
+            return;
+          lastFormKey = "";
+          lastFrameMs = hud.onFrame(latestState);
+          projectForm(latestState);
+        });
+      }
       return textureInfoCache.get(path);
     },
   };
@@ -166,6 +183,8 @@ export function createJsonUiRuntime(opts: JsonUiRuntimeOptions): JsonUiRuntime {
     if (textureInfoCache.has(path) || !assetBase) return;
     const existing = textureInfoInflight.get(path);
     if (existing) return existing;
+    if (textureInfoAttempted.has(path)) return;
+    textureInfoAttempted.add(path);
 
     pendingWin.__jsonUiTexturesPending =
       (pendingWin.__jsonUiTexturesPending ?? 0) + 1;
@@ -236,7 +255,10 @@ export function createJsonUiRuntime(opts: JsonUiRuntimeOptions): JsonUiRuntime {
   // HUD paints into a child layer so form host survives host.replaceChildren().
   const hudLayer = document.createElement("div");
   hudLayer.className = "jsonui-hud-layer";
-  hudLayer.style.cssText = "position:absolute;inset:0;pointer-events:none;";
+  // HUD control layers are local to their screen. They must never escape
+  // above an open server form (for example a high-layer battle log panel).
+  hudLayer.style.cssText =
+    "position:absolute;inset:0;pointer-events:none;z-index:0;";
   host.appendChild(hudLayer);
 
   const formsHost = document.createElement("div");
@@ -275,13 +297,15 @@ export function createJsonUiRuntime(opts: JsonUiRuntimeOptions): JsonUiRuntime {
     }
     opts.onExtensions?.(extension);
     const { files, globals, lang } = await loadUiFileSet(client);
-    resolver = buildResolver(files, globals);
     // Nineslice / flipbook UV need sync size lookup on first paint.
     const preload = [
       ...PRELOAD_TEXTURES,
       ...(extension?.preloadTextures ?? []),
     ];
     await Promise.all(preload.map((p) => preloadTextureInfo(p)));
+    // The public resolver also signals jsonUiReady. Publish it only after
+    // preloads, then mount/apply the first state in the same JS turn.
+    resolver = buildResolver(files, globals);
     // Layout viewport tracks the real host size (full window). A fixed
     // 1024x576 letterbox made gui space 512x288 so the sidebar's
     // `222.22%y x 192` dock ate most of the still — live run-43 black slab.
@@ -322,12 +346,21 @@ export function createJsonUiRuntime(opts: JsonUiRuntimeOptions): JsonUiRuntime {
   function projectForm(state: WorldState): void {
     if (!forms) return;
     const form = state.ui?.form ?? null;
-    const key = form ? `${form.title}\0${(form.buttons ?? []).join("\0")}` : "";
+    // Content, button icons and form type may change without any label change
+    // (for example a new turn or page of an inventory form).
+    const key = form ? JSON.stringify(form) : "";
     if (key !== lastFormKey) {
-      lastFormKey = key;
       lastHover = null;
-      if (form) forms.show(form);
-      else forms.hide();
+      try {
+        if (form) forms.show(form);
+        else forms.hide();
+      } catch (err) {
+        host.dataset.jsonuiError =
+          err instanceof Error ? err.message : String(err);
+        throw err;
+      }
+      delete host.dataset.jsonuiError;
+      lastFormKey = key;
     }
     if (state.formHover !== lastHover) {
       lastHover = state.formHover;
@@ -343,6 +376,7 @@ export function createJsonUiRuntime(opts: JsonUiRuntimeOptions): JsonUiRuntime {
     },
     getResolver: () => resolver,
     onFrame(state: WorldState): void {
+      latestState = state;
       if (!hud) {
         pendingState = state;
         return;

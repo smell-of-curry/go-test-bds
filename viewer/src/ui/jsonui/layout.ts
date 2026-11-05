@@ -184,27 +184,6 @@ function layoutElement(
   }
 
   if (el.type === "stack_panel") {
-    // Collection hosts sized to the parent (100%, not %c) overlay factory
-    // children so they share one origin. `stackFactoryChildNames` opts a
-    // child out: those `$offset`s compensate for stack index and must flow.
-    if (el.props.factory && el.props.collection_name) {
-      const hSpec = parseSize(readSizePair(el.props.size)[1]);
-      if (
-        !hSpec.needsChildren &&
-        !hSpec.isDefault &&
-        !factoryUsesStackCompensatedOffsets(el, opts)
-      ) {
-        return layoutFactoryOverlay(
-          el,
-          parentBox,
-          viewport,
-          opts,
-          fill,
-          visible,
-          layer,
-        );
-      }
-    }
     return layoutStack(el, parentBox, viewport, opts, fill, visible, layer);
   }
   if (el.type === "grid") {
@@ -490,25 +469,10 @@ function layoutStack(
   const childEls = visibleControls(el.controls);
   const childParsed = childEls.map((c) => {
     const sz = readSizePair(c.element.props.size);
-    let w = parseSize(sz[0]);
+    const w = parseSize(sz[0]);
     const h = parseSize(sz[1]);
     const overlayGutter =
       orientation === "horizontal" && isHorizontalOverlayGutter(c.element);
-    // Horizontal stacks: bare `100%` beside fixed *flow* siblings fills the
-    // remainder. Treating it as 100% of the parent overflows the fixed sibling.
-    // Overlay gutters (px × %c) do not shrink a `100%` / `fill` sibling —
-    // icons sit on the full-width button.
-    if (
-      orientation === "horizontal" &&
-      !overlayGutter &&
-      childEls.some(
-        (o) => o.id !== c.id && !isHorizontalOverlayGutter(o.element),
-      ) &&
-      typeof sz[0] === "string" &&
-      sz[0].trim() === "100%"
-    ) {
-      w = parseSize("fill");
-    }
     return { child: c, w, h, overlayGutter };
   });
 
@@ -672,14 +636,27 @@ function layoutStack(
       childFill.remainingW = m.mainFill ? perFill : selfBox.w;
     }
 
-    // Size against the full stack; force top_left so flow owns placement.
-    const stacked = layoutElementInSlot(
-      c.element,
+    // Factory slots own generated roots' placement; the host retains its
+    // authored offset. Ordinary stack children default to the slot origin,
+    // while explicit anchors still align the cross axis (a centered icon).
+    const stacked = layoutElement(
+      {
+        ...c.element,
+        props: {
+          ...c.element.props,
+          anchor_from: el.props.factory
+            ? "top_left"
+            : (c.element.props.anchor_from ?? "top_left"),
+          anchor_to: el.props.factory
+            ? "top_left"
+            : (c.element.props.anchor_to ?? "top_left"),
+          ...(el.props.factory ? { offset: [0, 0] } : {}),
+        },
+      },
       selfBox,
       viewport,
       opts,
       childFill,
-      /* forceTopLeft */ true,
     );
 
     if (orientation === "vertical") {
@@ -724,22 +701,6 @@ function layoutStack(
 }
 
 /**
- * True when a factory child is listed in `stackFactoryChildNames`. Those
- * `$offset` Y values only land correctly when each child is stacked.
- *
- * @param el - Factory collection host (already expanded).
- * @returns whether layout must use {@link layoutStack} instead of overlay.
- */
-function factoryUsesStackCompensatedOffsets(
-  el: ResolvedElement,
-  opts: LayoutOptions,
-): boolean {
-  const names = opts.rules?.stackFactoryChildNames;
-  if (!names?.length) return false;
-  return el.controls.some((c) => names.includes(c.element.name));
-}
-
-/**
  * Horizontal stack child that should paint at the stack origin without
  * consuming main-axis flow — e.g. `server_form.panel_name` (`[34, "100%c"]`)
  * beside a `fill` ActionForm button. Real client puts the icon ON the button;
@@ -753,93 +714,6 @@ function isHorizontalOverlayGutter(el: ResolvedElement): boolean {
   if (typeof sz[0] !== "number" || !Number.isFinite(sz[0])) return false;
   if (typeof sz[1] !== "string") return false;
   return /%c/i.test(sz[1].trim());
-}
-
-/**
- * Lay out a factory collection host as overlapping children (panel-like).
- *
- * @param el - stack_panel with factory + collection_name.
- * @param parentBox - Parent box.
- * @param viewport - Viewport.
- * @param opts - Layout options.
- * @param fill - Remaining fill space.
- * @param visible - Host visibility.
- * @param layer - Host layer.
- * @returns layout node.
- */
-function layoutFactoryOverlay(
-  el: ResolvedElement,
-  parentBox: LayoutBox,
-  viewport: Viewport,
-  opts: LayoutOptions,
-  fill: { remainingW: number; remainingH: number },
-  visible: boolean,
-  layer: number,
-): LayoutNode {
-  const sizeSpec = readSizePair(el.props.size);
-  const wParsed = parseSize(sizeSpec[0]);
-  const hParsed = parseSize(sizeSpec[1]);
-  const boxSize = resolveSizePair(
-    wParsed,
-    hParsed,
-    {
-      parentW: parentBox.w,
-      parentH: parentBox.h,
-      selfW: 0,
-      selfH: 0,
-      childrenW: 0,
-      childrenH: 0,
-      maxChildW: 0,
-      maxChildH: 0,
-      viewportW: viewport.width,
-      viewportH: viewport.height,
-      remainingW: fill.remainingW,
-      remainingH: fill.remainingH,
-    },
-    el,
-    opts,
-  );
-  const offset = resolveOffset(el.props.offset, boxSize, parentBox, viewport);
-  const pos = positionWithAnchors(
-    parentBox,
-    boxSize,
-    readAnchor(el.props.anchor_from, "center"),
-    readAnchor(el.props.anchor_to, "center"),
-    offset,
-  );
-  const selfBox: LayoutBox = {
-    x: pos.x,
-    y: pos.y,
-    w: boxSize.w,
-    h: boxSize.h,
-  };
-  const children = layoutControls(el.controls, selfBox, viewport, opts);
-  return { element: el, box: selfBox, children, layer, visible };
-}
-
-/** Like layoutElement but optionally forces top_left anchors (stack slots). */
-function layoutElementInSlot(
-  el: ResolvedElement,
-  slot: LayoutBox,
-  viewport: Viewport,
-  opts: LayoutOptions,
-  fill: { remainingW: number; remainingH: number },
-  forceTopLeft: boolean,
-): LayoutNode {
-  if (!forceTopLeft || el.type === "stack_panel" || el.type === "grid") {
-    return layoutElement(el, slot, viewport, opts, fill);
-  }
-  // Clone props with forced anchors for the stack slot pass.
-  const forced: ResolvedElement = {
-    ...el,
-    props: {
-      ...el.props,
-      anchor_from: "top_left",
-      anchor_to: "top_left",
-      // Offset still applies within the slot.
-    },
-  };
-  return layoutElement(forced, slot, viewport, opts, fill);
 }
 
 function layoutGrid(

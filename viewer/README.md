@@ -92,11 +92,51 @@ and applies frames from `window.__film` when their tick is due
 paused, then stepped with `runFor`. `performance.now` is pinned to the output
 timestamp on top of that, because the clock's install log replays the wall gap
 between `install` and `pauseAt` (about 1 ms) and that is enough to make two
-runs disagree. Each output frame is `canvas.toDataURL` in the same turn as the
-draw (`preserveDrawingBuffer` is already on). Diagnostic UI, HUD, crosshair, and name tags are hidden;
-`--hud` / `--nametags` put those back. View bobbing stays off. The default
+runs disagree. Cinematic frames use `canvas.toDataURL` in the same turn as the
+draw (`preserveDrawingBuffer` is already on). `--hud` captures the complete
+viewport, including the game HUD and pack JSON UI forms, after fonts, textures
+and pixels settle at that virtual instant. It requires a real Mojangles font;
+missing fonts or visible UI textures fail the render instead of filming fallback
+text or blank chrome. Diagnostic UI and crosshair stay hidden; `--nametags`
+restores player name tags. View bobbing stays off. The default
 camera is the actor (first person), including server camera instructions.
 `--camera camera.json` replaces that with an authored track.
+
+Offline UI resources can live in `<take>/extensions` (with `manifest.json`) and
+`<take>/fonts/Mojangles.ttf`, or be selected with `--extensions <dir>` and
+`--font-dir <dir>`. The font is supplied from a local Minecraft installation and
+is never bundled. `--packs-from <hub>` also mirrors `/viewer.json`, extension
+modules and fonts as requested, so a warmed take can replay after the hub is
+disconnected. Explicit directory options override that mirror.
+The offline `/packs` descriptors include a `uiFiles` inventory so UI loading
+skips known missing files in entity-only packs. Hubs without that optional
+inventory use bounded parallel requests; pack and definition order is preserved.
+
+Forms use their pack's JSON UI definitions, collection bindings, textures,
+font metrics and registered extension routes. Recorded hover indices select
+the authored hover face; disabled buttons select the locked face. Custom
+`hover_text_renderer` controls display their bound tooltip text. Interactive
+tooltips follow pointer movement; offline recordings contain only a button
+index, so tooltip placement uses that button's center. Tooltip chrome and this
+fallback placement are approximations pending a matched native-client reference.
+Pressed-pointer timing is not recorded. This implements JSON UI form playback;
+Ore UI is a separate runtime and is not implemented by this renderer.
+Two-button message forms use the pack's `popup_dialog` template with native
+modal bindings. Custom forms currently replay labels, headers, dividers,
+toggle defaults and closed dropdown selections. Input fields, sliders,
+dropdown expansion and live form editing are not implemented. Invalid recorded
+custom-form JSON or unsupported field types fail rather than silently showing
+an empty form. Conditional template variables, named black/white colors and
+image `fill` are applied by the generic renderer. These capabilities still
+require matched native-client screenshots before claiming pixel parity.
+Factory stacks now place generated roots in flow slots even with a definite
+height; the host retains its offset, while generated-root offsets and anchors
+do not displace the slot. Ordinary stack children start at the slot origin,
+honor explicit cross-axis anchors, and retain authored percentage widths.
+These placement rules agree with the battle UI in the native-client recording
+[The final showdown! at 12:50](https://www.youtube.com/watch?v=YdFfoCAE1Ic&t=770s),
+using the same authored layout positions. That historical, compressed reference
+is layout evidence, not a matched-version pixel comparison.
 
 ```bash
 npm run film -- render \

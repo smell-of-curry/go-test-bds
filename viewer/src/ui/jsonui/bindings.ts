@@ -207,22 +207,8 @@ function makeScope(
 ): ExprScope {
   return {
     binding(name: string): BindingValue | undefined {
-      const fromOut = out[name];
-      if (
-        typeof fromOut === "string" ||
-        typeof fromOut === "number" ||
-        typeof fromOut === "boolean"
-      ) {
-        return fromOut;
-      }
-      const hashed = out[`#${name}`];
-      if (
-        typeof hashed === "string" ||
-        typeof hashed === "number" ||
-        typeof hashed === "boolean"
-      ) {
-        return hashed;
-      }
+      const fromOut = readControlProp(out, name);
+      if (fromOut !== undefined) return fromOut;
       if (lookup) {
         const v = lookup(name);
         if (v !== undefined) return v;
@@ -262,7 +248,13 @@ function readControlProp(
   props: PropertyBag,
   name: string,
 ): BindingValue | undefined {
-  const v = props[name] ?? props[`#${name}`];
+  const bag = props.property_bag;
+  const nested =
+    bag && typeof bag === "object" && !Array.isArray(bag)
+      ? (bag as PropertyBag)
+      : {};
+  const v =
+    props[name] ?? props[`#${name}`] ?? nested[name] ?? nested[`#${name}`];
   if (
     typeof v === "string" ||
     typeof v === "number" ||
@@ -300,11 +292,43 @@ export function applyBindings(
   opts?: ApplyBindingsOptions,
 ): PropertyBag {
   const props = element.props;
+  // Toggle state is an engine property even before any user interaction. Other
+  // controls (notably dropdown popups) bind their visibility to this value.
+  if (
+    (element.type === "toggle" || element.type === "dropdown") &&
+    out.toggle_state === undefined
+  ) {
+    out.toggle_state = out.toggle_default_state === true;
+  }
   const scope = makeScope(source, out, props, opts?.lookup);
 
   const viewsOnly = opts?.viewsOnly === true;
 
-  for (const raw of element.bindings) {
+  for (const authored of element.bindings) {
+    // Metadata can itself be supplied through variables. Vanilla dropdowns
+    // also use expressions such as source_control_name: "($dropdown_name)".
+    const raw: PropertyBag = {};
+    for (const [key, original] of Object.entries(authored)) {
+      let value = original;
+      for (let i = 0; i < 8 && typeof value === "string"; i++) {
+        const expanded = expandBareVariable(value, props);
+        if (expanded === value) break;
+        value = expanded;
+      }
+      if (
+        typeof value === "string" &&
+        value.trim().startsWith("(") &&
+        key !== "source_property_name" &&
+        key !== "binding_name"
+      ) {
+        try {
+          value = evalExpr(parseExpr(value), scope);
+        } catch {
+          // Leave unrecognized metadata inert instead of guessing a name.
+        }
+      }
+      raw[key] = value;
+    }
     if (raw.ignored === true) continue;
 
     const condition =

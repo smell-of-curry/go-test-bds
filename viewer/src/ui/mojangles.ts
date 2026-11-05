@@ -348,6 +348,8 @@ export interface LayoutPaint {
   /** CSS pixel scale. 1 design pixel → this many CSS pixels. */
   guiScale: number;
   fontScale?: number;
+  /** Wrap width in design pixels, before CSS/gui scaling. */
+  maxWidth?: number;
 }
 
 /**
@@ -370,9 +372,14 @@ export function layoutRuns(
   cssH: number;
 } {
   const scale = paint.fontScale ?? 1;
-  const lines = splitRuns(runs);
+  const lines = splitRuns(runs).flatMap((line) =>
+    wrapPaintLine(font, line, paint.maxWidth),
+  );
   const laid = lines.map((line) => layoutLine(font, line));
-  const contentW = laid.reduce((m, l) => Math.max(m, l.width), 1);
+  const contentW = laid.reduce(
+    (m, l) => Math.max(m, paint.maxWidth ? lineInkWidth(l) : l.width),
+    1,
+  );
   const shadow = paint.shadow ? 1 : 0;
   const linePitch = Math.max(CELL_PX, LABEL_LINE_FOR_PAINT);
   const w = contentW + shadow;
@@ -421,6 +428,50 @@ function splitRuns(runs: PaintRun[]): PaintRun[][] {
       if (part) lines[lines.length - 1]!.push({ ...run, text: part });
     });
   }
+  return lines;
+}
+
+/**
+ * Wrap one styled paragraph using actual glyph advances, preserving colors
+ * and bold/italic state across inserted line breaks.
+ * @param font - Parsed Mojangles face.
+ * @param runs - One paragraph's styled runs.
+ * @param maxWidth - Optional design-pixel width.
+ * @returns One or more wrapped lines.
+ */
+function wrapPaintLine(
+  font: MojanglesFont,
+  runs: PaintRun[],
+  maxWidth?: number,
+): PaintRun[][] {
+  if (!(maxWidth && maxWidth > 0)) return [runs];
+  const lines: PaintRun[][] = [];
+  let line: PaintRun[] = [];
+  for (const run of runs)
+    for (const text of run.text) {
+      line.push({ ...run, text });
+      if (line.length < 2 || lineInkWidth(layoutLine(font, line)) <= maxWidth)
+        continue;
+      if (/\s/.test(text)) {
+        lines.push(line.slice(0, -1));
+        line = [];
+        continue;
+      }
+      let split = -1;
+      for (let i = line.length - 2; i >= 0; i--)
+        if (/\s/.test(line[i]!.text)) {
+          split = i;
+          break;
+        }
+      if (split > 0) {
+        lines.push(line.slice(0, split));
+        line = line.slice(split + 1);
+      } else {
+        lines.push(line.slice(0, -1));
+        line = line.slice(-1);
+      }
+    }
+  if (line.length || lines.length === 0) lines.push(line);
   return lines;
 }
 
@@ -687,13 +738,18 @@ function takeVisiblePrefix(text: string, count: number): string {
 }
 
 function inkWidth(font: MojanglesFont, line: string): number {
-  const laid = layoutLine(font, [{ text: line }]);
+  return lineInkWidth(layoutLine(font, [{ text: line }]));
+}
+
+/** Visible ink extent excludes the trailing pen spacing after the last glyph. */
+function lineInkWidth(laid: LaidLine): number {
   let end = 0;
   for (const g of laid.glyphs) {
     const cols = g.on.length / CELL_PX;
     for (let j = 0; j < CELL_PX; j++) {
+      const shift = g.italicShift && j < 4 ? 1 : 0;
       for (let i = 0; i < cols; i++) {
-        if (g.on[j * cols + i]) end = Math.max(end, g.x + i + 1);
+        if (g.on[j * cols + i]) end = Math.max(end, g.x + i + shift + 1);
       }
     }
   }

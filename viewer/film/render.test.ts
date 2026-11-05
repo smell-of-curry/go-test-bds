@@ -65,6 +65,7 @@ test(
     const take = mkdtempSync(join(tmpdir(), "film-take-"));
     const outA = mkdtempSync(join(tmpdir(), "film-a-"));
     const outB = mkdtempSync(join(tmpdir(), "film-b-"));
+    const outRanges = mkdtempSync(join(tmpdir(), "film-ranges-"));
     try {
       const bot = writeGoldenMotionTake(take);
       const common = {
@@ -112,10 +113,61 @@ test(
         differed,
         "consecutive frames are identical; virtual time did not advance",
       );
+      // Exercise the production renderer across a skipped interval. The second
+      // window must match its actual source-time poses, not restart at zero or
+      // merely continue after the first output window's three frames.
+      const { from: _from, to: _to, ...rangeCommon } = common;
+      const ranged = await renderFilm({
+        ...rangeCommon,
+        ranges: [
+          { from: 0, to: 0.05 },
+          { from: "0.1s", to: "0.1666667s" },
+        ],
+        out: join(outRanges, "ranges.mp4"),
+      });
+      assert.equal(ranged.frames, 7);
+      assert.deepEqual(
+        ranged.ranges.map((r) => [r.fromFrame, r.toFrame]),
+        [
+          [0, 3],
+          [3, 7],
+        ],
+      );
+      const encodedFrames = execFileSync(
+        process.env.FFPROBE ?? "ffprobe",
+        [
+          "-v",
+          "error",
+          "-count_frames",
+          "-select_streams",
+          "v:0",
+          "-show_entries",
+          "stream=nb_read_frames",
+          "-of",
+          "csv=p=0",
+          ranged.mp4!,
+        ],
+        { encoding: "utf8" },
+      ).trim();
+      assert.equal(
+        Number(encodedFrames),
+        7,
+        "MP4 contains only the selected frames",
+      );
+      for (const [i, sourceFrame] of [0, 1, 2, 6, 7, 8, 9].entries()) {
+        const actual = readFileSync(
+          join(ranged.frameDir, `frame_${String(i).padStart(5, "0")}.png`),
+        );
+        assert.ok(
+          actual.equals(bufs[sourceFrame]!),
+          `ranged frame ${i} differs from source frame ${sourceFrame}`,
+        );
+      }
     } finally {
       rmSync(take, { recursive: true, force: true });
       rmSync(outA, { recursive: true, force: true });
       rmSync(outB, { recursive: true, force: true });
+      rmSync(outRanges, { recursive: true, force: true });
     }
   },
 );

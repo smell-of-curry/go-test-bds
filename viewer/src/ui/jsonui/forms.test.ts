@@ -12,10 +12,12 @@ import { createFixtureUiClient } from "./fixtureClient.js";
 import {
   type FormFlagRoute,
   collectBattleMoveRects,
+  customFormCollection,
   formBindingState,
   intersectingBattleMovePairs,
   prepareFormTree,
   routeForm,
+  selectFormButtonStates,
   type FormSnapshot,
 } from "./forms.js";
 import { loadUiFileSet, parseUiRawFile } from "./load.js";
@@ -25,6 +27,42 @@ import type { ResolvedElement, UiFileSource } from "./types.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fixtures = join(here, "../../../testdata/jsonui");
+
+describe("custom form fields", () => {
+  it("retains heterogeneous factory types, labels, dropdown selection and toggles", () => {
+    const fields = customFormCollection(
+      JSON.stringify([
+        {
+          type: "dropdown",
+          text: "Format",
+          options: ["Singles", "Doubles"],
+          default: 1,
+        },
+        { type: "toggle", text: "Ranked", default: true },
+        { type: "toggle", text: "Spectators", default: false },
+      ]),
+    );
+    assert.deepEqual(
+      fields.map((f) => f["#factory_control_id"]),
+      ["dropdown", "toggle", "toggle"],
+    );
+    assert.equal(fields[0]!["#custom_text"], "Format");
+    assert.equal(fields[0]!["#dropdown_option_text"], "Doubles");
+    assert.equal(fields[1]!["#custom_toggle_state"], true);
+    assert.equal(fields[2]!["#custom_toggle_state"], false);
+  });
+  it("rejects corrupt and unsupported content instead of filming an empty form", () => {
+    assert.throws(
+      () => customFormCollection('[{"text":Format}]'),
+      /valid JSON/,
+    );
+    assert.throws(() => customFormCollection("{}"), /must be an array/);
+    assert.throws(
+      () => customFormCollection('[{"type":"slider"}]'),
+      /not supported/,
+    );
+  });
+});
 
 /** Welcome / showRequiredMessageForm shape (title + body + one icon button). */
 function welcomeFormSnapshot(): FormSnapshot {
@@ -84,6 +122,141 @@ const SAMPLE_ROUTES: FormFlagRoute[] = [
   { flag: "§p§o§k§e", screen: "pokemon.main_panel" },
 ];
 
+describe("authored form button states", () => {
+  it("keeps only the checked or unchecked face for toggles and dropdowns", () => {
+    for (const type of ["toggle", "dropdown"]) {
+      const resolver = buildResolver([
+        src("fixture", "ui/toggle.json", {
+          namespace: "fixture",
+          main: {
+            type,
+            collection_index: 1,
+            checked_control: "on",
+            unchecked_control: "off",
+            checked_hover_control: "on_focus",
+            unchecked_locked_control: "off_locked",
+            controls: ["on", "off", "on_focus", "off_locked"].map((id) => ({
+              [id]: { type: "image", texture: id },
+            })),
+          },
+        }),
+      ]);
+      const root = resolver.resolve("fixture", "main")!;
+      const selected = (props: Record<string, unknown>, hover: number | null) =>
+        selectFormButtonStates(
+          { ...root, props: { ...root.props, ...props } },
+          hover,
+        )
+          .controls.filter((c) => c.element.props.visible !== false)
+          .map((c) => c.id);
+      assert.deepEqual(selected({}, null), ["off"]);
+      assert.deepEqual(selected({ toggle_state: true }, null), ["on"]);
+      assert.deepEqual(selected({ toggle_state: true }, 1), ["on_focus"]);
+      assert.deepEqual(selected({ enabled: false }, 1), ["off_locked"]);
+    }
+  });
+
+  const resolver = buildResolver([
+    src("fixture", "ui/button.json", {
+      namespace: "fixture",
+      main: {
+        type: "panel",
+        collection_index: 3,
+        size: [120, 30],
+        controls: [
+          {
+            button: {
+              type: "button",
+              size: [120, 30],
+              default_control: "idle",
+              hover_control: "focus",
+              locked_control: "disabled",
+              controls: [
+                {
+                  idle: {
+                    type: "image",
+                    texture: "idle",
+                    size: [120, 30],
+                    $default_state: true,
+                  },
+                },
+                {
+                  focus: {
+                    type: "image",
+                    texture: "focus",
+                    size: [120, 30],
+                    $hover_state: true,
+                    controls: [
+                      {
+                        text: {
+                          type: "label",
+                          text: "Focused",
+                          $hover_state: true,
+                          size: [100, 10],
+                        },
+                      },
+                    ],
+                  },
+                },
+                {
+                  disabled: {
+                    type: "image",
+                    texture: "disabled",
+                    size: [120, 30],
+                    $locked_state: true,
+                  },
+                },
+              ],
+            },
+          },
+        ],
+      },
+    }),
+  ]);
+  const measureText = () => ({ w: 40, h: 9 });
+  function visiblePaint(tree: ResolvedElement): string[] {
+    const layout = layoutTree(
+      tree,
+      { width: 320, height: 180 },
+      { measureText },
+    );
+    const paint: string[] = [];
+    function visit(node: typeof layout): void {
+      if (!node.visible) return;
+      if (node.element.type === "image")
+        paint.push(String(node.element.props.texture));
+      if (node.element.type === "label")
+        paint.push(String(node.element.props.text));
+      node.children.forEach(visit);
+    }
+    visit(layout);
+    return paint;
+  }
+  it("uses collection hover through wrappers and retains active face children", () => {
+    const tree = resolver.resolve("fixture", "main")!;
+    assert.deepEqual(visiblePaint(selectFormButtonStates(tree, null)), [
+      "idle",
+    ]);
+    assert.deepEqual(visiblePaint(selectFormButtonStates(tree, 3)), [
+      "focus",
+      "Focused",
+    ]);
+    assert.deepEqual(visiblePaint(selectFormButtonStates(tree, 2)), ["idle"]);
+    assert.equal(
+      tree.controls[0]!.element.controls[1]!.element.props.$hover_state,
+      true,
+      "authored tree must remain reusable",
+    );
+  });
+  it("disabled buttons keep their authored locked face even when hovered", () => {
+    const tree = resolver.resolve("fixture", "main")!;
+    tree.controls[0]!.element.props.enabled = false;
+    assert.deepEqual(visiblePaint(selectFormButtonStates(tree, 3)), [
+      "disabled",
+    ]);
+  });
+});
+
 function walk(el: ResolvedElement, visit: (el: ResolvedElement) => void): void {
   visit(el);
   for (const c of el.controls) walk(c.element, visit);
@@ -133,15 +306,32 @@ describe("routeForm", () => {
     assert.equal(r.kind, "flag");
   });
 
-  it("modal/custom type → custom_form", () => {
+  it("custom type → custom_form", () => {
     const r = routeForm({
-      type: "modal",
+      type: "custom",
       title: "Settings",
       content: "",
       buttons: [],
     });
     assert.equal(r.screen, "server_form.custom_form");
     assert.equal(r.kind, "custom_form");
+  });
+
+  it("two-button modal messages use the popup dialog and preserve their bindings", () => {
+    const form = {
+      type: "modal",
+      title: "Result",
+      content: "Victory",
+      buttons: ["Continue", "Dismiss"],
+    };
+    const r = routeForm(form);
+    assert.equal(r.screen, "popup_dialog.modal_dialog_popup");
+    assert.equal(r.kind, "modal");
+    const { source } = formBindingState(form);
+    assert.equal(source.global("#modal_title_text"), "Result");
+    assert.equal(source.global("#modal_label_text"), "Victory");
+    assert.equal(source.global("#modal_left_button_text"), "Continue");
+    assert.equal(source.global("#modal_rightcancel_button_text"), "Dismiss");
   });
 
   it("matches the first supplied flag route", () => {

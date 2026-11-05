@@ -69,6 +69,65 @@ test("cross-namespace inheritance", () => {
   assert.equal(el!.namespace, "hud");
 });
 
+test("conditional variables select instance-specific templates without memo leakage", () => {
+  const r = buildResolver([
+    src("v", "ui/dialog.json", {
+      namespace: "dialog",
+      root: {
+        type: "panel",
+        "$expanded|default": false,
+        variables: [
+          { requires: "$expanded", $size: [200, 160], $child: "dialog.two" },
+          {
+            requires: "(not $expanded)",
+            $size: [100, 80],
+            $child: "dialog.one",
+          },
+        ],
+        size: "$size",
+        controls: [{ "body@$child": {} }],
+      },
+      one: { type: "label", text: "one" },
+      two: { type: "label", text: "two" },
+    }),
+  ]);
+  assert.deepEqual(r.resolve("dialog", "root")!.props.size, [100, 80]);
+  const expanded = r.resolve("dialog", "root", { $expanded: true })!;
+  assert.deepEqual(expanded.props.size, [200, 160]);
+  assert.equal(expanded.controls[0]!.element.props.text, "two");
+  assert.equal(
+    r.resolve("dialog", "root")!.controls[0]!.element.props.text,
+    "one",
+  );
+});
+
+test("nested inline and inherited defaults preserve the caller's variables", () => {
+  const r = buildResolver([
+    src("v", "ui/defaults.json", {
+      namespace: "defaults",
+      root: {
+        type: "panel",
+        $caption: "Selected option",
+        controls: [
+          {
+            inline: {
+              type: "label",
+              "$caption|default": "Wrong inline",
+              text: "$caption",
+            },
+          },
+          { "inherited@label": { "$caption|default": "Wrong inherited" } },
+        ],
+      },
+      label: { type: "label", text: "$caption" },
+    }),
+  ]);
+  assert.deepEqual(
+    r.resolve("defaults", "root")!.controls.map((c) => c.element.props.text),
+    ["Selected option", "Selected option"],
+  );
+});
+
 test("$variable substitution + control-instance override", () => {
   const r = buildResolver([
     src("v", "ui/a.json", {

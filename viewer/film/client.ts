@@ -51,7 +51,7 @@ export interface FilmHooks {
   hideChrome(): void;
 }
 
-interface TimedFrame {
+export interface TimedFrame {
   tMs: number;
   frame: Frame;
 }

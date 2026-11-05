@@ -379,6 +379,64 @@ describe("layoutTree anchors and offsets", () => {
 });
 
 describe("layoutTree stack_panel", () => {
+  it("preserves vertical centering of unequal-height horizontal children", () => {
+    // Vanilla start_screen.external_browser_button_content centers its 8px
+    // link icon beside a taller label on the horizontal stack's cross axis.
+    const root = el(
+      "stack_panel",
+      {
+        orientation: "horizontal",
+        size: [100, 12],
+        anchor_from: "top_left",
+        anchor_to: "top_left",
+      },
+      [
+        child(
+          "text",
+          el("panel", {
+            size: [50, 12],
+            anchor_from: "center",
+            anchor_to: "center",
+          }),
+        ),
+        child(
+          "icon",
+          el("image", {
+            size: [8, 8],
+            anchor_from: "center",
+            anchor_to: "center",
+          }),
+        ),
+      ],
+    );
+    const tree = layoutTree(root, VP, { measureText: measureStub });
+    assert.deepEqual(boxOf(tree.children[1]!), { x: 50, y: 2, w: 8, h: 8 });
+  });
+  it("centers a vertical stack child within content-width padding", () => {
+    // Vanilla store_common.progress_loading adds 50px to its widest child.
+    const root = el(
+      "stack_panel",
+      {
+        orientation: "vertical",
+        size: ["100%cm + 50px", "100%c"],
+        anchor_from: "top_left",
+        anchor_to: "top_left",
+      },
+      [
+        child(
+          "image",
+          el("image", {
+            size: [194, 80],
+            anchor_from: "bottom_middle",
+            anchor_to: "bottom_middle",
+          }),
+        ),
+      ],
+    );
+    const tree = layoutTree(root, VP, { measureText: measureStub });
+    assert.deepEqual(boxOf(tree), { x: 0, y: 0, w: 244, h: 80 });
+    assert.deepEqual(boxOf(tree.children[0]!), { x: 25, y: 0, w: 194, h: 80 });
+  });
   it("flows children vertically", () => {
     const root = el(
       "stack_panel",
@@ -931,7 +989,7 @@ describe("layoutTree self-axis %x/%y", () => {
 });
 
 describe("layoutTree factory offsets", () => {
-  it("stacks named children when a rule says their offsets compensate", () => {
+  it("flows fixed-height factory instances while retaining descendant offsets", () => {
     const offsets: Array<[string, string]> = [
       ["-19%", "25%"],
       ["-19%", "80%"],
@@ -986,7 +1044,6 @@ describe("layoutTree factory offsets", () => {
       { width: 200, height: 200 },
       {
         measureText: measureStub,
-        rules: { stackFactoryChildNames: ["grid_button"] },
       },
     );
     const moves: Array<{ x: number; y: number; w: number; h: number }> = [];
@@ -1015,6 +1072,76 @@ describe("layoutTree factory offsets", () => {
     );
     assert.equal(xs.length, 2, `columns=${xs}`);
     assert.equal(ys.length, 2, `rows=${ys}`);
+  });
+
+  it("factory slots place generated roots independently of their anchors and offsets", () => {
+    const root = el(
+      "stack_panel",
+      {
+        size: [200, 100],
+        orientation: "vertical",
+        offset: [30, 20],
+        anchor_from: "top_left",
+        anchor_to: "top_left",
+        factory: { control_name: "test.card" },
+        collection_name: "cards",
+      },
+      [
+        child(
+          "first",
+          el(
+            "stack_panel",
+            {
+              size: [50, 40],
+              offset: ["-50%", "10%"],
+              anchor_from: "center",
+              anchor_to: "center",
+            },
+            [child("icon", el("image", { size: [20, 20] }))],
+          ),
+        ),
+        child(
+          "second",
+          el("panel", {
+            size: [50, 30],
+            offset: ["50%", "10%"],
+            anchor_from: "center",
+            anchor_to: "center",
+          }),
+        ),
+      ],
+    );
+    const tree = layoutTree(root, VP, { measureText: measureStub });
+    assert.deepEqual(boxOf(tree.children[0]!), { x: 30, y: 20, w: 50, h: 40 });
+    assert.deepEqual(boxOf(tree.children[0]!.children[0]!), {
+      x: 30,
+      y: 20,
+      w: 20,
+      h: 20,
+    });
+    assert.deepEqual(boxOf(tree.children[1]!), { x: 30, y: 60, w: 50, h: 30 });
+  });
+
+  it("a horizontal 100% child keeps parent width beside a fixed sibling", () => {
+    const tree = layoutTree(
+      el(
+        "stack_panel",
+        {
+          size: [90, 42],
+          orientation: "horizontal",
+          anchor_from: "top_left",
+          anchor_to: "top_left",
+        },
+        [
+          child("icon", el("image", { size: [40, 40] })),
+          child("description", el("panel", { size: ["100%", 40] })),
+        ],
+      ),
+      VP,
+      { measureText: measureStub },
+    );
+    assert.deepEqual(boxOf(tree.children[0]!), { x: 0, y: 0, w: 40, h: 40 });
+    assert.deepEqual(boxOf(tree.children[1]!), { x: 40, y: 0, w: 90, h: 40 });
   });
 });
 

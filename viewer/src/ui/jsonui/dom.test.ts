@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   absolutePaintLayer,
+  colorChannels,
   fitImageBackgroundCss,
   imageKeepsRatio,
   labelClipsWithEllipsis,
@@ -69,6 +70,19 @@ describe("imageKeepsRatio", () => {
 });
 
 describe("fitImageBackgroundCss", () => {
+  it("fills a wide box while preserving the source ratio when fill is true", () => {
+    const css = fitImageBackgroundCss(
+      { w: 8, h: 8 },
+      null,
+      null,
+      { w: 640, h: 100 },
+      true,
+      true,
+    );
+    assert.equal(css.size, "640px 640px");
+    assert.equal(css.position, "0px -270px");
+  });
+
   it("aspect-fits an 8×8 texture into a 1920×1080 screen, centered", () => {
     const css = fitImageBackgroundCss(
       { w: 8, h: 8 },
@@ -127,6 +141,20 @@ describe("fitImageBackgroundCss", () => {
     );
     assert.equal(css.size, "120px 60px");
     assert.equal(css.position, "0px 0px");
+  });
+});
+
+describe("colorChannels", () => {
+  it("recognizes vanilla named colors for labels and image tint", () => {
+    assert.deepEqual(colorChannels("black"), [0, 0, 0]);
+    assert.deepEqual(colorChannels("white"), [1, 1, 1]);
+    assert.deepEqual(colorChannels(["black"]), [0, 0, 0]);
+  });
+
+  it("preserves numeric colors and rejects unresolved names", () => {
+    assert.deepEqual(colorChannels([0.5, 1, 0]), [0.5, 1, 0]);
+    assert.equal(colorChannels("$unresolved"), null);
+    assert.equal(colorChannels(["$unresolved", 1, 0]), null);
   });
 });
 

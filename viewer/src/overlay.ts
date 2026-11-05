@@ -203,7 +203,7 @@ function panelBlock(
   kind: string,
   title: string,
   body: string,
-  buttons: string[],
+  buttons: string[] = [],
 ): HTMLElement {
   const root = document.createElement("div");
   root.className = "ui-block";

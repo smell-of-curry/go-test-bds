@@ -161,15 +161,17 @@ export function parseControlRef(
 /**
  * Resolve the factory template element for a collection host.
  *
- * Prefers `factory.control_name`; falls back to `factory.control_ids.button`.
+ * Prefers `factory.control_name`; otherwise selects the item's control ID.
  *
  * @param host - Element with `factory` + `collection_name`.
  * @param resolver - UI resolver.
+ * @param controlId - Factory item type (`button` by default).
  * @returns template element, or undefined.
  */
 export function resolveFactoryTemplate(
   host: ResolvedElement,
   resolver: UiResolver,
+  controlId = "button",
 ): ResolvedElement | undefined {
   const factory = host.props.factory;
   if (!factory || typeof factory !== "object" || Array.isArray(factory)) {
@@ -181,7 +183,7 @@ export function resolveFactoryTemplate(
     ref = f.control_name;
   } else if (f.control_ids && typeof f.control_ids === "object") {
     const ids = f.control_ids as PropertyBag;
-    if (typeof ids.button === "string") ref = ids.button;
+    if (typeof ids[controlId] === "string") ref = ids[controlId] as string;
   }
   if (!ref) return undefined;
   const parsed = parseControlRef(ref, host.namespace);
@@ -274,6 +276,7 @@ export function expandCollections(
  * @param collections - Named item lists.
  * @param scope - Active collection item, if any.
  * @param parentVars - Inherited `$…` variables from ancestors.
+ * @param ancestors - Named ancestor control scopes for view bindings.
  */
 export function bindResolvedTree(
   el: ResolvedElement,
@@ -281,6 +284,7 @@ export function bindResolvedTree(
   collections: CollectionMap,
   scope?: CollectionScope,
   parentVars: PropertyBag = {},
+  ancestors: ReadonlyMap<string, PropertyBag> = new Map(),
 ): void {
   const opts: ApplyBindingsOptions = {};
   if (scope) {
@@ -310,17 +314,29 @@ export function bindResolvedTree(
 
   const childVars = pickDollarVars(out);
   const childScope = factoryChildScope(el, collections, scope);
+  const ancestorScope = new Map(ancestors);
+  ancestorScope.set(el.name, out);
   for (const child of el.controls) {
     const nextScope =
       childScope !== undefined
         ? { name: childScope.name, index: childScope.indexFor(child) }
         : scope;
-    bindResolvedTree(child.element, source, collections, nextScope, childVars);
+    const childAncestors = new Map(ancestorScope);
+    // Template names and instance IDs can differ (`modal_bg_buttons@…`).
+    childAncestors.set(child.id, child.element.props);
+    bindResolvedTree(
+      child.element,
+      source,
+      collections,
+      nextScope,
+      childVars,
+      childAncestors,
+    );
   }
 
   const byControl = indexControls(el.controls);
   const resolveControl = (name: string): PropertyBag | undefined =>
-    byControl.get(name);
+    byControl.get(name) ?? ancestorScope.get(name);
 
   // Parent view bindings (e.g. panel_name ← child image.#texture).
   applyBindings(bindEl, source, out, {
@@ -442,17 +458,18 @@ function expandInPlace(
       : "";
   if (collName && el.props.factory) {
     const items = collections[collName] ?? [];
-    const template = resolveFactoryTemplate(el, resolver);
-    if (template) {
-      const children: ResolvedChild[] = [];
-      for (let i = 0; i < items.length; i++) {
+    const children: ResolvedChild[] = [];
+    for (let i = 0; i < items.length; i++) {
+      const controlId = String(items[i]?.["#factory_control_id"] ?? "button");
+      const template = resolveFactoryTemplate(el, resolver, controlId);
+      if (template) {
         const inst = cloneResolved(template);
         inst.props = { ...inst.props, collection_index: i };
         expandInPlace(inst, resolver, collections);
         children.push({ id: `${inst.name}_${i}`, element: inst });
       }
-      el.controls = children;
     }
+    el.controls = children;
   } else if (collName && typeof el.props.grid_item_template === "string") {
     // Starter-style picker: `picker_panel_grid` uses grid_item_template
     // + #maximum_grid_items, not a factory stack.

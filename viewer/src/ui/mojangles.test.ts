@@ -8,6 +8,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import {
   ellipsizePlain,
+  layoutRuns,
   parseMojangles,
   rasterPlainLine,
   shadowOf,
@@ -75,4 +76,40 @@ describe("Mojangles raster", () => {
     assert.equal(ellipsizePlain(font!, src, 120), "The quick brown fox...");
     assert.equal(ellipsizePlain(font!, "Hi", 156), "Hi");
   });
+
+  it(
+    "wraps a styled canvas at word boundaries using actual glyph advances",
+    { skip: !font },
+    () => {
+      const runs = [
+        { text: "First ", color: "#ff0000" },
+        { text: "second third", color: "#0000ff" },
+      ];
+      const full = layoutRuns(font!, runs, { guiScale: 2 });
+      const wrapped = layoutRuns(font!, runs, { guiScale: 2, maxWidth: 48 });
+      assert.ok(full.w > 48);
+      assert.ok(wrapped.w <= 48);
+      assert.equal(wrapped.h, 27);
+      assert.equal(wrapped.cssH, 54);
+      const first = wrapped.rgba.slice(0, wrapped.w * 9 * 4);
+      const second = wrapped.rgba.slice(wrapped.w * 9 * 4, wrapped.w * 18 * 4);
+      assert.ok(first.some((v, i) => i % 4 === 0 && v === 255));
+      assert.ok(second.some((v, i) => i % 4 === 2 && v === 255));
+    },
+  );
+
+  it(
+    "does not wrap a natural-width label because of trailing glyph spacing",
+    { skip: !font },
+    () => {
+      const text = "HP: 321/321 Lv. 100";
+      const width = rasterPlainLine(font!, text).width;
+      const laid = layoutRuns(font!, [{ text }], {
+        guiScale: 2,
+        maxWidth: width,
+      });
+      assert.equal(laid.h, 9);
+      assert.equal(laid.w, width);
+    },
+  );
 });

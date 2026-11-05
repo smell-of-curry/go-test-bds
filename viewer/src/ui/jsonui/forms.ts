@@ -9,6 +9,7 @@
 import {
   formButtonsCollection,
   prepareCollectionTree,
+  type CollectionItem,
   type CollectionMap,
 } from "./collections.js";
 import {
@@ -18,6 +19,7 @@ import {
   type TextureInfoMap,
 } from "./dom.js";
 import { measureMojangles } from "../mojangles.js";
+import { mountFormTooltip } from "./tooltip";
 import {
   LABEL_LINE_HEIGHT_GUI,
   collapseLangPercentEscapes,
@@ -69,7 +71,7 @@ export interface FormRoute {
   name: string;
   /** Matched invisible flag, or "" for vanilla long/custom form. */
   flag: string;
-  kind: "flag" | "long_form" | "custom_form";
+  kind: "flag" | "long_form" | "custom_form" | "modal";
 }
 
 export interface FormRendererDeps {
@@ -107,8 +109,8 @@ export interface FormRenderer {
 /**
  * Extract the title-flag route for a form snapshot.
  *
- * Battle / PC / … flags win over plain titles. `type === "custom"` (or
- * `"modal"`) → vanilla custom_form; otherwise vanilla long_form.
+ * Title flags win over plain titles. Custom input forms use custom_form;
+ * two-button messages use the vanilla popup dialog template.
  *
  * @param form - Form snapshot.
  * @returns route descriptor.
@@ -125,7 +127,16 @@ export function routeForm(
     }
   }
   const t = (form.type ?? "").toLowerCase();
-  if (t === "custom" || t === "modal" || t === "modal_form") {
+  if (t === "modal" || t === "modal_form") {
+    return {
+      screen: "popup_dialog.modal_dialog_popup",
+      namespace: "popup_dialog",
+      name: "modal_dialog_popup",
+      flag: "",
+      kind: "modal",
+    };
+  }
+  if (t === "custom") {
     return {
       screen: "server_form.custom_form",
       namespace: "server_form",
@@ -156,6 +167,8 @@ export function formBindingState(form: FormSnapshot): {
 } {
   const buttons = form.buttons ?? [];
   const items = formButtonsCollection(buttons, form.buttonImages);
+  const custom =
+    form.type === "custom" ? customFormCollection(form.content) : [];
   const globals: Record<string, BindingValue> = {
     "#title_text": form.title ?? "",
     "#form_text": form.content ?? "",
@@ -163,6 +176,11 @@ export function formBindingState(form: FormSnapshot): {
     "#form_button_contents": buttons.length,
     "#submit_text": "Submit",
     "#submit_button_visible": true,
+    "#custom_form_length": custom.length,
+    "#modal_title_text": form.title ?? "",
+    "#modal_label_text": form.content ?? "",
+    "#modal_left_button_text": buttons[0] ?? "",
+    "#modal_rightcancel_button_text": buttons[1] ?? "",
   };
   const source: BindingSource = {
     global(name: string): BindingValue | undefined {
@@ -175,9 +193,57 @@ export function formBindingState(form: FormSnapshot): {
   };
   return {
     source,
-    collections: { form_buttons: items },
+    collections: { form_buttons: items, custom_form: custom },
     globals,
   };
+}
+
+/**
+ * Project recorded custom-form fields onto vanilla collection bindings.
+ * Malformed recordings must not silently turn into an empty Submit screen.
+ *
+ * @param content - Serialized custom-form field array from the recorder.
+ * @returns Per-field bindings, preserving the original field index.
+ */
+export function customFormCollection(content: string): CollectionItem[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(content);
+  } catch {
+    throw new Error("recorded custom-form content is not valid JSON");
+  }
+  if (!Array.isArray(parsed))
+    throw new Error("recorded custom-form content must be an array");
+  return parsed.map((value, index) => {
+    if (!value || typeof value !== "object" || Array.isArray(value))
+      throw new Error(`recorded custom-form field ${index} is not an object`);
+    const field = value as Record<string, unknown>;
+    const type = String(field.type ?? "label");
+    if (!["label", "header", "divider", "toggle", "dropdown"].includes(type)) {
+      throw new Error(
+        `recorded custom-form field type ${type} is not supported`,
+      );
+    }
+    const text = typeof field.text === "string" ? field.text : "";
+    const options = Array.isArray(field.options)
+      ? field.options.map(String)
+      : [];
+    const selected = Math.max(0, Math.floor(Number(field.default) || 0));
+    const enabled = field.enabled !== false;
+    return {
+      "#factory_control_id": type,
+      "#collection_index": index,
+      "#custom_text": text,
+      "#custom_tooltip_text":
+        typeof field.tooltip === "string" ? field.tooltip : "",
+      "#custom_toggle_state": field.default === true,
+      "#custom_toggle_enabled": enabled,
+      "#dropdown_option_text": options[selected] ?? options[0] ?? "",
+      // Playback has no dropdown expansion event: display its recorded/default
+      // selection, leaving the unopened option list uninstantiated.
+      "#custom_dropdown_length": 0,
+    };
+  });
 }
 
 /**
@@ -195,7 +261,11 @@ export function prepareFormTree(
   routes: readonly FormFlagRoute[] = [],
 ): { tree: ResolvedElement; route: FormRoute } | null {
   const route = routeForm(form, routes);
-  const root = resolver.resolve(route.namespace, route.name);
+  const root = resolver.resolve(
+    route.namespace,
+    route.name,
+    route.kind === "modal" ? { $two_buttons_visible: true } : undefined,
+  );
   if (!root) return null;
   const { source, collections } = formBindingState(form);
   const merged: BindingSource = {
@@ -215,10 +285,112 @@ export function prepareFormTree(
     },
   };
   const tree = prepareCollectionTree(root, resolver, merged, collections);
-  if (route.kind === "long_form" || route.kind === "custom_form") {
+  if (
+    route.kind === "long_form" ||
+    route.kind === "custom_form" ||
+    route.kind === "modal"
+  ) {
     patchDialogueChrome(tree);
   }
   return { tree, route };
+}
+
+/**
+ * Select a form button's authored default/hover/locked face. Collection indices
+ * live on factory roots, so carry them through nested panels to each button.
+ * Bindings have already run; neutralizing the active face's state markers lets
+ * the generic layout retain it instead of its idle-only fallback suppression.
+ */
+export function selectFormButtonStates(
+  tree: ResolvedElement,
+  hoverIndex: number | null,
+): ResolvedElement {
+  const states = ["default", "hover", "pressed", "locked"] as const;
+  function walk(
+    node: ResolvedElement,
+    inheritedIndex: number | null,
+    activeFace = false,
+  ): ResolvedElement {
+    const index =
+      typeof node.props.collection_index === "number"
+        ? node.props.collection_index
+        : inheritedIndex;
+    const props = { ...node.props };
+    if (activeFace)
+      for (const state of states) props[`$${state}_state`] = false;
+    if (
+      node.type !== "button" &&
+      node.type !== "toggle" &&
+      node.type !== "dropdown"
+    ) {
+      return {
+        ...node,
+        props,
+        controls: node.controls.map((child) => ({
+          ...child,
+          element: walk(child.element, index, activeFace),
+        })),
+      };
+    }
+    const toggle = node.type === "toggle" || node.type === "dropdown";
+    const ownStates: readonly string[] = toggle
+      ? [
+          "checked",
+          "unchecked",
+          "checked_hover",
+          "unchecked_hover",
+          "checked_locked",
+          "unchecked_locked",
+          "checked_locked_hover",
+          "unchecked_locked_hover",
+        ]
+      : states;
+    const faceState = (
+      id: string,
+      element: ResolvedElement,
+    ): string | undefined =>
+      ownStates.find((state) => {
+        const control = node.props[`${state}_control`];
+        return (
+          (typeof control === "string" && control !== "" && id === control) ||
+          element.props[`$${state}_state`] === true
+        );
+      });
+    const interaction =
+      node.props.enabled === false
+        ? "locked"
+        : index !== null && index === hoverIndex
+          ? "hover"
+          : "default";
+    const checked =
+      (node.props.toggle_state ?? node.props.toggle_default_state) === true
+        ? "checked"
+        : "unchecked";
+    const wanted = toggle
+      ? checked + (interaction === "default" ? "" : `_${interaction}`)
+      : interaction;
+    const fallback = toggle ? checked : "default";
+    const selected = node.controls.some(
+      (child) => faceState(child.id, child.element) === wanted,
+    )
+      ? wanted
+      : fallback;
+    return {
+      ...node,
+      props,
+      controls: node.controls.map((child) => {
+        const state = faceState(child.id, child.element);
+        const element = walk(
+          child.element,
+          index,
+          state ? state === selected : activeFace,
+        );
+        if (state && state !== selected) element.props.visible = false;
+        return { ...child, element };
+      }),
+    };
+  }
+  return walk(tree, null);
 }
 
 /**
@@ -341,8 +513,10 @@ export function createFormRenderer(deps: FormRendererDeps): FormRenderer {
   let lastTree: ResolvedElement | null = null;
   let lastRoute: FormRoute | null = null;
   let hoverIndex: number | null = null;
+  let currentForm: FormSnapshot | null = null;
   let engineRoot: HTMLElement | null = null;
   let plainRoot: HTMLElement | null = null;
+  let clearTooltip = (): void => {};
 
   const host = deps.host;
   host.style.position = host.style.position || "absolute";
@@ -378,6 +552,8 @@ export function createFormRenderer(deps: FormRendererDeps): FormRenderer {
   }
 
   function clear(): void {
+    clearTooltip();
+    clearTooltip = (): void => {};
     host.replaceChildren();
     engineRoot = null;
     plainRoot = null;
@@ -454,23 +630,23 @@ export function createFormRenderer(deps: FormRendererDeps): FormRenderer {
     // Vanilla long/custom forms get dialogue chrome. Flag-routed screens
     // keep the pack layout.
     const routed = routeForm(form, deps.formRoutes);
-    const dialogue =
-      routed.kind === "long_form" || routed.kind === "custom_form";
+    const dialogue = routed.kind !== "flag";
     const prepared = prepareFormTree(
       deps.resolver,
       dialogue ? normalizeDialogueForm(form) : form,
       deps.globals ?? {},
+      deps.formRoutes,
     );
     if (!prepared) return false;
     clear();
-    lastTree = prepared.tree;
+    lastTree = selectFormButtonStates(prepared.tree, hoverIndex);
     lastRoute = prepared.route;
 
     const viewport: Viewport = deps.viewport ?? {
       width: Math.max(320, host.clientWidth / guiScale || 640),
       height: Math.max(180, host.clientHeight / guiScale || 360),
     };
-    const layout = layoutTree(prepared.tree, viewport, {
+    const layout = layoutTree(lastTree, viewport, {
       measureText,
       rules: deps.layoutRules,
     });
@@ -487,6 +663,15 @@ export function createFormRenderer(deps: FormRendererDeps): FormRenderer {
     }
     tagCollectionIndices(layout, engineRoot);
     applyHover();
+    if (hoverIndex !== null) {
+      clearTooltip = mountFormTooltip(
+        host,
+        layout,
+        guiScale,
+        measureText,
+        deps.lang,
+      );
+    }
     return true;
   }
 
@@ -498,14 +683,19 @@ export function createFormRenderer(deps: FormRendererDeps): FormRenderer {
       return lastRoute;
     },
     show(form: FormSnapshot): void {
+      currentForm = form;
+      hoverIndex = null;
       if (!showEngine(form)) showPlain(form);
     },
     hover(index: number | null): void {
+      if (hoverIndex === index) return;
       hoverIndex = index;
-      applyHover();
+      if (engineRoot && currentForm) showEngine(currentForm);
+      else applyHover();
     },
     hide(): void {
       clear();
+      currentForm = null;
       hoverIndex = null;
     },
   };

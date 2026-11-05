@@ -61,8 +61,12 @@ export interface ResolvedChild {
 
 /** Resolves "namespace.element" references against the loaded document set. */
 export interface UiResolver {
-  /** @param namespace Namespace to look in. @param name Element name. @returns the resolved element or undefined. */
-  resolve(namespace: string, name: string): ResolvedElement | undefined;
+  /** @param namespace Namespace to look in. @param name Element name. @param variables Runtime-selected template variables. @returns the resolved element or undefined. */
+  resolve(
+    namespace: string,
+    name: string,
+    variables?: PropertyBag,
+  ): ResolvedElement | undefined;
   /** All screens (elements of type "screen") keyed "namespace.name". */
   screens(): string[];
 }

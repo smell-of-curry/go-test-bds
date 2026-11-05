@@ -11,6 +11,7 @@ import type {
   UiFileSource,
   UiResolver,
 } from "./types";
+import { evalExpr, parseExpr } from "./expr";
 
 /** Merged element definition before inheritance resolve. */
 interface StoredDef {
@@ -256,7 +257,8 @@ export function buildResolver(
     const overrideVars: PropertyBag = {};
     for (const [k, v] of Object.entries(inst)) {
       if (!k.startsWith("$")) continue;
-      const { varName } = parseVarKey(k);
+      const { varName, isDefault } = parseVarKey(k);
+      if (isDefault && `$${varName}` in parentVars) continue;
       overrideVars[`$${varName}`] = substituteVars(v, parentVars);
     }
     // Parent scope $vars must flow into the child (sidebar `$var_size`, etc.).
@@ -341,8 +343,12 @@ export function buildResolver(
   }
 
   return {
-    resolve(namespace: string, name: string): ResolvedElement | undefined {
-      return resolve(namespace, name);
+    resolve(
+      namespace: string,
+      name: string,
+      variables?: PropertyBag,
+    ): ResolvedElement | undefined {
+      return resolve(namespace, name, variables);
     },
     screens(): string[] {
       const out: string[] = [];
@@ -617,6 +623,7 @@ function collectVariables(
     applyVarDeclarations(vars, d.props);
   }
   if (overrides) applyVarDeclarations(vars, overrides, true);
+  for (const d of chain) applyConditionalVariables(vars, d.props);
   return vars;
 }
 
@@ -630,8 +637,49 @@ function collectVariablesFromProps(
   base: PropertyBag,
 ): PropertyBag {
   const vars = { ...base };
-  applyVarDeclarations(vars, props, true);
+  applyVarDeclarations(vars, props);
+  applyConditionalVariables(vars, props);
   return resolveVarAliases(vars);
+}
+
+/**
+ * Evaluate a template's conditional variable blocks after instance selectors
+ * are known. Popup dialogs use these to choose their size and button panel.
+ *
+ * @param vars - Current variable scope, updated in declaration order.
+ * @param props - Element containing a `variables` object or array.
+ */
+function applyConditionalVariables(
+  vars: PropertyBag,
+  props: PropertyBag,
+): void {
+  const blocks = Array.isArray(props.variables)
+    ? props.variables
+    : [props.variables];
+  for (const value of blocks) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) continue;
+    const block = value as PropertyBag;
+    let active = block.requires === undefined || block.requires === true;
+    if (typeof block.requires === "string") {
+      try {
+        const scope = resolveVarAliases(vars);
+        const result = evalExpr(parseExpr(block.requires), {
+          variable: (name) => scope[`$${name}`],
+          binding: () => undefined,
+        });
+        active =
+          result === true ||
+          (typeof result === "number" && result !== 0) ||
+          (typeof result === "string" &&
+            result !== "" &&
+            result !== "false" &&
+            result !== "0");
+      } catch {
+        active = false;
+      }
+    }
+    if (active) applyVarDeclarations(vars, block);
+  }
 }
 
 /**

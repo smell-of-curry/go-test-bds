@@ -219,6 +219,23 @@ test("localizeLabelText: localize true hits / miss unchanged", () => {
   );
 });
 
+test("language loading decodes newline markers without rewriting raw UI strings", () => {
+  const lang = parseLangFile(
+    "result=Victory\\n\\nExperience~LINEBREAK~10 EXP\nunknown=literal\\q\n",
+  );
+  assert.equal(lang.result, "Victory\n\nExperience\n10 EXP");
+  assert.equal(lang.unknown, "literal\\q");
+  assert.equal(
+    localizeLabelText("result", true, lang),
+    "Victory\n\nExperience\n10 EXP",
+  );
+  assert.equal(localizeLabelText("literal\\n", false, lang), "literal\\n");
+  assert.equal(
+    localizeLabelText("literal~LINEBREAK~", false, lang),
+    "literal~LINEBREAK~",
+  );
+});
+
 test("loadUiFileSet: lang merge, later pack wins, 404 ok", async () => {
   const client: UiLoadClient = {
     async getPacks() {
@@ -254,4 +271,79 @@ test("loadUiFileSet: real fixture lang override order", async () => {
   assert.equal(lang["fixture.shared"], "addon");
   assert.equal(lang["fixture.only_vanilla"], "only vanilla");
   assert.equal(lang["fixture.with_tab"], "hello");
+});
+
+test("UI file loads overlap with a bounded fanout and retain pack/file precedence", async () => {
+  const paths = Array.from({ length: 19 }, (_, i) => `ui/part_${i}.json`);
+  let active = 0;
+  let peak = 0;
+  const client: UiLoadClient = {
+    getPacks: async () => [
+      { id: "addon", priority: 2 },
+      { id: "vanilla", priority: 0 },
+    ],
+    fetchPackText: async () => null,
+    fetchPackJson: async <T>(pack: string, path: string): Promise<T | null> => {
+      if (path.endsWith("_ui_defs.json")) return { ui_defs: paths } as T;
+      const index = paths.indexOf(path);
+      if (index < 0) return null;
+      active++;
+      peak = Math.max(peak, active);
+      await new Promise((resolve) => setTimeout(resolve, index % 2 ? 1 : 4));
+      active--;
+      return {
+        namespace: "sample",
+        [`element_${index}`]: { type: "label", text: pack },
+      } as T;
+    },
+  };
+  const loaded = await loadUiFileSet(client);
+  assert.ok(
+    peak > 1,
+    "serial UI pack requests make real-stack film startup time out",
+  );
+  assert.ok(
+    peak <= 8,
+    "cold packs must not create unbounded parallel requests",
+  );
+  assert.deepEqual(
+    loaded.files.map((file) => `${file.packId}/${file.path}`),
+    [
+      ...paths.map((path) => `vanilla/${path}`),
+      ...paths.map((path) => `addon/${path}`),
+    ],
+  );
+});
+
+test("an optional UI inventory skips known misses without dropping undeclared overrides", async () => {
+  const requests: string[] = [];
+  const client: UiLoadClient = {
+    getPacks: async () => [
+      { id: "base", uiFiles: ["ui/main.json", "ui/extra.json"] },
+      { id: "override", uiFiles: ["ui/main.json"], priority: 1 },
+      { id: "entities", uiFiles: [], priority: 2 },
+    ],
+    fetchPackText: async () => null,
+    fetchPackJson: async <T>(pack: string, path: string): Promise<T | null> => {
+      if (path.endsWith("_ui_defs.json"))
+        return (
+          pack === "base"
+            ? { ui_defs: ["ui/main.json", "ui/extra.json"] }
+            : null
+        ) as T | null;
+      if (path.endsWith("_global_variables.json")) return null;
+      requests.push(`${pack}/${path}`);
+      return { namespace: "sample", main: { type: "label", text: pack } } as T;
+    },
+  };
+  const loaded = await loadUiFileSet(client);
+  assert.deepEqual(requests.sort(), [
+    "base/ui/extra.json",
+    "base/ui/main.json",
+    "override/ui/main.json",
+  ]);
+  assert.deepEqual(
+    loaded.files.map((file) => file.packId),
+    ["base", "base", "override"],
+  );
 });

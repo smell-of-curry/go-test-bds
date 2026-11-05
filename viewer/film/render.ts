@@ -2,16 +2,33 @@ import { execFileSync, spawn } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { pathToFileURL, fileURLToPath } from "node:url";
-import { chromium, type Browser, type Page } from "playwright";
+import { chromium, type Browser } from "playwright";
 import { sampleTrackPoints } from "./lookahead";
 import { boundToMs, outputTimes, parseBound } from "./time";
+import { presentFilmFrame } from "./frame";
+
+/** One half-open source window. Numbers are relative seconds; tick strings are absolute. */
+export interface FilmRenderRange {
+  from: string | number;
+  to: string | number;
+}
+
+/** Source window and its half-open frame interval in the concatenated output. */
+export interface FilmOutputRange {
+  fromMs: number;
+  toMs: number;
+  fromFrame: number;
+  toFrame: number;
+}
 
 export interface RenderFilmOptions {
   takeDir: string;
   bot: string;
   /** Seconds (`1.5` / `1.5s`) or ticks (`30t` / `30tick`). */
-  from: string;
-  to: string;
+  from?: string;
+  to?: string;
+  /** Ordered, nonoverlapping source windows, instead of from/to. */
+  ranges?: readonly FilmRenderRange[];
   width: number;
   height: number;
   fps: number;
@@ -32,6 +49,10 @@ export interface RenderFilmOptions {
   dev?: boolean;
   /** Live hub origin. Misses are saved under `<take>/packs-mirror/`. */
   packsFrom?: string;
+  /** Extension modules. Defaults to `<take>/extensions/`, then the mirror. */
+  extensionsDir?: string;
+  /** Host-owned fonts. Defaults to `<take>/fonts/`, then the mirror. */
+  fontDir?: string;
   appDir?: string;
 }
 
@@ -45,6 +66,107 @@ export interface RenderFilmResult {
   renderer: string;
   frameDir: string;
   mp4: string | null;
+  /** Exact offsets for splitting the concatenated output back into source windows. */
+  ranges: FilmOutputRange[];
+}
+
+/** Validate JSON/API ranges without coercing null, booleans or empty strings into zero. */
+export function parseFilmRanges(value: unknown): FilmRenderRange[] {
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new Error("ranges must be a non-empty array of {from, to}");
+  }
+  return value.map((entry: unknown, i) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      throw new Error(`range ${i}: expected {from, to}`);
+    }
+    const range = entry as Record<string, unknown>;
+    for (const key of ["from", "to"]) {
+      const bound = range[key];
+      if (
+        (typeof bound !== "number" && typeof bound !== "string") ||
+        (typeof bound === "number" && !Number.isFinite(bound)) ||
+        (typeof bound === "string" &&
+          !/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?(?:s|t|tick)?$/i.test(
+            bound.trim(),
+          ))
+      ) {
+        throw new Error(`range ${i}: invalid ${key} time`);
+      }
+      parseBound(String(bound));
+    }
+    return {
+      from: range.from as string | number,
+      to: range.to as string | number,
+    };
+  });
+}
+
+/** Validate selection mode before opening a server or launching Chromium. */
+function requestedRanges(
+  opts: Pick<RenderFilmOptions, "from" | "to" | "ranges">,
+): FilmRenderRange[] {
+  if (opts.ranges !== undefined) {
+    if (opts.from !== undefined || opts.to !== undefined) {
+      throw new Error("ranges cannot be combined with from/to");
+    }
+    return parseFilmRanges(opts.ranges);
+  }
+  if (opts.from === undefined || opts.to === undefined) {
+    throw new Error("provide from and to, or ranges");
+  }
+  // Preserve single-window parsing and its legacy clamp before tick zero.
+  parseBound(opts.from);
+  parseBound(opts.to);
+  return [{ from: opts.from, to: opts.to }];
+}
+
+/**
+ * Select source timestamps, retaining each range's own exact output grid.
+ * Gaps remain in source time and disappear only from the output frame indices.
+ */
+export function filmOutputSelection(
+  opts: Pick<RenderFilmOptions, "from" | "to" | "ranges" | "fps">,
+  firstTick: number,
+): {
+  fromMs: number;
+  toMs: number;
+  times: number[];
+  ranges: FilmOutputRange[];
+} {
+  const requested = requestedRanges(opts);
+  const ranges: FilmOutputRange[] = [];
+  const times: number[] = [];
+  for (const [i, range] of requested.entries()) {
+    let fromMs = boundToMs(parseBound(String(range.from)), firstTick);
+    let toMs = boundToMs(parseBound(String(range.to)), firstTick);
+    if (!Number.isSafeInteger(fromMs) || !Number.isSafeInteger(toMs)) {
+      throw new Error(`range ${i}: time is outside the supported clock`);
+    }
+    if (opts.ranges === undefined) {
+      fromMs = Math.max(0, fromMs);
+      toMs = Math.max(0, toMs);
+    } else if (fromMs < 0 || toMs < 0) {
+      throw new Error(`range ${i}: time precedes the first keyframe`);
+    }
+    const previous = ranges[ranges.length - 1];
+    if (previous && fromMs < previous.toMs) {
+      throw new Error(`range ${i}: ranges must be ordered and nonoverlapping`);
+    }
+    const selected = outputTimes(fromMs, toMs, opts.fps);
+    ranges.push({
+      fromMs,
+      toMs,
+      fromFrame: times.length,
+      toFrame: times.length + selected.length,
+    });
+    for (const time of selected) times.push(time);
+  }
+  return {
+    fromMs: ranges[0]!.fromMs,
+    toMs: ranges[ranges.length - 1]!.toMs,
+    times,
+    ranges,
+  };
 }
 
 /**
@@ -57,6 +179,7 @@ export interface RenderFilmResult {
 export async function renderFilm(
   opts: RenderFilmOptions,
 ): Promise<RenderFilmResult> {
+  requestedRanges(opts);
   const serverPath = fileURLToPath(
     new URL("../tools/film-server.mjs", import.meta.url),
   );
@@ -66,6 +189,8 @@ export async function renderFilm(
       dev?: boolean;
       appDir?: string;
       packsFrom?: string;
+      extensionsDir?: string;
+      fontDir?: string;
     }) => Promise<{ url: string; close: () => Promise<void> }>;
   };
   const server = await mod.startFilmServer({
@@ -73,6 +198,8 @@ export async function renderFilm(
     dev: opts.dev,
     appDir: opts.appDir,
     packsFrom: opts.packsFrom,
+    extensionsDir: opts.extensionsDir,
+    fontDir: opts.fontDir,
   });
   const mp4 = opts.out.endsWith(".mp4") ? opts.out : null;
   const frameDir = filmFrameDirectory(opts.out);
@@ -130,11 +257,10 @@ export async function renderFilm(
       );
     }
 
-    let fromMs = boundToMs(parseBound(opts.from), loaded.meta.firstTick);
-    let toMs = boundToMs(parseBound(opts.to), loaded.meta.firstTick);
-    if (fromMs < 0) fromMs = 0;
-    if (toMs < 0) toMs = 0;
-    const times = outputTimes(fromMs, toMs, opts.fps);
+    const { fromMs, toMs, times, ranges } = filmOutputSelection(
+      opts,
+      loaded.meta.firstTick,
+    );
     let track:
       { t: number; pos: [number, number, number]; ease?: string }[] | null =
       null;
@@ -197,7 +323,9 @@ export async function renderFilm(
     const renderer = await page.evaluate(
       () => window.__film?.renderer() ?? "unknown",
     );
-    console.error("film: capturing frames");
+    console.error(
+      `film: capturing ${times.length} frames across ${ranges.length} range(s)`,
+    );
     const t0 = performance.now();
     for (let i = 0; i < times.length; i++) {
       const target = times[i]!;
@@ -207,7 +335,7 @@ export async function renderFilm(
         clock += delta;
       }
       await page.evaluate((ms) => window.__film?.setNow(ms), target);
-      const png = await presentStable(page);
+      const png = await presentFilmFrame(page, opts.hud === true);
       const name = `frame_${String(i).padStart(5, "0")}.png`;
       writeFileSync(join(frameDir, name), Buffer.from(png, "base64"));
     }
@@ -233,40 +361,12 @@ export async function renderFilm(
       renderer,
       frameDir,
       mp4,
+      ranges,
     };
   } finally {
     await browser?.close();
     await server.close();
   }
-}
-
-/**
- * Present until two reads match, so a pack fetch that lands between draws
- * cannot split a frame. The page clock does not move, so motion lerp stays put.
- *
- * @param page - Film page.
- * @returns PNG base64 of the settled frame.
- */
-async function presentStable(page: Page): Promise<string> {
-  // Model/texture fetches resolve after the keyframe that spawned the entity.
-  // Capturing before they settle paints the wireframe placeholder.
-  await page.waitForFunction(
-    () => (window.__viewer?.pendingModelLoads ?? 0) === 0,
-    undefined,
-    { timeout: 120_000 },
-  );
-  let prev = "";
-  for (let i = 0; i < 10; i++) {
-    const png = await page.evaluate(() => window.__film?.present() ?? "");
-    if (!png) throw new Error("film present returned empty");
-    if (i > 0 && png === prev) return png;
-    prev = png;
-    await page.waitForTimeout(40);
-  }
-  console.error(
-    "film: frame did not settle in 10 presents; using the last read",
-  );
-  return prev;
 }
 
 /**

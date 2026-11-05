@@ -3,10 +3,11 @@ import { join } from "node:path";
 import { cameraClearance } from "./clearance";
 import { timelineFromSse } from "./client";
 import { takeMap } from "./map";
-import { renderFilm } from "./render";
+import { filmOutputSelection, parseFilmRanges, renderFilm } from "./render";
 import { boundToMs, parseBound } from "./time";
 
 const HELP = `Usage: npm run film -- render --take <dir> --bot <name> --from <time> --to <time> --out <dir|file.mp4>
+       npm run film -- render --take <dir> --bot <name> --ranges <file.json> --out <dir|file.mp4>
        npm run film -- check --take <dir> --bot <name> --from <time> --to <time> --camera <file> [--fps n]
 
 Render a recorded take offline, frame-exact, with no live bot.
@@ -24,13 +25,14 @@ up with ffmpeg -vf scale=iw*6:ih*6:flags=neighbor to read it.
   --bot <name>          Bot whose <name>.sse to play
   --from <time>         Start. Seconds (1.5, 1.5s) or server ticks (30t, 30tick)
   --to <time>           End, exclusive, same units
+  --ranges <file>       Ordered [{from,to}, ...] windows instead of --from/--to
   --out <path>          PNG directory, or an .mp4 (frames written beside it in frames/)
   --width <n>           Default 1080
   --height <n>          Default 1920
   --fps <n>             Default 60
   --camera <file>       JSON keyframes [{t, pos, yaw, pitch, fov, ease}]
   --gpu                 ANGLE Metal. Default is SwiftShader
-  --hud                 Keep the game HUD (hidden by default)
+  --hud                 Capture game HUD/forms with the world (requires Mojangles)
   --nametags            Keep name tags (hidden by default)
   --hide <name,...>     Also hide these player names (default none)
   --show-self           Draw the recording bot (hidden by default)
@@ -39,11 +41,17 @@ up with ffmpeg -vf scale=iw*6:ih*6:flags=neighbor to read it.
   --dev                 Serve the Vite app instead of viewer/dist
   --app <dir>           Built app directory (default viewer/dist)
   --packs-from <url>    Mirror hub pack responses into <take>/packs-mirror/
+  --extensions <dir>   Viewer extension files (default <take>/extensions/)
+  --font-dir <dir>     Host-owned TTFs (default <take>/fonts/)
   --help
 
 Time is milliseconds after the first keyframe. A tick flag is an absolute
 server tick: (tick - firstKeyframeTick) * 50. The page clock is paused and
 advanced with Playwright runFor, one output frame per 1000/fps ms.
+Ranges concatenate their frame grids, advancing the source clock through gaps.
+They share one bot, camera timeline, viewport and lookahead over the overall bounds.
+Range numbers are seconds; strings also accept tick units. Overlap/order errors fail.
+check also accepts --ranges to inspect only the selected windows.
 
 Packs: take.json cacheDir + baselineTag, else <take>/packs-mirror/, else
 --packs-from. No packs → placeholder cubes.
@@ -54,6 +62,7 @@ interface Flags {
   bot?: string;
   from?: string;
   to?: string;
+  ranges?: string;
   out?: string;
   width: number;
   height: number;
@@ -69,6 +78,8 @@ interface Flags {
   app?: string;
   area?: string;
   packsFrom?: string;
+  extensionsDir?: string;
+  fontDir?: string;
   help: boolean;
 }
 
@@ -152,6 +163,10 @@ function parseArgs(argv: string[]): Flags {
       flags.to = next(++i, a);
       continue;
     }
+    if (a === "--ranges") {
+      flags.ranges = next(++i, a);
+      continue;
+    }
     if (a === "--out") {
       flags.out = next(++i, a);
       continue;
@@ -184,6 +199,14 @@ function parseArgs(argv: string[]): Flags {
       flags.packsFrom = next(++i, a);
       continue;
     }
+    if (a === "--extensions") {
+      flags.extensionsDir = next(++i, a);
+      continue;
+    }
+    if (a === "--font-dir") {
+      flags.fontDir = next(++i, a);
+      continue;
+    }
     throw new Error(`unknown argument: ${a}`);
   }
   return flags;
@@ -197,15 +220,25 @@ async function main(): Promise<void> {
   }
   if (process.argv[2] === "check") return check(flags);
   if (process.argv[2] === "map") return map(flags);
-  if (!flags.take || !flags.bot || !flags.from || !flags.to || !flags.out) {
+  if (
+    !flags.take ||
+    !flags.bot ||
+    (!flags.ranges && (!flags.from || !flags.to)) ||
+    !flags.out
+  ) {
     process.stderr.write(HELP);
-    throw new Error("--take, --bot, --from, --to, and --out are required");
+    throw new Error(
+      "--take, --bot, --out, and either --from/--to or --ranges are required",
+    );
   }
   const result = await renderFilm({
     takeDir: flags.take,
     bot: flags.bot,
     from: flags.from,
     to: flags.to,
+    ranges: flags.ranges
+      ? parseFilmRanges(JSON.parse(readFileSync(flags.ranges, "utf8")))
+      : undefined,
     out: flags.out,
     width: flags.width,
     height: flags.height,
@@ -220,6 +253,8 @@ async function main(): Promise<void> {
     dev: flags.dev,
     appDir: flags.app,
     packsFrom: flags.packsFrom,
+    extensionsDir: flags.extensionsDir,
+    fontDir: flags.fontDir,
   });
   process.stdout.write(
     `${result.frames} ${result.width}x${result.height} → ${result.mp4 ?? result.frameDir}\n`,
@@ -227,30 +262,57 @@ async function main(): Promise<void> {
 }
 
 function check(flags: Flags): void {
-  if (!flags.take || !flags.bot || !flags.from || !flags.to || !flags.camera) {
+  if (
+    !flags.take ||
+    !flags.bot ||
+    (!flags.ranges && (!flags.from || !flags.to)) ||
+    !flags.camera
+  ) {
     process.stderr.write(HELP);
-    throw new Error("check needs --take, --bot, --from, --to, and --camera");
+    throw new Error(
+      "check needs --take, --bot, --camera, and either --from/--to or --ranges",
+    );
   }
   const { frames, firstTick } = timelineFromSse(
     readFileSync(join(flags.take, `${flags.bot}.sse`), "utf8"),
   );
-  const fromSec = boundToMs(parseBound(flags.from), firstTick) / 1000;
-  const toSec = boundToMs(parseBound(flags.to), firstTick) / 1000;
+  const selection = flags.ranges
+    ? filmOutputSelection(
+        {
+          ranges: parseFilmRanges(
+            JSON.parse(readFileSync(flags.ranges, "utf8")),
+          ),
+          from: flags.from,
+          to: flags.to,
+          fps: flags.fps,
+        },
+        firstTick,
+      )
+    : {
+        ranges: [
+          {
+            fromMs: boundToMs(parseBound(flags.from!), firstTick),
+            toMs: boundToMs(parseBound(flags.to!), firstTick),
+          },
+        ],
+      };
   const keys = JSON.parse(readFileSync(flags.camera, "utf8"));
-  const hits = cameraClearance(
-    frames,
-    keys,
-    fromSec,
-    toSec,
-    flags.fps,
-    flags.width / flags.height,
+  const hits = selection.ranges.flatMap(({ fromMs, toMs }) =>
+    cameraClearance(
+      frames,
+      keys,
+      fromMs / 1000,
+      toMs / 1000,
+      flags.fps,
+      flags.width / flags.height,
+    ),
   );
   for (const h of hits)
     process.stdout.write(
       `${h.tSec.toFixed(3)}s lens [${h.pos.map((v) => v.toFixed(2)).join(", ")}] in ${h.block} @ ${h.at.join(" ")}\n`,
     );
   process.stdout.write(
-    `clearance: ${hits.length} blocked sample(s) in ${fromSec.toFixed(2)}..${toSec.toFixed(2)}s\n`,
+    `clearance: ${hits.length} blocked sample(s) in ${selection.ranges.map((r) => `${(r.fromMs / 1000).toFixed(2)}..${(r.toMs / 1000).toFixed(2)}s`).join(", ")}\n`,
   );
   if (hits.length) process.exitCode = 1;
 }

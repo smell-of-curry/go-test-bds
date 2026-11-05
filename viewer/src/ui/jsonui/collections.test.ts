@@ -10,6 +10,8 @@ import {
   readCollectionItem,
 } from "./collections.js";
 import { applyBindings } from "./bindings.js";
+import { buildResolver } from "./resolve.js";
+import { parseUiRawFile } from "./load.js";
 import type {
   BindingSource,
   PropertyBag,
@@ -52,6 +54,146 @@ describe("formButtonsCollection", () => {
     assert.equal(readCollectionItem(items[0]!, "#form_button_text"), "a");
     assert.equal(readCollectionItem(items[0]!, "#form_button_texture"), "t__1");
     assert.equal(readCollectionItem(items[1]!, "form_button_texture"), "");
+  });
+});
+
+describe("heterogeneous factories and ancestor bindings", () => {
+  it("evaluates a dropdown's named sibling binding and its initial toggle state", () => {
+    const raw = parseUiRawFile({
+      namespace: "test",
+      root: {
+        type: "panel",
+        $name: "choices",
+        controls: [
+          { "$name@toggle": {} },
+          {
+            popup: {
+              type: "panel",
+              bindings: [
+                {
+                  binding_type: "view",
+                  source_control_name: "($name)",
+                  source_property_name: "#toggle_state",
+                  target_property_name: "#visible",
+                  resolve_sibling_scope: true,
+                },
+              ],
+            },
+          },
+        ],
+      },
+      toggle: { type: "dropdown" },
+    })!;
+    const resolver = buildResolver([
+      { packId: "fixture", path: "ui/test.json", raw },
+    ]);
+    for (const state of [undefined, true, false]) {
+      const root = resolver.resolve("test", "root")!;
+      const tree = structuredClone(root);
+      tree.controls[0]!.element.props.toggle_default_state = state;
+      const bound = prepareCollectionTree(tree, resolver, source({}), {});
+      assert.equal(
+        bound.controls[0]!.element.props.toggle_state,
+        state === true,
+      );
+      assert.equal(bound.controls[1]!.element.props.visible, state === true);
+    }
+  });
+
+  it("chooses each item's control_ids template and preserves collection index", () => {
+    const raw = parseUiRawFile({
+      namespace: "test",
+      root: {
+        type: "stack_panel",
+        collection_name: "fields",
+        factory: {
+          control_ids: { label: "test.label", toggle: "test.toggle" },
+        },
+      },
+      label: { type: "label", text: "#text" },
+      toggle: { type: "toggle", text: "#text" },
+    })!;
+    const resolver = buildResolver([
+      { packId: "fixture", path: "ui/fields.json", raw },
+    ]);
+    const tree = prepareCollectionTree(
+      resolver.resolve("test", "root")!,
+      resolver,
+      source({}),
+      {
+        fields: [
+          { "#factory_control_id": "label", "#text": "Heading" },
+          { "#factory_control_id": "toggle", "#text": "On" },
+        ],
+      },
+    );
+    assert.deepEqual(
+      tree.controls.map((c) => c.element.type),
+      ["label", "toggle"],
+    );
+    assert.deepEqual(
+      tree.controls.map((c) => c.element.props.text),
+      ["Heading", "On"],
+    );
+    assert.deepEqual(
+      tree.controls.map((c) => c.element.props.collection_index),
+      [0, 1],
+    );
+  });
+
+  it("view bindings read a named ancestor through nested controls", () => {
+    const raw = parseUiRawFile({
+      namespace: "test",
+      root: {
+        type: "panel",
+        controls: [
+          {
+            "instance@holder": {},
+          },
+        ],
+      },
+      holder: {
+        type: "panel",
+        property_bag: { "#caption": "Ancestor" },
+        controls: [
+          {
+            nested: {
+              type: "panel",
+              controls: [
+                {
+                  caption: {
+                    type: "label",
+                    text: "#text",
+                    bindings: [
+                      {
+                        binding_type: "view",
+                        source_control_name: "instance",
+                        source_property_name: "#caption",
+                        target_property_name: "#text",
+                      },
+                    ],
+                  },
+                },
+              ],
+            },
+          },
+        ],
+      },
+    })!;
+    const resolver = buildResolver([
+      { packId: "fixture", path: "ui/ancestor.json", raw },
+    ]);
+    const tree = prepareCollectionTree(
+      resolver.resolve("test", "root")!,
+      resolver,
+      source({}),
+      {},
+    );
+    assert.equal(
+      tree.controls[0]!.element.controls[0]!.element.controls[0]!.element.props
+        .text,
+      "Ancestor",
+    );
   });
 });
 

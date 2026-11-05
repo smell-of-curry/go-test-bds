@@ -28,6 +28,20 @@ const COLOR: Record<string, string> = {
   d: "#ff55ff",
   e: "#ffff55",
   f: "#ffffff",
+  g: "#ddd605", // Minecoin gold.
+  // Bedrock material formatting, not Java underline/strikethrough. Material
+  // RGBs follow bedrock-samples v1.26.50.4 ui/_global_variables.json; code
+  // meanings follow Microsoft's creator/reference/content/rawmessagejson.
+  h: "#d9ccb8", // Quartz.
+  i: "#a9b4b7", // Iron.
+  j: "#8f727d", // Netherite.
+  m: "#ee222c", // Redstone.
+  n: "#c87363", // Copper.
+  p: "#ffbf1e", // Gold.
+  q: "#13a045", // Emerald.
+  s: "#5fecff", // Diamond.
+  t: "#577bff", // Lapis.
+  u: "#b66cdd", // Amethyst.
 };
 
 export interface FormatSegment {
@@ -76,12 +90,6 @@ export function parseFormatCodes(input: string): FormatSegment[] {
           break;
         case "o":
           italic = true;
-          break;
-        case "n":
-          underline = true;
-          break;
-        case "m":
-          strike = true;
           break;
         case "r":
           color = undefined;
@@ -132,6 +140,8 @@ export interface FormatPaint {
   guiScale?: number;
   /** Bedrock shadow: +1 design pixel, colour × 0.25. */
   shadow?: boolean;
+  /** Wrap width in design pixels before GUI scaling. */
+  maxWidth?: number;
 }
 
 /**
@@ -161,6 +171,7 @@ export function formatCodesToFragment(
     const canvas = renderMojanglesCanvas(runs, {
       guiScale: paint?.guiScale ?? 2,
       shadow: paint?.shadow ?? false,
+      maxWidth: paint?.maxWidth,
     });
     if (canvas) {
       // Canvas has no text node. Hidden spans keep the string and § colour
