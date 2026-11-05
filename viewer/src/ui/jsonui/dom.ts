@@ -46,6 +46,8 @@ export interface JsonUiAssets {
    * @returns URL (e.g. `/asset/textures/ui/White.png`).
    */
   textureUrl(path: string): string;
+  /** Resolve a server item identifier to its pack icon. */
+  itemIconUrl?(name: string): Promise<string | null>;
   /**
    * Optional sync lookup for natural size + texture-json nineslice.
    * Flipbook UV crop and tiny chrome (2x2 `control.png`) need this.

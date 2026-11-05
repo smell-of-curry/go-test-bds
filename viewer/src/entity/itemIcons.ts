@@ -4,8 +4,7 @@ import { normalizePath } from "../terrain/assetClient";
 /**
  * Resolve item ids → pack texture paths via `textures/item_texture.json`.
  *
- * Hotbar HUD currently shows text names only; this is the shared atlas lookup
- * for in-world held / dropped item sprites.
+ * Shared by hotbar icons and in-world held / dropped item sprites.
  */
 export class ItemIconResolver {
   private readonly client: AssetClient;
@@ -38,6 +37,7 @@ export class ItemIconResolver {
     const bare = itemName.replace(/^minecraft:/, "").toLowerCase();
     return (
       this.table.get(bare) ??
+      this.table.get(`${bare}_item`) ??
       this.table.get(itemName.toLowerCase()) ??
       // Convention fallback when the atlas omits an entry.
       ((await this.client.has(`textures/items/${bare}.png`))

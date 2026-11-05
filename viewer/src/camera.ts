@@ -87,7 +87,7 @@ export function resolveFov(
  * - Bedrock yaw 0 faces +Z (south); yaw increases westward (90 = west, 180 = north).
  * - Bedrock pitch 0 is horizontal; positive pitch looks down.
  * - Three.js camera default looks down −Z; Y-up; rotation order `YXZ`.
- * - Mapping: `rotation.y = π − yawRad`, `rotation.x = pitchRad`.
+ * - Mapping: `rotation.y = π − yawRad`, `rotation.x = −pitchRad`.
  *   (yaw 180 → north/−Z → y=0; yaw 0 → south/+Z → y=π; positive pitch → look down.)
  *
  * @param camera - Perspective camera to place.
@@ -105,7 +105,7 @@ export function applyBedrockLook(
   const yaw = THREE.MathUtils.degToRad(yawDeg);
   const pitch = THREE.MathUtils.degToRad(pitchDeg);
   camera.rotation.order = "YXZ";
-  camera.rotation.x = pitch;
+  camera.rotation.x = -pitch;
   camera.rotation.y = Math.PI - yaw;
   camera.rotation.z = 0;
 }

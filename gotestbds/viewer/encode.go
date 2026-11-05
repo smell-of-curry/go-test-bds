@@ -1022,7 +1022,7 @@ func (e *encoder) lookingAt(a *actor.Actor) *LookingAt {
 }
 
 func (e *encoder) encodeUI(a *actor.Actor) UI {
-	ui := UI{}
+	ui := UI{BossBars: a.BossBars()}
 	if f, ok := a.LastForm(); ok {
 		ui.Form = &UIForm{
 			Type:         formTypeName(f.Type()),

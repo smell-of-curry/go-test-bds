@@ -1,5 +1,7 @@
 package viewer
 
+import "github.com/smell-of-curry/go-test-bds/gotestbds/actor"
+
 // Schema version carried on every frame. Bump on any change an older client
 // could misread.
 const SchemaVersion = 1
@@ -421,14 +423,15 @@ type Effect struct {
 
 // UI is open forms/containers and recent chat / title state.
 type UI struct {
-	Form      *UIForm      `json:"form,omitempty"`
-	Container *UIContainer `json:"container,omitempty"`
-	Sign      *UISign      `json:"sign,omitempty"`
-	Dialogue  *UIDialogue  `json:"dialogue,omitempty"`
-	Messages  []string     `json:"messages,omitempty"`
-	Title     string       `json:"title,omitempty"`
-	Subtitle  string       `json:"subtitle,omitempty"`
-	ActionBar string       `json:"actionBar,omitempty"`
+	BossBars  []actor.BossBar `json:"bossBars,omitempty"`
+	Form      *UIForm         `json:"form,omitempty"`
+	Container *UIContainer    `json:"container,omitempty"`
+	Sign      *UISign         `json:"sign,omitempty"`
+	Dialogue  *UIDialogue     `json:"dialogue,omitempty"`
+	Messages  []string        `json:"messages,omitempty"`
+	Title     string          `json:"title,omitempty"`
+	Subtitle  string          `json:"subtitle,omitempty"`
+	ActionBar string          `json:"actionBar,omitempty"`
 	// Fade timings for title/subtitle (ticks). Absent → client defaults.
 	FadeInTicks  int32 `json:"fadeInTicks,omitempty"`
 	StayTicks    int32 `json:"stayTicks,omitempty"`

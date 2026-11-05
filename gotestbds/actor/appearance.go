@@ -85,9 +85,36 @@ func (a *Actor) NoteSkin(id uuid.UUID, sk protocol.Skin) {
 	a.storeSkin(id, sk.SkinData, w, h, SlimSkin(sk.ArmSize, geom), geom)
 }
 
-// ForgetSkin drops a player-list removal.
+// PlayerSkinListed keeps list membership separate from visible NPC lifetime.
+func (a *Actor) PlayerSkinListed(id uuid.UUID) { delete(a.unlistedSkins, id) }
+
+// ForgetSkin marks list removal. NPCs leave the list immediately after spawn,
+// but their texture and geometry must survive until the entity despawns.
 func (a *Actor) ForgetSkin(id uuid.UUID) {
-	delete(a.skins, id)
+	if a.unlistedSkins == nil {
+		a.unlistedSkins = make(map[uuid.UUID]bool)
+	}
+	a.unlistedSkins[id] = true
+	a.PruneUnlistedSkins()
+}
+
+// PruneUnlistedSkins releases appearances with neither a list nor entity owner.
+func (a *Actor) PruneUnlistedSkins() {
+	if len(a.unlistedSkins) == 0 {
+		return
+	}
+	live := make(map[uuid.UUID]bool)
+	for ent := range a.World().Entities() {
+		if player, ok := ent.(interface{ UUID() uuid.UUID }); ok {
+			live[player.UUID()] = true
+		}
+	}
+	for id := range a.unlistedSkins {
+		if !live[id] {
+			delete(a.skins, id)
+			delete(a.unlistedSkins, id)
+		}
+	}
 }
 
 // Appearance returns the skin last stored for id.

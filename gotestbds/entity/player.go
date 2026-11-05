@@ -7,7 +7,7 @@ import (
 )
 
 // EyeOffset is how far above the feet Bedrock writes a player's position in
-// AddPlayer, MovePlayer, and MoveActorAbsolute.
+// MovePlayer and MoveActorAbsolute (AddPlayer already uses feet).
 const EyeOffset = 1.62
 
 // Player is an implementation of a player entity. Its position is the feet.

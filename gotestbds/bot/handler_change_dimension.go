@@ -27,6 +27,7 @@ func (*ChangeDimensionHandler) Handle(p packet.Packet, _ *Bot, a *actor.Actor) e
 	// destination — keep them and the same ChunkPos reads the wrong world.
 	a.World().FlushChunks()
 	a.World().FlushEntities(a.RuntimeID())
+	a.PruneUnlistedSkins()
 	a.World().SetDimension(to)
 
 	pos := mcmath.Vec32To64(pk.Position)

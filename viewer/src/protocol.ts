@@ -202,6 +202,7 @@ export interface CameraWire {
 }
 
 export interface UI {
+  bossBars?: { id: number; title: string; health: number; colour: number; overlay: number }[];
   form?: {
     type: string;
     title: string;

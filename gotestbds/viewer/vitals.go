@@ -18,15 +18,12 @@ func collectVitals(bot string, a *actor.Actor) VitalsFrame {
 	st := a.State()
 	hotbar := make([]*VitalsHotbarSlot, 9)
 	for i := 0; i < 9; i++ {
-		stack, err := a.Inventory().Item(i)
-		if err != nil || stack.Empty() {
-			continue
-		}
-		name, _ := stack.Item().EncodeItem()
+		raw := a.Inventory().RawStack(i)
+		name := a.ItemStackName(raw)
 		if name == "" || name == "minecraft:air" {
 			continue
 		}
-		hotbar[i] = &VitalsHotbarSlot{TypeID: name, Count: stack.Count()}
+		hotbar[i] = &VitalsHotbarSlot{TypeID: name, Count: int(raw.Count)}
 	}
 	air, maxAir := int(st.Air()), int(st.MaxAir())
 	if maxAir <= 0 {

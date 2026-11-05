@@ -1,3 +1,4 @@
+import { ItemIconResolver } from "../../entity/itemIcons";
 /**
  * JSON UI runtime: load pack ui files, mount the HUD, drive frames from WorldState.
  */
@@ -156,7 +157,12 @@ export function createJsonUiRuntime(opts: JsonUiRuntimeOptions): JsonUiRuntime {
   pendingWin.__jsonUiTextureRequested =
     pendingWin.__jsonUiTextureRequested ?? 0;
 
+  const itemIcons = new ItemIconResolver(assetHttp);
   const assets: JsonUiAssets = {
+    async itemIconUrl(name: string) {
+      const path = await itemIcons.resolve(name);
+      return path ? assets.textureUrl(path) : null;
+    },
     textureUrl(path: string): string {
       const withExt = /\.[a-z]{3,4}$/i.test(path) ? path : `${path}.png`;
       if (!assetBase) return withExt;

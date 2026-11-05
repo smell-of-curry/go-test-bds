@@ -208,7 +208,13 @@ func TestPlayerListSkinAndEmote(t *testing.T) {
 	}}}, nil, a); err != nil {
 		t.Fatal(err)
 	}
+	if _, ok := a.Appearance(other); !ok {
+		t.Fatal("visible NPC lost its skin on player list removal")
+	}
+	if err := (&bot.RemoveActorHandler{}).Handle(&packet.RemoveActor{EntityUniqueID: 9}, nil, a); err != nil {
+		t.Fatal(err)
+	}
 	if _, ok := a.Appearance(other); ok {
-		t.Fatal("skin survived player list removal")
+		t.Fatal("unlisted NPC skin survived despawn")
 	}
 }

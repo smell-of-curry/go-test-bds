@@ -77,6 +77,8 @@ export interface ViewerHandle {
     sy: number,
   ) => {
     point: number[];
+    entityRuntimeID?: number;
+    distance: number;
     block: number[];
     palette: { name: string; states: Record<string, unknown> } | null;
     pass: string;
@@ -248,8 +250,18 @@ export function installViewerHandle(
       const ray = new THREE.Raycaster();
       ray.setFromCamera(ndc, camera.perspective);
       const hits = ray.intersectObjects(scene.scene.children, true);
-      const hit = hits.find((h) => (h.object as THREE.Mesh).isMesh);
+      const hit = hits.find((h) => {
+        if (!(h.object as THREE.Mesh).isMesh) return false;
+        for (let node: THREE.Object3D | null = h.object; node; node = node.parent) {
+          if (!node.visible) return false;
+        }
+        return h.object.name !== "entity-shadow";
+      });
       if (!hit) return null;
+      let entityRuntimeID: number | undefined;
+      for (let node: THREE.Object3D | null = hit.object; node; node = node.parent) {
+        if (/^entity:\d+$/.test(node.name)) { entityRuntimeID = Number(node.name.slice(7)); break; }
+      }
       // Step just inside the surface along the ray to land in the block.
       const inside = hit.point.clone().addScaledVector(ray.ray.direction, 0.01);
       const bx = Math.floor(inside.x);
@@ -307,6 +319,8 @@ export function installViewerHandle(
       }
       return {
         point: [hit.point.x, hit.point.y, hit.point.z],
+        entityRuntimeID,
+        distance: hit.distance,
         block: [bx, by, bz],
         palette: palette
           ? { name: palette.name, states: palette.states ?? {} }

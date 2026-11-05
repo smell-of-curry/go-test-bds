@@ -49,7 +49,10 @@ type Actor struct {
 
 	// skins is keyed by player UUID. Written from packet handlers and read
 	// from the viewer encoder, both on the bot goroutine.
-	skins map[uuid.UUID]Appearance
+	skins         map[uuid.UUID]Appearance
+	unlistedSkins map[uuid.UUID]bool
+	// Accessed on the actor goroutine by packet handlers and viewer snapshots.
+	bossBars map[int64]BossBar
 
 	cmdMu   sync.Mutex
 	cmdWait map[uuid.UUID]chan CommandResult

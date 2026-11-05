@@ -188,7 +188,7 @@ func TestOtherPlayerPositionIsFeet(t *testing.T) {
 		Armour:    inventory.NewArmour(nil),
 		Ui:        inventory.NewHandle(54, 0, nil),
 	}.New()
-	_ = (&AddEntityHandler{}).Handle(&packet.AddPlayer{EntityRuntimeID: 2, Position: mgl32.Vec3{3, 70 + eyeOffset, 3}}, nil, a)
+	_ = (&AddEntityHandler{}).Handle(&packet.AddPlayer{EntityRuntimeID: 2, Position: mgl32.Vec3{3, 70, 3}}, nil, a)
 	other, ok := a.World().Entity(2)
 	if !ok {
 		t.Fatal("AddPlayer did not add the entity")

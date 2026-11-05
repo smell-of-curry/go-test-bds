@@ -62,6 +62,7 @@ export function initHud(opts: {
   const root = document.createElement("div");
   root.id = "player-hud";
   root.innerHTML = `
+    <div class="hud-bossbars" data-hud="bossbars"></div>
     <div class="hud-chat" data-hud="chat"></div>
     <div class="hud-title-wrap">
       <div class="hud-title" data-hud="title"></div>
@@ -78,6 +79,8 @@ export function initHud(opts: {
   `;
   document.body.appendChild(root);
 
+  const bossEl = root.querySelector('[data-hud="bossbars"]') as HTMLElement;
+  let lastBossKey = "";
   const chatEl = root.querySelector('[data-hud="chat"]') as HTMLElement;
   const titleEl = root.querySelector('[data-hud="title"]') as HTMLElement;
   const subtitleEl = root.querySelector('[data-hud="subtitle"]') as HTMLElement;
@@ -262,6 +265,36 @@ export function initHud(opts: {
     onFrame(state: WorldState): void {
       const now = performance.now();
       applyUi(state.ui, now);
+      const bars = state.ui?.bossBars ?? [];
+      const bossKey = JSON.stringify(bars);
+      if (bossKey !== lastBossKey) {
+        lastBossKey = bossKey;
+        bossEl.replaceChildren();
+        const colours = ["#e65db4", "#527beb", "#dc4444", "#60c744", "#e9d74a", "#a353d1", "#663399", "#eeeeee"];
+        for (const bar of bars) {
+          const wrap = document.createElement("div");
+          wrap.className = "hud-bossbar";
+          const label = document.createElement("div");
+          label.appendChild(formatCodesToFragment(localizeChatText(bar.title, opts.getLang?.()), {guiScale:2,shadow:true}));
+          const track = document.createElement("div");
+          track.className = "hud-bossbar-track";
+          track.setAttribute("role", "progressbar");
+          track.setAttribute("aria-label", stripFormatCodes(bar.title));
+          track.setAttribute("aria-valuenow", String(Math.round(bar.health * 100)));
+          const fill = document.createElement("div");
+          fill.style.width = `${Math.max(0,Math.min(1,bar.health))*100}%`;
+          fill.style.height = "100%";
+          fill.style.backgroundColor = colours[bar.colour] ?? colours[0]!;
+          track.appendChild(fill);
+          const segments = [0,6,10,12,20][bar.overlay] ?? 0;
+          if (segments) {
+            const overlay = document.createElement("div");
+            overlay.style.cssText = `position:absolute;inset:0;background:repeating-linear-gradient(to right,transparent 0,transparent calc(${100/segments}% - 2px),#252025 calc(${100/segments}% - 2px),#252025 ${100/segments}%)`;
+            track.appendChild(overlay);
+          }
+          wrap.append(label,track); bossEl.appendChild(wrap);
+        }
+      }
       renderVitals(state.actor);
       renderHotbar(state.actor);
       if (state.dirtyBlocks.length) {

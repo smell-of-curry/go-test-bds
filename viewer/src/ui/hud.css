@@ -132,3 +132,6 @@
   font-size: 12px;
   font-weight: 700;
 }
+
+#player-hud .hud-bossbars { position:absolute; top:12px; left:50%; transform:translateX(-50%); text-align:center; display:grid; gap:12px; }
+#player-hud .hud-bossbar-track { position:relative; width:364px; max-width:80vw; height:10px; margin-top:4px; border:2px solid #171717; background:#343034; }

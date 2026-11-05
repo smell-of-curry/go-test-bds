@@ -1360,8 +1360,7 @@ function paintIconRow(
 }
 
 /**
- * Hotbar stub: slot frames + count badges.
- * Item icons: punt without ItemIconResolver wired (needs async atlas).
+ * Hotbar slots with pack-resolved item icons and stack counts.
  *
  * @param host - Container.
  * @param vitals - Vitals with hotbar.
@@ -1405,11 +1404,25 @@ function paintHotbar(
       slot.dataset.selected = "1";
     }
     const stack = slots[i];
+    if (stack) {
+      slot.dataset.item = stack.typeId;
+      slot.title = stack.typeId.replace(/^minecraft:/, "").replaceAll("_", " ");
+      const icon = document.createElement("img");
+      icon.alt = slot.title;
+      icon.style.cssText = `position:absolute;width:${16 * guiScale}px;height:${16 * guiScale}px;left:50%;top:50%;transform:translate(-50%,-50%);object-fit:contain;image-rendering:pixelated;pointer-events:none`;
+      // Each promise owns its detached slot: a late result cannot overwrite
+      // the selected item after inventory changes or a server transfer.
+      void assets.itemIconUrl?.(stack.typeId).then((url) => {
+        if (url) { icon.src = url; slot.appendChild(icon); }
+        else slot.textContent = slot.title;
+      }).catch(() => { slot.textContent = slot.title; });
+    }
     if (stack && stack.count > 1) {
       const badge = document.createElement("div");
       badge.className = "jsonui-hotbar-count";
       badge.textContent = String(stack.count);
       badge.style.position = "absolute";
+      badge.style.zIndex = "1";
       badge.style.right = "1px";
       badge.style.bottom = "1px";
       badge.style.fontSize = `${8 * guiScale}px`;
@@ -1420,7 +1433,7 @@ function paintHotbar(
       badge.style.pointerEvents = "none";
       slot.appendChild(badge);
     }
-    // ponytail: item icons need ItemIconResolver + atlas; slot frame + count only.
+
     host.appendChild(slot);
   }
 }

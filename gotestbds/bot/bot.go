@@ -306,6 +306,7 @@ func (b *Bot) HandlePacket(pk packet.Packet) {
 // registerHandlers registers all packet handlers.
 func (b *Bot) registerHandlers() {
 	b.handlers = map[uint32]packetHandler{
+		packet.IDBossEvent:                   &BossEventHandler{},
 		packet.IDAddActor:                    &AddEntityHandler{},
 		packet.IDAddItemActor:                &AddEntityHandler{},
 		packet.IDAddPlayer:                   &AddEntityHandler{},

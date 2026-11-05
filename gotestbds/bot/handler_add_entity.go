@@ -29,7 +29,8 @@ func (*AddEntityHandler) Handle(p packet.Packet, b *Bot, a *actor.Actor) error {
 		setHeadYaw(ent, float64(pk.HeadYaw))
 		setProperties(ent, pk.EntityProperties)
 	}
-	ent.Move(entity.FeetOf(ent, ent.Position()), rot)
+	// Spawn packets use feet positions. Movement packets for players use eyes.
+	ent.Move(ent.Position(), rot)
 	a.World().AddEntity(ent)
 	for _, link := range links {
 		if err := (&SetActorLinkHandler{}).Handle(&packet.SetActorLink{EntityLink: link}, b, a); err != nil {

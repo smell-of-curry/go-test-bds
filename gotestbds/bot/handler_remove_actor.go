@@ -19,5 +19,6 @@ func (r RemoveActorHandler) Handle(p packet.Packet, b *Bot, a *actor.Actor) erro
 		// e.g. one that despawned outside the bot's chunk radius.
 		b.logger.Debug("removing untracked entity", "entity", removeActor.EntityUniqueID)
 	}
+	a.PruneUnlistedSkins()
 	return nil
 }
