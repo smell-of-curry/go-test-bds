@@ -144,3 +144,33 @@ func TestSendMovementSynchronizesOnlyLocalHead(t *testing.T) {
 		t.Fatalf("local movement changed remote head/body: %v/%v", remote.HeadYaw(), remote.Rotation().Yaw())
 	}
 }
+
+// Normalizing a zero mathgl vector produces NaN. A stationary look must still
+// send valid input so the server can accept its head and body rotation.
+func TestStationaryLookSendsFiniteInput(t *testing.T) {
+	for _, moving := range []bool{false, true} {
+		a, conn := newLookActor(t)
+		a.LookAt(a.EyePos().Add(mgl64.Vec3{10, 0, 0}))
+		a.moving = moving
+		a.SendMovement()
+		pk := lookAuthInput(t, conn)
+		if pk.MoveVector != (mgl32.Vec2{}) || pk.RawMoveVector != (mgl32.Vec2{}) {
+			t.Fatalf("stationary moving=%v sent move=%v raw=%v, want finite zero vectors", moving, pk.MoveVector, pk.RawMoveVector)
+		}
+		if pk.Yaw != 270 || pk.HeadYaw != 270 {
+			t.Fatal("stationary input lost its look direction")
+		}
+	}
+}
+
+func TestMovingInputStillNormalizesDirection(t *testing.T) {
+	a, conn := newLookActor(t)
+	a.Move(a.Position(), cube.Rotation{0, 0})
+	a.moving = true
+	a.delta = mgl64.Vec3{0.3, 0, 0.4}
+	a.SendMovement()
+	pk := lookAuthInput(t, conn)
+	if math.Abs(float64(pk.MoveVector.Len()-1)) > 1e-6 || pk.MoveVector[0] <= 0 || pk.MoveVector[1] <= 0 {
+		t.Fatalf("moving input no longer normalized: %v", pk.MoveVector)
+	}
+}

@@ -288,13 +288,19 @@ func (a *Actor) SendMovement() {
 	if a.vehicleUniqueID != 0 && a.rideMoveSet {
 		moveVector = a.rideMove
 	}
+	// mathgl normalizes zero to NaN. Idle and look-only input must retain a
+	// finite zero vector, otherwise BDS can reject the entire movement packet.
+	normalizedMove := moveVector
+	if moveVector.LenSqr() > 0 {
+		normalizedMove = moveVector.Normalize()
+	}
 
 	a.fillMovementBitset()
 	pk := &packet.PlayerAuthInput{
 		Pitch:             pitch,
 		Yaw:               yaw,
 		Position:          mcmath.Vec64To32(a.Position().Add(mgl64.Vec3{0, 1.62})),
-		MoveVector:        moveVector.Normalize(),
+		MoveVector:        normalizedMove,
 		HeadYaw:           yaw,
 		InputData:         a.movementBitset,
 		InputMode:         packet.InputModeTouch,
