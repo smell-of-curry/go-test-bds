@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
-	"unsafe"
 )
 
 // FormElement represents form element.
@@ -298,10 +297,13 @@ type FormStepSlider struct {
 
 // UnmarshalJSON ...
 func (s *FormStepSlider) UnmarshalJSON(data []byte) error {
-	var i sliderInternals
-	err := json.Unmarshal(data, &i)
-	s.d = *(*dropdownInternals)(unsafe.Pointer(&i))
-	return err
+	var i stepSliderInternals
+	if err := json.Unmarshal(data, &i); err != nil {
+		return err
+	}
+	s.d = dropdownInternals{Text: i.Text, Options: i.Options, DefaultIndex: i.DefaultIndex}
+	s.value = i.DefaultIndex
+	return nil
 }
 
 // stepSliderInternals ...
