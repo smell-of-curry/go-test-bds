@@ -112,6 +112,8 @@ test(
       rot: [0, 15, 30] as [number, number, number],
     };
     let pose = a.tickPoses(0.05, walking);
+    // Player gait follows authoritative travel, not a retained impulse.
+    walking.pos = [walking.pos[0] + 0.215, walking.pos[1], walking.pos[2]];
     pose = a.tickPoses(0.05, walking);
     assert.ok(Math.abs(pose.get("leftarm")?.rotation[0] ?? 0) > 1);
     assert.ok(

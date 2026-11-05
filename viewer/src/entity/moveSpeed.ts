@@ -33,7 +33,7 @@ export function createMoveTrack(): MoveTrack {
 
 /** One frame of horizontal motion. */
 export interface MoveSample {
-  /** max(wire blocks/s, smoothed position blocks/s). For limb swing. */
+  /** Smoothed travel, optionally supplemented by wire velocity. For limb swing. */
   blocksPerSec: number;
   /**
    * `blocksPerSec / 20`, same unit as wire `vel` and
@@ -56,6 +56,9 @@ export interface MoveSample {
  * @param pos - Current feet position, blocks.
  * @param dtSec - Frame delta seconds.
  * @param vel - Wire velocity, blocks per tick.
+ * @param source - Players use authoritative position travel: their wire
+ * velocity can be a knockback impulse that the server never clears. Other
+ * actors may be velocity-driven and retain the wire fallback.
  * @returns speed, distance, and the position delta.
  */
 export function stepHorizontalMove(
@@ -63,13 +66,16 @@ export function stepHorizontalMove(
   pos: [number, number, number],
   dtSec: number,
   vel: [number, number, number],
+  source: "position" | "velocity-fallback" = "velocity-fallback",
 ): MoveSample {
   const dt = Number.isFinite(dtSec) && dtSec > 0 ? dtSec : 0;
   const velBps =
-    Math.hypot(
-      Number.isFinite(vel[0]) ? vel[0] : 0,
-      Number.isFinite(vel[2]) ? vel[2] : 0,
-    ) * TICKS_PER_SEC;
+    source === "position"
+      ? 0
+      : Math.hypot(
+          Number.isFinite(vel[0]) ? vel[0] : 0,
+          Number.isFinite(vel[2]) ? vel[2] : 0,
+        ) * TICKS_PER_SEC;
   // A film present redraws the same instant (dt 0). Treating that as a stop
   // zeroed modified_move_speed and the bike controller dropped into idle.
   if (!(dt > 0)) {

@@ -947,8 +947,13 @@ export class ViewerScene {
         } else {
           const speed = node.animator
             ? node.animator.horizontalBlocksPerSec
-            : stepHorizontalMove(node.move, ent.pos, dtSec, ent.vel)
-                .blocksPerSec;
+            : stepHorizontalMove(
+                node.move,
+                ent.pos,
+                dtSec,
+                ent.vel,
+                ent.player ? "position" : "velocity-fallback",
+              ).blocksPerSec;
           tickLocomotion(node.loco, dtSec, speed, ent.swing ?? 0);
           addLocomotionPoses(node.loco, node.model.bones.keys(), poses);
         }

@@ -378,7 +378,13 @@ export class EntityAnimator {
    * @param delta - dt seconds.
    */
   private syncQueries(ent: AnimEntityState, delta: number): void {
-    const move = stepHorizontalMove(this.move, ent.pos, delta, ent.vel);
+    const move = stepHorizontalMove(
+      this.move,
+      ent.pos,
+      delta,
+      ent.vel,
+      ent.player ? "position" : "velocity-fallback",
+    );
     this.distanceMoved += move.distance;
     this.blocksPerSec = move.blocksPerSec;
     const look = headLookFromRot(ent.rot);
