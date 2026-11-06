@@ -11,13 +11,11 @@ import {
 } from "../src/clouds";
 import {
   builtinEmote,
-  EMOTE_DURATION_SEC,
+  registerNativeEmotes,
   WAVE_EMOTE_ID,
 } from "../src/entity/emotes";
 import { entityShade } from "../src/entity/lighting";
 import { shadowQuads } from "../src/entity/shadow";
-import { sampleAnimationPoses } from "../src/entity/animation";
-import { createDefaultHost } from "../src/molang";
 
 test.describe("film look math", () => {
   test("entity shade is top-bright and bottom-dark", () => {
@@ -41,22 +39,10 @@ test.describe("film look math", () => {
     expect(cloudDriftBlocks(1000)).toBe(cloudDriftBlocks(1000));
   });
 
-  test("wave emote raises the right arm then returns", () => {
-    const anim = builtinEmote(WAVE_EMOTE_ID);
-    expect(anim).not.toBeNull();
+  test("emotes require imported native assets; unknown IDs have no fake fallback", () => {
+    registerNativeEmotes({ schemaVersion: 1, emotes: [] });
+    expect(builtinEmote(WAVE_EMOTE_ID)).toBeNull();
     expect(builtinEmote("not-a-real-emote")).toBeNull();
-    const host = createDefaultHost();
-    const mid = sampleAnimationPoses(anim!, 0.5, host);
-    const arm = mid.get("rightArm");
-    expect(arm).toBeTruthy();
-    expect(arm!.rotation[0]).toBeLessThan(-100);
-    expect(Math.abs(arm!.rotation[2])).toBeGreaterThan(5);
-    const end = sampleAnimationPoses(anim!, EMOTE_DURATION_SEC, host);
-    const back = end.get("rightArm");
-    expect(back!.rotation[0]).toBeCloseTo(0, 3);
-    expect(
-      sampleAnimationPoses(anim!, EMOTE_DURATION_SEC + 0.5, host).size,
-    ).toBe(0);
   });
 
   test("blob shadow lands on the block under the feet and fades when high", () => {

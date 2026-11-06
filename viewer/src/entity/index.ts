@@ -120,7 +120,7 @@ export {
 } from "./itemSprite";
 export { ItemIconResolver } from "./itemIcons";
 export { createNameTag, nameTagAnchor, type NameTagSprite } from "./nameTag";
-export { builtinEmote, EMOTE_DURATION_SEC, WAVE_EMOTE_ID } from "./emotes";
+export { builtinEmote, registerNativeEmotes, WAVE_EMOTE_ID } from "./emotes";
 export { entityShade, setEntityLight } from "./lighting";
 export { EntityBlobShadow, shadowQuads, shadowRadius } from "./shadow";
 export {

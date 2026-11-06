@@ -95,10 +95,15 @@ collision width, fading with height. Items get none.
 `geometry.humanoid.custom` / `geometry.humanoid.customSlim` (the slim geo
 lives in vanilla `models/mobs.json`). Missing skin → Steve.
 
-Persona emotes are **not** in any resource pack. `src/entity/emotes/` is the
-documented exception: Bedrock animation JSON parsed by `parseAnimations`.
-Wave id `4c8ae710-df2e-47cd-814d-cc7bf21a3d67` raises `rightArm` and swings
-it for 3 s, then idle. Unknown ids do nothing.
+Native persona emotes come from an installed Minecraft client. Run
+`python3 tools/import-emotes.py` from `viewer/`, then rebuild the viewer.
+The importer reads bundled `.brarchive` files, loose metadata/animation JSON,
+and readable persona cache ZIPs into ignored `.cache/emotes/`. It resolves
+UUIDs through the native metadata and preserves animation keyframes unchanged.
+Vite embeds the local dataset for both live viewing and offline filming.
+There is no hand-authored wave fallback. Missing assets produce a build warning;
+unknown IDs contribute no pose. Playback uses each source animation's duration.
+See [emote import documentation](emotes/README.md) for coverage and limitations.
 
 ## Equipment / items / name tags
 

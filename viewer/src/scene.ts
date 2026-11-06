@@ -12,7 +12,6 @@ import {
   createLocomotion,
   createMoveTrack,
   createNameTag,
-  EMOTE_DURATION_SEC,
   EntityAnimator,
   type ServerAnimRequest,
   EntityBlobShadow,
@@ -1967,7 +1966,7 @@ export class ViewerScene {
   }
 
   /**
-   * Overlay a built-in emote onto the pose map. Unknown ids are ignored.
+   * Overlay an imported native emote onto the pose map. Unknown ids are ignored.
    * Time is `(snapshotTick - startTick) / 20`.
    *
    * @param ent - Entity snapshot.
@@ -1980,7 +1979,7 @@ export class ViewerScene {
     if (!anim) return;
     const tick = this.storeRef?.tick ?? this.worldTime ?? 0;
     const elapsed = (tick - emote.startTick) / 20;
-    if (elapsed < 0 || elapsed > EMOTE_DURATION_SEC) return;
+    if (elapsed < 0 || elapsed > anim.animationLength) return;
     const extra = sampleAnimationPoses(anim, elapsed, createDefaultHost());
     for (const [bone, pose] of extra) poses.set(bone, pose);
   }

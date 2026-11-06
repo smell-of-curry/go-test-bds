@@ -6,7 +6,8 @@ import {
 import { createFilmRandom, installFilmMode } from "../film/client";
 import { hiddenEntityIds, hideNameSet } from "../film/hide";
 import { installViewerHandle } from "./debug";
-import { EntityModelRegistry } from "./entity";
+import { EntityModelRegistry, registerNativeEmotes } from "./entity";
+import nativeEmotes from "virtual:native-emotes";
 import { MotionLerp } from "./motion";
 import { Overlay } from "./overlay";
 import { ParticleRegistry, ParticleSystem } from "./particles";
@@ -46,6 +47,8 @@ const HIDE_NO_NAMES: ReadonlySet<string> = new Set();
 /** Actor rids since the last keyframe, so a rejoin stays hidden. */
 const selfRids = new Set<number>();
 
+// Build-time import ensures the same dataset is available offline and live.
+registerNativeEmotes(nativeEmotes);
 const store = new Store();
 const scene = new ViewerScene(canvas, labelsEl);
 scene.nameTagsEnabled = !filmMode || filmNametags;
