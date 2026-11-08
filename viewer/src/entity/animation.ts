@@ -333,8 +333,17 @@ export function applyBonePoses(
   headPitchDeg = 0,
 ): void {
   const head = bones.get("head") ?? bones.get("Head");
+  // Vanilla animation channels use lowercase limb names, while the humanoid
+  // geometry and emotes use camelCase. Preserve exact matches and only fall
+  // back when case folding identifies one unambiguous animation channel.
+  const foldedPoses = new Map<string, BoneAnimPose | null>();
+  for (const [name, pose] of poses) {
+    const key = name.toLowerCase();
+    foldedPoses.set(key, foldedPoses.has(key) ? null : pose);
+  }
   for (const [name, group] of bones) {
-    const pose = poses.get(name) ?? emptyBonePose();
+    const pose =
+      poses.get(name) ?? foldedPoses.get(name.toLowerCase()) ?? emptyBonePose();
     const extraPitch = group === head ? headPitchDeg : 0;
     setBoneLocalPose(group, pose, extraPitch);
   }
