@@ -181,10 +181,14 @@ export function addLocomotionPoses(
     : 0;
   if (walk === 0 && !swinging) return;
 
+  // Model callers pass Map.keys(), which is single-use. Both selection and
+  // application must traverse the complete set of bones.
+  const names = Array.from(boneNames);
+
   // One-shot swing goes to the right arm, or the left when no right exists.
   let swingArm: string | null = null;
   if (swinging) {
-    for (const name of boneNames) {
+    for (const name of names) {
       const limb = classifyLimb(name);
       if (limb?.kind !== "arm") continue;
       if (limb.side === "right") {
@@ -195,7 +199,7 @@ export function addLocomotionPoses(
     }
   }
 
-  for (const name of boneNames) {
+  for (const name of names) {
     const limb = classifyLimb(name);
     if (!limb) continue;
     const existing = poses.get(name);
