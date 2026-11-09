@@ -156,6 +156,21 @@ export class EntityModelRegistry {
     );
   }
 
+  /** Geometry and texture selection can change after a native property update. */
+  appearanceKey(ent: EntityLike): string {
+    const inputs = toInputs(ent);
+    const def = this.entities.get(inputs.type);
+    if (!def) return "";
+    return JSON.stringify(
+      resolveRenderPasses(def, this.controllers, inputs).map((pass) => ({
+        geometry: pass.geometryId,
+        textures: pass.texturePaths,
+        material: pass.materialName,
+        visibility: [...pass.partVisibility],
+      })),
+    );
+  }
+
   /**
    * Build (or fetch cached) a model for an entity. Returns null on any failure
    * so the scene can keep the wireframe box.

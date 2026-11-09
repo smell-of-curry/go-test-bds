@@ -421,6 +421,8 @@ interface EntityNode {
   gearKey: string;
   /** Skin hash/geometry signature; change reloads the player model. */
   skinKey: string;
+  /** Live render-controller geometry/texture selection. */
+  appearanceKey: string;
   /** Blob shadow projected onto block tops. */
   shadow: EntityBlobShadow;
 }
@@ -1204,6 +1206,7 @@ export class ViewerScene {
         bornSec: performance.now() / 1000,
         gearKey: "",
         skinKey: skinKeyOf(ent),
+        appearanceKey: this.entityRegistry?.appearanceKey(ent) ?? "",
         shadow: new EntityBlobShadow(),
       };
       this.scene.add(node.shadow.mesh);
@@ -1226,6 +1229,12 @@ export class ViewerScene {
       this.clearEntityModel(node);
       this.requestEntityModel(node, ent);
     } else if (!node.model && !node.itemSprite && this.entityRegistry) {
+      this.requestEntityModel(node, ent);
+    }
+
+    const appearanceKey = this.entityRegistry?.appearanceKey(ent) ?? "";
+    if (node.appearanceKey !== appearanceKey) {
+      node.appearanceKey = appearanceKey;
       this.requestEntityModel(node, ent);
     }
 
