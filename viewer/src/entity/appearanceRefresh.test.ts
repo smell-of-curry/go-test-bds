@@ -16,6 +16,12 @@ test("native shiny update refreshes the existing scene model only when appearanc
           identifier: "pokemon:test",
           geometry: { default: "geometry.test" },
           textures: { default: "normal", shiny: "blue" },
+          scripts: {
+            initialize: ["v.offset = 2;"],
+            pre_animation: [
+              "v.skin_index = query.property('pack:skin_index') + v.offset;",
+            ],
+          },
           render_controllers: ["controller.render.test"],
         },
       },
@@ -28,7 +34,9 @@ test("native shiny update refreshes the existing scene model only when appearanc
           textures: { "Array.skins": ["Texture.default", "Texture.shiny"] },
         },
         geometry: "Geometry.default",
-        textures: ["Array.skins[query.property('pack:shiny')]"],
+        textures: [
+          "Array.skins[(v.skin_index == 2 && query.property('pack:shiny') == true) ? 1 : 0]",
+        ],
       },
     },
   }))
@@ -37,7 +45,7 @@ test("native shiny update refreshes the existing scene model only when appearanc
     rid: 1,
     type: "pokemon:test",
     player: false,
-    props: { "pack:shiny": 0, air: 300 },
+    props: { "pack:shiny": 0, "pack:skin_index": 0, air: 300 },
     flags: {},
     bbox: [1, 1],
     rot: [0, 0, 0],

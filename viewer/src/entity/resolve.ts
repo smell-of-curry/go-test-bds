@@ -50,6 +50,7 @@ export function selectControllers(
     return ["controller.render.default"];
   }
   const host = createEntityMolangHost(inputs);
+  prepareRenderVariables(def, host);
   const chosen: string[] = [];
   const bare: string[] = [];
   for (const ref of def.renderControllers) {
@@ -78,6 +79,7 @@ export function resolveOnePass(
 ): ResolvedControllerPass | null {
   const arrayTables = buildArrayTables(rc, def);
   const host = createEntityMolangHost(inputs, arrayTables);
+  prepareRenderVariables(def, host);
 
   const geoExpr = rc.geometry ?? "Geometry.default";
   const geometryRef = resolveResourceExpr(geoExpr, host, def, "geometry");
@@ -359,4 +361,17 @@ function truthy(v: MolangValue): boolean {
   if (typeof v === "boolean") return v;
   if (Array.isArray(v)) return v.length > 0;
   return true;
+}
+
+/** Render controllers also read variables authored by the client scripts. */
+function prepareRenderVariables(
+  def: ClientEntityDef,
+  host: ReturnType<typeof createEntityMolangHost>,
+): void {
+  for (const script of [
+    ...def.scripts.initialize,
+    ...def.scripts.pre_animation,
+  ]) {
+    evalMolang(script, host);
+  }
 }
