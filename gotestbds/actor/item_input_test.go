@@ -293,3 +293,14 @@ func TestItemTransportValidationPreservesQueuedActions(t *testing.T) {
 		t.Fatalf("transport still locked after queue drained: %v", err)
 	}
 }
+
+func TestSignInteractionReach(t *testing.T) {
+	a, _ := newItemInputActor(t)
+	near := cube.PosFromVec3(a.EyePos())
+	if _, err := a.AbleToInteractWithBlock(block.Sign{}, near); err != nil {
+		t.Fatalf("nearby sign has no collision boxes but is within reach: %v", err)
+	}
+	if _, err := a.AbleToInteractWithBlock(block.Sign{}, near.Add(cube.Pos{32, 0, 0})); err == nil {
+		t.Fatal("out-of-reach sign was accepted")
+	}
+}

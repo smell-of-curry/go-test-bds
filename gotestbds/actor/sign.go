@@ -29,17 +29,22 @@ func (s *Sign) Edit(text string) error {
 	}
 	s.edited = true
 
-	textData := map[string]any{"Text": text}
 	nbt := s.bl.EncodeNBT()
 	if nbt == nil {
 		nbt = make(map[string]any)
 	}
 
+	side := "BackText"
 	if s.isFrontSide {
-		nbt["FrontText"] = textData
-	} else {
-		nbt["BackText"] = textData
+		side = "FrontText"
 	}
+	textData, ok := nbt[side].(map[string]any)
+	if !ok {
+		textData = map[string]any{}
+		nbt[side] = textData
+	}
+	textData["Text"] = text
+	nbt["x"], nbt["y"], nbt["z"] = int32(s.pos[0]), int32(s.pos[1]), int32(s.pos[2])
 
 	return s.conn.WritePacket(&packet.BlockActorData{
 		Position: posToProtocol(s.pos),

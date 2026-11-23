@@ -938,6 +938,12 @@ func (a *Actor) AbleToInteractWithBlock(bl w.Block, pos cube.Pos) (clickPos mgl6
 
 	var distanceSquared = math.MaxFloat64
 	var resultPos mgl64.Vec3
+	// Signs have a selectable face but no collision boxes. Use the sign's
+	// center for the same reach check applied to other interactive blocks.
+	if _, ok := bl.(block.Sign); ok {
+		resultPos = pos.Vec3().Add(mgl64.Vec3{0.5, 0.5, 0.5})
+		distanceSquared = resultPos.Sub(eyePos).LenSqr()
+	}
 	for _, box := range bl.Model().BBox(pos, a.world) {
 		p := mcmath.NearestPosOnBox(box.Translate(pos.Vec3()), eyePos)
 		l := p.Sub(eyePos).LenSqr()
