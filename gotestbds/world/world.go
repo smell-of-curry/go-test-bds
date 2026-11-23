@@ -5,8 +5,6 @@ import (
 	"maps"
 	"math"
 
-	_ "unsafe"
-
 	"github.com/df-mc/dragonfly/server/block"
 	"github.com/df-mc/dragonfly/server/block/cube"
 	"github.com/df-mc/dragonfly/server/world"
@@ -279,9 +277,9 @@ func (w *World) block(pos cube.Pos, layer uint8) world.Block {
 		return block.Air{}
 	}
 	rid := w.decodeRuntimeID(c.Block(uint8(pos[0]), int16(pos[1]), uint8(pos[2]), layer))
-	if layer == 0 && isNbtBlock(rid) {
+	if layer == 0 {
 		bl, ok := c.BlockEntities[pos]
-		if ok {
+		if ok && world.BlockRuntimeID(bl) == rid {
 			return bl
 		}
 	}
@@ -376,10 +374,18 @@ func (w *World) SetBlockOnTheLayer(pos cube.Pos, b world.Block, layer uint32) {
 	}
 	rid := world.BlockRuntimeID(b)
 	x, y, z := uint8(pos[0]), int16(pos[1]), uint8(pos[2])
-	if layer == 0 && isNbtBlock(rid) {
-		c.BlockEntities[pos] = b
+	if layer == 0 {
+		if _, ok := b.(world.NBTer); ok {
+			c.BlockEntities[pos] = b
+		} else {
+			delete(c.BlockEntities, pos)
+		}
 	}
-
+	if w.hashedIDs {
+		if hash, ok := blockRegistry.RuntimeIDToHash(rid); ok {
+			rid = hash
+		}
+	}
 	c.SetBlock(x, y, z, uint8(layer), rid)
 }
 
@@ -400,10 +406,8 @@ func (w *World) SetBlockRuntimeID(pos cube.Pos, rid uint32, layer uint32) {
 		return
 	}
 
-	if local := w.decodeRuntimeID(rid); layer == 0 && isNbtBlock(local) {
-		if b, ok := world.BlockByRuntimeID(local); ok {
-			c.BlockEntities[pos] = b
-		}
+	if layer == 0 && rid != c.Block(uint8(pos[0]), int16(pos[1]), uint8(pos[2]), 0) {
+		delete(c.BlockEntities, pos)
 	}
 	c.SetBlock(uint8(pos[0]), int16(pos[1]), uint8(pos[2]), uint8(layer), rid)
 }
@@ -411,15 +415,4 @@ func (w *World) SetBlockRuntimeID(pos cube.Pos, rid uint32, layer uint32) {
 // chunkPosFromBlockPos ...
 func chunkPosFromBlockPos(p cube.Pos) world.ChunkPos {
 	return world.ChunkPos{int32(p[0] >> 4), int32(p[2] >> 4)}
-}
-
-//go:linkname nbtBlocks github.com/df-mc/dragonfly/server/world.nbtBlocks
-var nbtBlocks []bool
-
-// isNbtBlock returns whether the block does contain nbt.
-func isNbtBlock(rid uint32) bool {
-	if len(nbtBlocks) < int(rid+1) {
-		return false
-	}
-	return nbtBlocks[rid]
 }

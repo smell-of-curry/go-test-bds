@@ -265,3 +265,21 @@ func TestColumnReceiptState(t *testing.T) {
 		t.Fatalf("String()=%q", col.State.String())
 	}
 }
+
+func TestSignTextPersistsAcrossBlockUpdates(t *testing.T) {
+	w := NewWorld(true)
+	w.AddChunk(world.ChunkPos{}, NewColumn(chunk.New(world.DefaultBlockRegistry, world.Overworld.Range()), nil))
+	pos := cube.Pos{2, 70, 2}
+	sign := block.Sign{Wood: block.OakWood(), Attach: block.StandingAttachment(0), Front: block.SignText{Text: "POKÉMON\nPORTRAITS"}}
+	w.SetBlock(pos, sign)
+	hash, _ := world.DefaultBlockRegistry.RuntimeIDToHash(world.BlockRuntimeID(sign))
+	w.SetBlockRuntimeID(pos, hash, 0)
+	if got := w.Block(pos).(block.Sign).Front.Text; got != sign.Front.Text {
+		t.Fatalf("recorded sign text = %q", got)
+	}
+	air, _ := world.DefaultBlockRegistry.RuntimeIDToHash(world.BlockRuntimeID(block.Air{}))
+	w.SetBlockRuntimeID(pos, air, 0)
+	if c, _ := w.Chunk(world.ChunkPos{}); c.BlockEntities[pos] != nil {
+		t.Fatal("sign text survived block removal")
+	}
+}
