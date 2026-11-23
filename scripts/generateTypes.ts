@@ -312,7 +312,9 @@ function generateTsForStruct(
     if (f.doc) {
       fieldLines.push(formatJsDoc(f.doc, "  "));
     }
-    fieldLines.push(`  ${prop}: ${tsType};`);
+    const optional =
+      f.type.startsWith("*") && f.jsonTag?.split(",").includes("omitempty");
+    fieldLines.push(`  ${prop}${optional ? "?" : ""}: ${tsType};`);
   }
 
   if (s.doc) {

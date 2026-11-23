@@ -81,6 +81,7 @@ export interface DropSelectedItem {}
 /** EditSign edits the last Sign sent to the Actor. */
 export interface EditSign {
   text: string;
+  pos?: Pos;
 }
 
 /** Emote plays an emote on this bot. An empty emoteId uses DefaultEmoteID. Flags leave EmoteFlagServerSide unset — this packet is from the client. */
