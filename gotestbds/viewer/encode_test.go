@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/df-mc/dragonfly/server/block"
@@ -511,3 +512,22 @@ type itemCarrier struct {
 }
 
 func (i *itemCarrier) Item() item.Stack { return i.stack }
+
+func TestSignTextEditResendsColumn(t *testing.T) {
+	a := testActor(t, "FilmCam")
+	w := a.World()
+	pos := cube.Pos{1, 70, 1}
+	a.Move(pos.Vec3(), cube.Rotation{})
+	addColumn(w, dfworld.ChunkPos{0, 0})
+	sign := block.Sign{Wood: block.OakWood(), Attach: block.StandingAttachment(0)}
+	w.SetBlock(pos, sign)
+	enc := newEncoder("FilmCam", 4, 4)
+	encodeKeyframe(t, enc, a)
+	sign.Front.Text = "POKÉMON\nPORTRAITS"
+	w.SetBlock(pos, sign)
+	d := encodeDelta(t, enc, a)
+	if len(d.ColumnsAdded) != 1 || len(d.ColumnsAdded[0].BlockEntities) != 1 ||
+		strings.Join(d.ColumnsAdded[0].BlockEntities[0].TextFront, "\n") != sign.Front.Text {
+		t.Fatal("sign-only edit missing from replay delta")
+	}
+}

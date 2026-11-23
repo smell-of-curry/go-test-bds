@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"math"
 	"reflect"
+	"slices"
 	"strings"
 
 	"github.com/df-mc/dragonfly/server/block"
@@ -306,9 +307,9 @@ func (e *encoder) delta(cur *viewState) Delta {
 		if prev.State != col.State {
 			d.ColumnsState = append(d.ColumnsState, ColumnState{X: key[0], Z: key[1], State: col.State})
 		}
-		// Light/biomes ride on Column payloads, not BlockChange. Re-send the
-		// column when those fields moved so already-delivered clients update.
-		resent := columnLightOrBiomeChanged(prev, col)
+		// Sign edits can change only block-entity text. BlockChange carries only
+		// the palette entry, so send the column for these updates as well.
+		resent := columnLightOrBiomeChanged(prev, col) || !reflect.DeepEqual(prev.BlockEntities, col.BlockEntities)
 		if resent {
 			d.ColumnsAdded = append(d.ColumnsAdded, col)
 		}
@@ -634,6 +635,8 @@ func encodeColumnBlockEntities(col *gw.Column) []BlockEntity {
 		}
 		out = append(out, be)
 	}
+	// Stable order keeps map iteration from looking like a change every tick.
+	slices.SortFunc(out, func(a, b BlockEntity) int { return slices.Compare(a.Pos[:], b.Pos[:]) })
 	return out
 }
 
