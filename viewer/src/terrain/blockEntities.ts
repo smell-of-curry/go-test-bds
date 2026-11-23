@@ -57,8 +57,13 @@ export function meshBlockEntity(
   switch (kind) {
     case "chest":
       return [boxMesh(wx, wy, wz, 14 / 16, 14 / 16, 14 / 16, 0x8b5a2b, yaw)];
-    case "sign":
-      return signMeshes(block, be, wx, wy, wz, yaw);
+    case "sign": {
+      // Bedrock yaw increases toward west, while Three.js rotates +Z toward east.
+      const rotation = block.states.ground_sign_direction;
+      const signYaw =
+        rotation == null ? -yaw : (-Number(rotation) * Math.PI) / 8;
+      return signMeshes(block, be, wx, wy, wz, signYaw);
+    }
     case "banner":
       return [boxMesh(wx, wy, wz, 2 / 16, 1, 12 / 16, 0xc0c0c0, yaw)];
     case "bed":
@@ -94,8 +99,12 @@ function signMeshes(
     // Post under a standing sign.
     out.push(boxMesh(wx, wy, wz, 2 / 16, 0.55, 2 / 16, 0x8b6914, yaw));
   }
-  const lines = be?.textFront ?? [];
-  if (lines.length && typeof document !== "undefined") {
+  const faces = [
+    [be?.textFront, yaw],
+    [be?.textBack, yaw + Math.PI],
+  ] as const;
+  for (const [lines, rotation] of faces) {
+    if (!lines?.length || typeof document === "undefined") continue;
     const tex = textCanvasTexture(lines);
     const mat = new THREE.MeshBasicMaterial({
       map: tex,
@@ -106,7 +115,7 @@ function signMeshes(
     const geo = new THREE.PlaneGeometry(14 / 16, 7 / 16);
     const mesh = new THREE.Mesh(geo, mat);
     mesh.position.set(wx + 0.5, wy + (wall ? 0.35 : 0.55) + 0.25, wz + 0.5);
-    mesh.rotation.y = yaw;
+    mesh.rotation.y = rotation;
     // Nudge off the board so it doesn't z-fight.
     mesh.translateZ(0.04);
     mesh.userData.pass = "transparent";
