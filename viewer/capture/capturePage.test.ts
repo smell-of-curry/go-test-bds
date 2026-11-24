@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import type { Page } from "playwright";
 
-import { captureWithPageRecovery } from "./capturePage";
+import { captureWithPageRecovery, waitForCaptureFrame } from "./capturePage";
 
 const crash = new Error("page.waitForFunction: Target crashed");
 
@@ -103,4 +104,75 @@ test("drops a queued capture whose original deadline passed", async () => {
     ),
     /capture deadline exceeded/,
   );
+});
+
+const frameTimeout = Object.assign(new Error("viewer read timed out"), {
+  name: "TimeoutError",
+});
+
+function framePage(observations: Array<number | null>, timeouts: number) {
+  const tickRequests: number[] = [];
+  const page = {
+    evaluate: async () => {
+      assert(observations.length, "unexpected viewport sample");
+      return observations.shift();
+    },
+    waitForFunction: async (_predicate: unknown, minTick: number) => {
+      tickRequests.push(minTick);
+      if (timeouts-- > 0) throw frameTimeout;
+    },
+  } as unknown as Page;
+  return { page, tickRequests };
+}
+
+test("reconnects one stalled page without changing the requested tick", async () => {
+  const { page, tickRequests } = framePage([30, 30], 1);
+  const recovery: boolean[] = [];
+  await captureWithPageRecovery(
+    page,
+    async (current, remaining, mayRecover) => {
+      assert.equal(current, page);
+      recovery.push(mayRecover);
+      await waitForCaptureFrame(current, 40, remaining, mayRecover);
+    },
+    async (current, reason) => {
+      assert.equal(reason, "frame-stalled");
+      return current;
+    },
+    Date.now() + 25_000,
+  );
+  assert.deepEqual(recovery, [true, false]);
+  assert.deepEqual(tickRequests, [40, 40]);
+});
+
+test("does not reconnect while assets are loading or the tick is advancing", async () => {
+  const { page, tickRequests } = framePage([null, 30, 33, 36], 3);
+  await waitForCaptureFrame(page, 40, () => 25_000, true);
+  assert.deepEqual(tickRequests, [40, 40, 40, 40]);
+});
+
+test("a stalled-stream retry can time out without another recovery", async () => {
+  const { page, tickRequests } = framePage([30, 30], 2);
+  let recoveries = 0;
+  await assert.rejects(
+    captureWithPageRecovery(
+      page,
+      (current, remaining, mayRecover) =>
+        waitForCaptureFrame(current, 40, remaining, mayRecover),
+      async (current) => {
+        recoveries++;
+        return current;
+      },
+      Date.now() + 25_000,
+    ),
+    frameTimeout,
+  );
+  assert.equal(recoveries, 1);
+  assert.deepEqual(tickRequests, [40, 40]);
+});
+
+test("leaves a short capture's entire budget for its ordinary frame wait", async () => {
+  const { page, tickRequests } = framePage([], 0);
+  await waitForCaptureFrame(page, 40, () => 10_000, true);
+  assert.deepEqual(tickRequests, [40]);
 });

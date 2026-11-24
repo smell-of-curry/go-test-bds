@@ -16,7 +16,11 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import type { BrowserContext, Page } from "playwright";
 
-import { captureWithPageRecovery } from "./capturePage";
+import {
+  captureWithPageRecovery,
+  type RecoveryReason,
+  waitForCaptureFrame,
+} from "./capturePage";
 import {
   applyTimelapse,
   resolveFfmpeg,
@@ -543,11 +547,25 @@ export async function runHarness(opts: HarnessOptions): Promise<void> {
           log,
           stillsPage: pageRef.page,
           mark,
-          recover: async (failed) => {
+          recover: async (failed, reason) => {
             await pageRecovering;
-            if (pageRef.page === failed || browserDown) return undefined;
-            log.info("capture: retrying pending still on recovered page");
-            return pageRef.page;
+            if (browserDown) return undefined;
+            if (pageRef.page !== failed) {
+              log.info("capture: retrying pending still on recovered page");
+              return pageRef.page;
+            }
+            if (reason !== "frame-stalled") return undefined;
+            const reconnected = await failed.evaluate(() => {
+              const viewer = window.__viewer;
+              if (typeof viewer?.kick !== "function") return false;
+              viewer.kick();
+              return true;
+            });
+            if (!reconnected) return undefined;
+            log.info(
+              "capture: reconnected stalled world stream for pending still",
+            );
+            return failed;
           },
         }),
       );
@@ -836,7 +854,10 @@ async function handleCapture(
     log: Logger;
     stillsPage: Page;
     mark: MarkState;
-    recover: (failed: Page) => Promise<Page | undefined>;
+    recover: (
+      failed: Page,
+      reason: RecoveryReason,
+    ) => Promise<Page | undefined>;
   },
 ): Promise<void> {
   const { opts, log, mark } = ctx;
@@ -845,27 +866,9 @@ async function handleCapture(
   const captureStill = async (
     stillsPage: Page,
     remainingMs: () => number,
+    mayRecover: boolean,
   ): Promise<void> => {
-    await stillsPage.waitForFunction(
-      (need) => {
-        const v = (
-          window as unknown as {
-            __viewer?: {
-              schemaOk: boolean;
-              tick: number;
-              assetsSettled: boolean;
-            };
-          }
-        ).__viewer;
-        // assetsSettled = atlas ready OR failed (placeholder fallback). Still
-        // must not fire while the deliberate loading screen is up.
-        return !!v && v.schemaOk && v.tick >= need && v.assetsSettled;
-      },
-      minTick,
-      // Timer polling, not the default rAF: a backgrounded page may never
-      // grant an animation frame, and the predicate has to keep running.
-      { timeout: remainingMs(), polling: 250 },
-    );
+    await waitForCaptureFrame(stillsPage, minTick, remainingMs, mayRecover);
     await stillsPage.evaluate((budgetMs) => {
       (
         window as unknown as {
@@ -935,9 +938,12 @@ async function handleCapture(
         });
     }
 
-    const tick = await stillsPage.evaluate(
-      () => (window as unknown as { __viewer: { tick: number } }).__viewer.tick,
-    );
+    const tick = await stillsPage.evaluate((need) => {
+      const v = window.__viewer;
+      return v?.schemaOk && v.assetsSettled && v.tick >= need ? v.tick : null;
+    }, minTick);
+    if (tick === null)
+      throw new Error("viewer lost the requested frame before capture");
     const png = await stillsPage.screenshot({
       type: "png",
       timeout: remainingMs(),
