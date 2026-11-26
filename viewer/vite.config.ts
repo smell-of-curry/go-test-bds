@@ -17,13 +17,13 @@ export default defineConfig({
       },
       load(id) {
         if (id !== "\0virtual:native-emotes") return;
-        this.addWatchFile(emotesPath);
         if (!existsSync(emotesPath)) {
           this.warn(
             "Native emotes unavailable. Run python3 tools/import-emotes.py before filming emotes.",
           );
           return "export default {schemaVersion: 1, emotes: []};";
         }
+        this.addWatchFile(emotesPath);
         const dataset = JSON.parse(readFileSync(emotesPath, "utf8"));
         // Provenance stays in the local dataset, not in the browser bundle.
         return `export default ${JSON.stringify({
