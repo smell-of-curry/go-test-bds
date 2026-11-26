@@ -82,20 +82,22 @@ func (h *TestingHandler) HandleReceiveMessage(a *actor.Actor, msg string, parame
 	a.RecordMessage(actualMessage, parameters...)
 }
 
-// extractMessageContent extracts the actual message from either plain string or raw text format
+// extractMessageContent preserves translated RawText so message waiters can
+// match its keys and the viewer can resolve its arguments.
 func (h *TestingHandler) extractMessageContent(msg string) string {
-	// Try to parse as raw text message first
-	var rawTextMsg RawTextMessage
-	if err := json.Unmarshal([]byte(msg), &rawTextMsg); err == nil {
-		// Successfully parsed as raw text, extract the first text entry
-		h.logger.Debug("parsed raw text message", "rawTextMsg", rawTextMsg)
-		if len(rawTextMsg.RawText) > 0 {
-			return rawTextMsg.RawText[0].Text
+	var wrapper RawTextMessage
+	if err := json.Unmarshal([]byte(msg), &wrapper); err == nil && len(wrapper.RawText) > 0 {
+		// The protocol envelope is the first literal run, even if a caller
+		// included other parts in the same RawText object.
+		first := wrapper.RawText[0].Text
+		if strings.HasPrefix(first, StatusMessagePrefix) ||
+			(h.cfg != nil && h.cfg.InstructionPrefix != "" && strings.HasPrefix(first, h.cfg.InstructionPrefix)) {
+			return first
 		}
 	}
-
-	// If parsing failed or no text entries, return the original message as-is
-	return msg
+	var text actor.Text
+	_ = text.UnmarshalJSON([]byte(msg)) // Text preserves the original on unknown shapes.
+	return text.String()
 }
 
 // runAction runs encoded instruction.
