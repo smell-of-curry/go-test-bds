@@ -14,8 +14,9 @@ type FormElement interface {
 
 // FormButton ...
 type FormButton struct {
-	b buttonInternals
-	f *Form
+	b     buttonInternals
+	f     *Form
+	index int
 }
 
 // UnmarshalJSON accepts a button object (`{"text":…}`), a bare string, or a
@@ -42,26 +43,19 @@ func (b *FormButton) UnmarshalJSON(data []byte) error {
 	return json.Unmarshal(data, &b.b)
 }
 
-// Press ...
+// Press submits the position assigned to this button when the form was decoded.
 func (b *FormButton) Press() error {
+	if b == nil || b.f == nil {
+		return fmt.Errorf("unknown button")
+	}
 	switch b.f.Type() {
-	case FormTypeCustom:
-		return fmt.Errorf("form should not contain buttons")
 	case FormTypeMenu:
-		index := slices.Index(b.f.f.Buttons, *b)
-		if index == -1 {
-			return fmt.Errorf("unknown button")
-		}
-		return b.f.submit(index)
+		return b.f.submit(b.index)
+	case FormTypeModal:
+		return b.f.submit(b.index == 0)
+	default:
+		return fmt.Errorf("form should not contain buttons")
 	}
-
-	switch *b {
-	case b.f.f.Button1:
-		return b.f.submit(true)
-	case b.f.f.Button2:
-		return b.f.submit(false)
-	}
-	return fmt.Errorf("unknown button")
 }
 
 // Text ...

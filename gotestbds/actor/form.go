@@ -55,11 +55,13 @@ func (f *Form) UnmarshalJSON(data []byte) error {
 		err = json.Unmarshal(data, &f.f.menuForm)
 		for i := range f.f.Buttons {
 			f.f.Buttons[i].f = f
+			f.f.Buttons[i].index = i
 		}
 	case FormTypeModal:
 		err = json.Unmarshal(data, &f.f.modalForm)
 		f.f.Button1.f = f
 		f.f.Button2.f = f
+		f.f.Button2.index = 1
 	case FormTypeCustom:
 		err = json.Unmarshal(data, &f.f.customForm)
 		f.f.Content.f = f
