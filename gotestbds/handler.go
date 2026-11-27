@@ -66,38 +66,36 @@ type actionEnvelope struct {
 func (h *TestingHandler) HandleReceiveMessage(a *actor.Actor, msg string, parameters []string) {
 	h.logger.Debug("received message", "message", msg)
 
-	actualMessage := h.extractMessageContent(msg)
+	controlMessage, rawText := extractControlMessage(msg)
 
-	if strings.HasPrefix(actualMessage, StatusMessagePrefix) {
+	if strings.HasPrefix(controlMessage, StatusMessagePrefix) {
 		return
 	}
 
-	actionData, isAction := strings.CutPrefix(actualMessage, h.cfg.InstructionPrefix)
+	actionData, isAction := strings.CutPrefix(controlMessage, h.cfg.InstructionPrefix)
 	if isAction {
 		h.logger.Debug("received action", "action", actionData)
 		go h.runAction(actionData)
 		return
 	}
 
-	a.RecordMessage(actualMessage, parameters...)
+	if rawText {
+		// Keep the translation envelope for message matching and viewer rendering.
+		var text actor.Text
+		_ = text.UnmarshalJSON([]byte(msg)) // Text preserves the original on unknown shapes.
+		msg = text.String()
+	}
+	a.RecordMessage(msg, parameters...)
 }
 
-// extractMessageContent preserves translated RawText so message waiters can
-// match its keys and the viewer can resolve its arguments.
-func (h *TestingHandler) extractMessageContent(msg string) string {
+// extractControlMessage reads only the first literal run of a RawText object.
+// Protocol classification never uses the flattened chat that the bot displays.
+func extractControlMessage(msg string) (control string, rawText bool) {
 	var wrapper RawTextMessage
 	if err := json.Unmarshal([]byte(msg), &wrapper); err == nil && len(wrapper.RawText) > 0 {
-		// The protocol envelope is the first literal run, even if a caller
-		// included other parts in the same RawText object.
-		first := wrapper.RawText[0].Text
-		if strings.HasPrefix(first, StatusMessagePrefix) ||
-			(h.cfg != nil && h.cfg.InstructionPrefix != "" && strings.HasPrefix(first, h.cfg.InstructionPrefix)) {
-			return first
-		}
+		return wrapper.RawText[0].Text, true
 	}
-	var text actor.Text
-	_ = text.UnmarshalJSON([]byte(msg)) // Text preserves the original on unknown shapes.
-	return text.String()
+	return msg, false
 }
 
 // runAction runs encoded instruction.
