@@ -17,6 +17,11 @@ import { dirname, join } from "node:path";
 import type { BrowserContext, Page } from "playwright";
 
 import {
+  captureWithPageRecovery,
+  type RecoveryReason,
+  waitForCaptureFrame,
+} from "./capturePage";
+import {
   applyTimelapse,
   resolveFfmpeg,
   resolveKeepSuite,
@@ -537,11 +542,31 @@ export async function runHarness(opts: HarnessOptions): Promise<void> {
 
     if (type === "capture" || frame.type === "capture") {
       await safe(log, () =>
-        handleCapture(frame as CaptureFrame, {
+        handleCapture(frame as CaptureFrame, atMs, {
           opts,
           log,
           stillsPage: pageRef.page,
           mark,
+          recover: async (failed, reason) => {
+            await pageRecovering;
+            if (browserDown) return undefined;
+            if (pageRef.page !== failed) {
+              log.info("capture: retrying pending still on recovered page");
+              return pageRef.page;
+            }
+            if (reason !== "frame-stalled") return undefined;
+            const reconnected = await failed.evaluate(() => {
+              const viewer = window.__viewer;
+              if (typeof viewer?.kick !== "function") return false;
+              viewer.kick();
+              return true;
+            });
+            if (!reconnected) return undefined;
+            log.info(
+              "capture: reconnected stalled world stream for pending still",
+            );
+            return failed;
+          },
         }),
       );
     }
@@ -823,37 +848,27 @@ function noteSuiteBoundary(
 
 async function handleCapture(
   frame: CaptureFrame,
+  receivedAt: number,
   ctx: {
     opts: HarnessOptions;
     log: Logger;
     stillsPage: Page;
     mark: MarkState;
+    recover: (
+      failed: Page,
+      reason: RecoveryReason,
+    ) => Promise<Page | undefined>;
   },
 ): Promise<void> {
-  const { opts, log, stillsPage, mark } = ctx;
+  const { opts, log, mark } = ctx;
   const minTick = frame.minTick;
   const timeoutMs = frame.timeoutMs ?? DEFAULT_CAPTURE_TIMEOUT_MS;
-  try {
-    await stillsPage.waitForFunction(
-      (need) => {
-        const v = (
-          window as unknown as {
-            __viewer?: {
-              schemaOk: boolean;
-              tick: number;
-              assetsSettled: boolean;
-            };
-          }
-        ).__viewer;
-        // assetsSettled = atlas ready OR failed (placeholder fallback). Still
-        // must not fire while the deliberate loading screen is up.
-        return !!v && v.schemaOk && v.tick >= need && v.assetsSettled;
-      },
-      minTick,
-      // Timer polling, not the default rAF: a backgrounded page may never
-      // grant an animation frame, and the predicate has to keep running.
-      { timeout: timeoutMs, polling: 250 },
-    );
+  const captureStill = async (
+    stillsPage: Page,
+    remainingMs: () => number,
+    mayRecover: boolean,
+  ): Promise<void> => {
+    await waitForCaptureFrame(stillsPage, minTick, remainingMs, mayRecover);
     await stillsPage.evaluate((budgetMs) => {
       (
         window as unknown as {
@@ -874,9 +889,11 @@ async function handleCapture(
             (window as unknown as { __viewer?: { settled: boolean } }).__viewer
               ?.settled === true,
           undefined,
-          { polling: 250, timeout: SETTLE_GRACE_MS },
+          { polling: 250, timeout: Math.min(SETTLE_GRACE_MS, remainingMs()) },
         )
-        .catch(() => {
+        .catch((error: unknown) => {
+          if (!(error instanceof Error) || error.name !== "TimeoutError")
+            throw error;
           log.warn(
             `capture: scene still meshing after ${SETTLE_GRACE_MS}ms; capturing anyway`,
           );
@@ -910,19 +927,28 @@ async function handleCapture(
             return gate.ready(v?.titleTokens ?? {}, document);
           },
           label,
-          { polling: 100, timeout: 8_000 },
+          { polling: 100, timeout: Math.min(8_000, remainingMs()) },
         )
-        .catch(() => {
+        .catch((error: unknown) => {
+          if (!(error instanceof Error) || error.name !== "TimeoutError")
+            throw error;
           log.warn(
             "capture: title-token gate never became ready; capturing anyway",
           );
         });
     }
 
-    const tick = await stillsPage.evaluate(
-      () => (window as unknown as { __viewer: { tick: number } }).__viewer.tick,
-    );
-    const png = await stillsPage.screenshot({ type: "png" });
+    const tick = await stillsPage.evaluate((need) => {
+      const v = window.__viewer;
+      return v?.schemaOk && v.assetsSettled && v.tick >= need ? v.tick : null;
+    }, minTick);
+    if (tick === null)
+      throw new Error("viewer lost the requested frame before capture");
+    const png = await stillsPage.screenshot({
+      type: "png",
+      timeout: remainingMs(),
+    });
+    remainingMs();
     await postArtifact(opts.stream, {
       kind: "screenshot",
       ext: "png",
@@ -939,6 +965,15 @@ async function handleCapture(
     });
     await uploadJsonUiDump(stillsPage, opts, mark, frame.label, tick, log);
     log.info(`capture: uploaded still id=${frame.id} tick=${tick}`);
+  };
+
+  try {
+    await captureWithPageRecovery(
+      ctx.stillsPage,
+      captureStill,
+      ctx.recover,
+      receivedAt + timeoutMs,
+    );
   } catch (err) {
     // Carry the real error: run 15 reported "within 239999ms" for a failure
     // that was actually a 30s default timeout on a different wait.
