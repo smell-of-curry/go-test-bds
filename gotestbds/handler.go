@@ -66,36 +66,36 @@ type actionEnvelope struct {
 func (h *TestingHandler) HandleReceiveMessage(a *actor.Actor, msg string, parameters []string) {
 	h.logger.Debug("received message", "message", msg)
 
-	actualMessage := h.extractMessageContent(msg)
+	controlMessage, rawText := extractControlMessage(msg)
 
-	if strings.HasPrefix(actualMessage, StatusMessagePrefix) {
+	if strings.HasPrefix(controlMessage, StatusMessagePrefix) {
 		return
 	}
 
-	actionData, isAction := strings.CutPrefix(actualMessage, h.cfg.InstructionPrefix)
+	actionData, isAction := strings.CutPrefix(controlMessage, h.cfg.InstructionPrefix)
 	if isAction {
 		h.logger.Debug("received action", "action", actionData)
 		go h.runAction(actionData)
 		return
 	}
 
-	a.RecordMessage(actualMessage, parameters...)
+	if rawText {
+		// Keep the translation envelope for message matching and viewer rendering.
+		var text actor.Text
+		_ = text.UnmarshalJSON([]byte(msg)) // Text preserves the original on unknown shapes.
+		msg = text.String()
+	}
+	a.RecordMessage(msg, parameters...)
 }
 
-// extractMessageContent extracts the actual message from either plain string or raw text format
-func (h *TestingHandler) extractMessageContent(msg string) string {
-	// Try to parse as raw text message first
-	var rawTextMsg RawTextMessage
-	if err := json.Unmarshal([]byte(msg), &rawTextMsg); err == nil {
-		// Successfully parsed as raw text, extract the first text entry
-		h.logger.Debug("parsed raw text message", "rawTextMsg", rawTextMsg)
-		if len(rawTextMsg.RawText) > 0 {
-			return rawTextMsg.RawText[0].Text
-		}
+// extractControlMessage reads only the first literal run of a RawText object.
+// Protocol classification never uses the flattened chat that the bot displays.
+func extractControlMessage(msg string) (control string, rawText bool) {
+	var wrapper RawTextMessage
+	if err := json.Unmarshal([]byte(msg), &wrapper); err == nil && len(wrapper.RawText) > 0 {
+		return wrapper.RawText[0].Text, true
 	}
-
-	// If parsing failed or no text entries, return the original message as-is
-	return msg
+	return msg, false
 }
 
 // runAction runs encoded instruction.
